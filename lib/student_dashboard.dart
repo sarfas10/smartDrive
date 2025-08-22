@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:smart_drive/onboarding_forms.dart';
+import 'package:smart_drive/user_slot_booking.dart';
 
 class _GrainPainter extends CustomPainter {
     final double opacity;
@@ -529,7 +530,10 @@ Widget _buildHeader() {
   }
 
   void _navigateToSlotBooking() {
-    debugPrint('Navigate to Slot Booking');
+   Navigator.push(
+  context,
+  MaterialPageRoute(builder: (_) => const UserSlotBooking()),
+);
   }
 
   void _navigateToPayments() {

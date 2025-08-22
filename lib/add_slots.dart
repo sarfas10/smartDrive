@@ -199,7 +199,7 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
   String _dayKey(DateTime d) =>
       '${d.year.toString().padLeft(4, '0')}-'
       '${d.month.toString().padLeft(2, '0')}-'
-      '${d.day.toString().padLeft(2, '0')}';
+      '${d.day.toString().padLeft(2, '0')}' ;
 
   String _timeKeyNoSpace(String slotTimeWithSpaces) =>
       slotTimeWithSpaces.replaceAll(' - ', '-');
@@ -359,100 +359,103 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
   }
 
   Future<void> _addSlots() async {
-    if (!hasAllSelections) return;
+  if (!hasAllSelections) return;
 
-    for (final vid in selectedVehicleIds) {
-      _seatsPerVehicle.putIfAbsent(vid, () => kDefaultSeats);
-    }
+  for (final vid in selectedVehicleIds) {
+    _seatsPerVehicle.putIfAbsent(vid, () => kDefaultSeats);
+  }
 
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Confirm'),
-        content: Text('Create $totalCombinations slot document(s) in Firestore?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Yes, Create')),
-        ],
-      ),
-    );
-    if (confirm != true) return;
+  final confirm = await showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      title: const Text('Confirm'),
+      content: Text('Create $totalCombinations slot document(s) in Firestore?'),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+        ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Yes, Create')),
+      ],
+    ),
+  );
+  if (confirm != true) return;
 
-    try {
-      final batch = FirebaseFirestore.instance.batch();
-      int toWrite = 0;
-      int skipped = 0;
+  try {
+    final batch = FirebaseFirestore.instance.batch();
+    int toWrite = 0;
+    int skipped = 0;
 
-      final sortedDates = selectedDates.toList()..sort((a, b) => a.compareTo(b));
+    final sortedDates = selectedDates.toList()..sort((a, b) => a.compareTo(b));
 
-      for (final day in sortedDates) {
-        final dayAtMidnight = Timestamp.fromDate(_atMidnight(day));
-        final dk = _dayKey(day);
+    for (final day in sortedDates) {
+      final dayAtMidnight = Timestamp.fromDate(_atMidnight(day));
+      final dk = _dayKey(day);
 
-        for (final timeKey in selectedTimeSlots) {
-          final fully = _fullyBookedByDay[dk] ?? const <String>{};
-          if (fully.contains(timeKey)) {
-            skipped++;
-            continue;
-          }
+      for (final timeKey in selectedTimeSlots) {
+        final fully = _fullyBookedByDay[dk] ?? const <String>{};
+        if (fully.contains(timeKey)) {
+          skipped++;
+          continue;
+        }
 
-          final slotTime = timeKey.replaceAll('-', ' - '); // "09:00 AM - 10:00 AM"
+        final slotTime = timeKey.replaceAll('-', ' - '); // "09:00 AM - 10:00 AM"
 
-          for (final vehicleId in selectedVehicleIds) {
-            final seat = _seatsPerVehicle[vehicleId] ?? kDefaultSeats;
-            final v = _vehicleById[vehicleId];
-            final slotCost = (v?.charge ?? 0.0) + _additionalCharges; // ✅ single field
+        for (final vehicleId in selectedVehicleIds) {
+          final seat = _seatsPerVehicle[vehicleId] ?? kDefaultSeats;
+          final v = _vehicleById[vehicleId];
+          final vehicleCost = v?.charge ?? 0.0; // ✅ separate vehicle cost
+          final additionalCost = _additionalCharges; // ✅ separate additional cost
 
-            for (final instructorId in selectedInstructorIds) {
-              final docRef = FirebaseFirestore.instance.collection('slots').doc();
-              final data = {
-                'slot_id'           : docRef.id,
-                'slot_day'          : dayAtMidnight,
-                'slot_time'         : slotTime,
-                'vehicle_id'        : vehicleId,
-                'vehicle_type'      : v?.carType ?? '',
-                'instructor_user_id': instructorId,
-                'instructor_name'   : _instructorNamesById[instructorId] ?? '',
-                'seat'              : seat,
-                'slot_cost'         : slotCost, // ✅ only one cost field
-                'created_at'        : FieldValue.serverTimestamp(),
-              };
-              batch.set(docRef, data);
-              toWrite++;
-            }
+          for (final instructorId in selectedInstructorIds) {
+            final docRef = FirebaseFirestore.instance.collection('slots').doc();
+            final data = {
+              'slot_id'           : docRef.id,
+              'slot_day'          : dayAtMidnight,
+              'slot_time'         : slotTime,
+              'vehicle_id'        : vehicleId,
+              'vehicle_type'      : v?.carType ?? '',
+              'instructor_user_id': instructorId,
+              'instructor_name'   : _instructorNamesById[instructorId] ?? '',
+              'seat'              : seat,
+              'vehicle_cost'      : vehicleCost,     // ✅ NEW: separate vehicle cost field
+              'additional_cost'   : additionalCost, // ✅ NEW: separate additional cost field
+              'slot_cost'         : vehicleCost + additionalCost, // ✅ KEEP: total cost for backward compatibility
+              'created_at'        : FieldValue.serverTimestamp(),
+            };
+            batch.set(docRef, data);
+            toWrite++;
           }
         }
       }
-
-      if (toWrite == 0) {
-        final txt = (vehicles.isEmpty)
-            ? 'No vehicle available.'
-            : (instructors.isEmpty)
-                ? 'No instructor available.'
-                : (skipped > 0
-                    ? 'All selected (day × time) were already fully booked.'
-                    : 'Nothing to create.');
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(txt)));
-        return;
-      }
-
-      await batch.commit();
-
-      if (!mounted) return;
-      final msg = skipped > 0
-          ? 'Created $toWrite document(s). Skipped $skipped fully-booked (day × time) combo(s).'
-          : 'Created $toWrite slot document(s).';
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-
-      _clearAll();
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to create slots: $e')),
-      );
     }
+
+    if (toWrite == 0) {
+      final txt = (vehicles.isEmpty)
+          ? 'No vehicle available.'
+          : (instructors.isEmpty)
+              ? 'No instructor available.'
+              : (skipped > 0
+                  ? 'All selected (day × time) were already fully booked.'
+                  : 'Nothing to create.');
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(txt)));
+      return;
+    }
+
+    await batch.commit();
+
+    if (!mounted) return;
+    final msg = skipped > 0
+        ? 'Created $toWrite document(s). Skipped $skipped fully-booked (day × time) combo(s).'
+        : 'Created $toWrite slot document(s).';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+    _clearAll();
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Failed to create slots: $e')),
+    );
   }
+}
 
   // ====== Build ======
   @override
@@ -657,6 +660,8 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
                                                 Expanded(
                                                   child: Text(
                                                     v.carType,
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
                                                     style: TextStyle(
                                                       fontWeight: FontWeight.w600,
                                                       color: fg,
@@ -759,8 +764,7 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
                           SizedBox(height: _clampd(context.hp(2), 12, 22)),
 
                           // Instructors
-                          _Section
-                          (
+                          _Section(
                             icon: Icons.person_pin_circle_outlined,
                             title: 'Select Instructors',
                             titleSize: _clampd(context.sp(2.4), 16, 22),
@@ -1142,14 +1146,17 @@ class _TimeSlotGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(builder: (context, c) {
-      // Use percentage-based target tile width/height
       final targetTileW = _AddSlotsPageState()._clampd(context.wp(28), 200, 320);
       int columns = (c.maxWidth / targetTileW).floor().clamp(1, 4);
       final gap = _AddSlotsPageState()._clampd(context.wp(1.5), 8, 14);
       final totalGap = gap * (columns - 1);
       final tileW = (c.maxWidth - totalGap) / columns;
-      final tileH = _AddSlotsPageState()._clampd(context.hp(9), 72, 110);
-      final aspect = tileW / tileH;
+
+      // Dynamic extra height to avoid tiny overflows with larger text scales
+      final baseTileH = _AddSlotsPageState()._clampd(context.hp(9), 72, 110);
+      final textScale = MediaQuery.of(context).textScaleFactor;
+      final extraH = 4 + ((textScale - 1.0).clamp(0.0, 0.6) * 24);
+      final aspect = tileW / (baseTileH + extraH);
 
       final startFs = _AddSlotsPageState()._clampd(context.sp(1.9), 13, 16);
       final endFs = _AddSlotsPageState()._clampd(context.sp(1.6), 11, 13);
@@ -1161,6 +1168,7 @@ class _TimeSlotGrid extends StatelessWidget {
         itemCount: slots.length,
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
+        clipBehavior: Clip.hardEdge,
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: columns,
           crossAxisSpacing: gap,
@@ -1255,8 +1263,11 @@ class _VehicleGrid extends StatelessWidget {
       final gap = _AddSlotsPageState()._clampd(context.wp(1.5), 8, 14);
       final totalGap = gap * (columns - 1);
       final tileW = (c.maxWidth - totalGap) / columns;
-      final tileH = _AddSlotsPageState()._clampd(context.hp(10), 88, 130);
-      final aspect = tileW / tileH;
+
+      final baseTileH = _AddSlotsPageState()._clampd(context.hp(10), 88, 130);
+      final textScale = MediaQuery.of(context).textScaleFactor;
+      final extraH = 6 + ((textScale - 1.0).clamp(0.0, 0.6) * 40);
+      final aspect = tileW / (baseTileH + extraH);
 
       final padAll = _AddSlotsPageState()._clampd(context.wp(3), 12, 20);
       final iconCircle = _AddSlotsPageState()._clampd(context.wp(7), 42, 56);
@@ -1269,6 +1280,7 @@ class _VehicleGrid extends StatelessWidget {
         itemCount: vehicles.length,
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
+        clipBehavior: Clip.hardEdge,
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: columns,
           crossAxisSpacing: gap,
@@ -1310,15 +1322,30 @@ class _VehicleGrid extends StatelessWidget {
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(v.carType, style: TextStyle(fontWeight: FontWeight.w600, fontSize: nameFs, color: fg)),
+                            Text(
+                              v.carType,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontWeight: FontWeight.w600, fontSize: nameFs, color: fg),
+                            ),
                             SizedBox(height: _AddSlotsPageState()._clampd(context.hp(0.5), 4, 8)),
                             Opacity(
                               opacity: 0.85,
-                              child: Text('₹${v.charge.toStringAsFixed(0)} per session', style: TextStyle(fontSize: subFs, color: fg)),
+                              child: Text(
+                                '₹${v.charge.toStringAsFixed(0)} per session',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: subFs, color: fg),
+                              ),
                             ),
                             Opacity(
                               opacity: 0.6,
-                              child: Text('ID: ${v.id}', style: TextStyle(fontSize: idFs, color: fg)),
+                              child: Text(
+                                'ID: ${v.id}',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: idFs, color: fg),
+                              ),
                             ),
                           ],
                         ),
@@ -1356,8 +1383,11 @@ class _InstructorGrid extends StatelessWidget {
       final gap = _AddSlotsPageState()._clampd(context.wp(1.5), 8, 14);
       final totalGap = gap * (columns - 1);
       final tileW = (c.maxWidth - totalGap) / columns;
-      final tileH = _AddSlotsPageState()._clampd(context.hp(10), 88, 130);
-      final aspect = tileW / tileH;
+
+      final baseTileH = _AddSlotsPageState()._clampd(context.hp(10), 88, 130);
+      final textScale = MediaQuery.of(context).textScaleFactor;
+      final extraH = 6 + ((textScale - 1.0).clamp(0.0, 0.6) * 36);
+      final aspect = tileW / (baseTileH + extraH);
 
       final padAll = _AddSlotsPageState()._clampd(context.wp(3), 12, 20);
       final iconCircle = _AddSlotsPageState()._clampd(context.wp(7), 42, 56);
@@ -1370,6 +1400,7 @@ class _InstructorGrid extends StatelessWidget {
         itemCount: instructors.length,
         shrinkWrap: true,
         physics: const NeverScrollableScrollPhysics(),
+        clipBehavior: Clip.hardEdge,
         gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
           crossAxisCount: columns,
           crossAxisSpacing: gap,
@@ -1424,9 +1455,22 @@ class _InstructorGrid extends StatelessWidget {
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(ins.name, style: TextStyle(fontWeight: FontWeight.w600, fontSize: nameFs, color: fg)),
+                            Text(
+                              ins.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(fontWeight: FontWeight.w600, fontSize: nameFs, color: fg),
+                            ),
                             SizedBox(height: _AddSlotsPageState()._clampd(context.hp(0.5), 4, 8)),
-                            Opacity(opacity: 0.85, child: Text(ins.subtitle, style: TextStyle(fontSize: subFs, color: fg))),
+                            Opacity(
+                              opacity: 0.85,
+                              child: Text(
+                                ins.subtitle,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(fontSize: subFs, color: fg),
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -1648,6 +1692,8 @@ class _ChipWrap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+   
+
     final padH = _AddSlotsPageState()._clampd(context.wp(2.2), 10, 14);
     final padV = _AddSlotsPageState()._clampd(context.hp(0.5), 4, 6);
     final radius = _AddSlotsPageState()._clampd(context.sp(1.1), 10, 14);

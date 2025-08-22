@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'add_slots.dart';
 
 class SlotsBlock extends StatefulWidget {
@@ -15,15 +16,56 @@ class _SlotsBlockState extends State<SlotsBlock> {
   DateTime selectedDate = _atMidnight(DateTime.now());
   String? selectedSlotId;
 
+  bool isAdmin = false;
+  bool _roleLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRole();
+  }
+
+  Future<void> _loadRole() async {
+    try {
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+      if (uid == null) {
+        setState(() {
+          isAdmin = false;
+          _roleLoaded = true;
+        });
+        return;
+      }
+
+      final snap = await FirebaseFirestore.instance.collection('users').doc(uid).get();
+      final data = snap.data();
+      final role = (data?['role'] ?? '').toString().toLowerCase().trim();
+
+      setState(() {
+        isAdmin = (role == 'admin');
+        _roleLoaded = true;
+      });
+    } catch (_) {
+      setState(() {
+        isAdmin = false;
+        _roleLoaded = true;
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final sw = media.size.width;
+    final sh = media.size.height;
+    final ts = media.textScaleFactor.clamp(0.9, 1.2);
+
     return Scaffold(
       backgroundColor: const Color(0xFFF8F9FA),
       body: NestedScrollView(
         headerSliverBuilder: (context, inner) => [
           SliverAppBar(
             floating: true,
-            snap: true,       // hide on scroll, reappear on slight up-scroll
+            snap: true,
             pinned: false,
             elevation: 0,
             backgroundColor: Colors.transparent,
@@ -44,19 +86,24 @@ class _SlotsBlockState extends State<SlotsBlock> {
               ),
             ),
             leading: IconButton(
-              icon: const Icon(Icons.arrow_back_ios_new, color: Colors.white),
+              icon: Icon(Icons.arrow_back_ios_new,
+                  color: Colors.white, size: _scale(sw, 18, 22, 26)),
               tooltip: 'Back',
               onPressed: () {
                 if (Navigator.canPop(context)) Navigator.pop(context);
               },
             ),
-            title: const Text(
+            title: Text(
               '🚗 Driving School Slots',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: _scale(sw, 16, 18, 20) * ts,
+              ),
             ),
             actions: [
               Padding(
-                padding: const EdgeInsets.only(right: 8),
+                padding: EdgeInsets.only(right: _scale(sw, 8, 10, 12)),
                 child: ElevatedButton.icon(
                   onPressed: () {
                     Navigator.push(
@@ -64,14 +111,21 @@ class _SlotsBlockState extends State<SlotsBlock> {
                       MaterialPageRoute(builder: (_) => const AddSlotsPage()),
                     );
                   },
-                  icon: const Icon(Icons.add, size: 16),
-                  label: const Text('Create Slot'),
+                  icon: Icon(Icons.add, size: _scale(sw, 14, 16, 18)),
+                  label: Text(
+                    'Create Slot',
+                    style: TextStyle(fontSize: _scale(sw, 12, 13, 14) * ts),
+                  ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.white.withOpacity(0.2),
                     foregroundColor: Colors.white,
                     side: BorderSide(color: Colors.white.withOpacity(0.3)),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(6)),
+                    padding: EdgeInsets.symmetric(
+                      horizontal: _scale(sw, 10, 12, 14),
+                      vertical: _scale(sw, 6, 8, 10),
+                    ),
                     elevation: 0,
                   ),
                 ),
@@ -81,11 +135,11 @@ class _SlotsBlockState extends State<SlotsBlock> {
         ],
         body: Column(
           children: [
-            _buildDateSelector(),
+            _buildDateSelector(context),
             Expanded(
               child: Container(
                 color: const Color(0xFFFAFBFC),
-                child: _buildSlotsContent(),
+                child: _buildSlotsContent(context),
               ),
             ),
           ],
@@ -95,15 +149,31 @@ class _SlotsBlockState extends State<SlotsBlock> {
   }
 
   // ————————————————— UI: Date selector —————————————————
-  Widget _buildDateSelector() {
+  Widget _buildDateSelector(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final sw = media.size.width;
+    final ts = media.textScaleFactor.clamp(0.9, 1.2);
+
+    final barPaddingH = _scale(sw, 16, 20, 28);
+    final barPaddingV = _scale(sw, 10, 12, 14);
+    final barHeight = _scale(sw, 64, 70, 82);
+
+    final pillPadH = _scale(sw, 8, 10, 12);
+    final pillPadV = _scale(sw, 4, 6, 8);
+    final pillGap = _scale(sw, 4, 6, 8);
+
+    final dowSize = _scale(sw, 9, 10, 11) * ts;
+    final daySize = _scale(sw, 14, 16, 18) * ts;
+    final monSize = _scale(sw, 9, 10, 11) * ts;
+
     return Container(
-  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-  decoration: const BoxDecoration(
-    color: Colors.white, // ✅ put color here
-    border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
-  ),
-  child: SizedBox(
-    height: 70,
+      padding: EdgeInsets.symmetric(horizontal: barPaddingH, vertical: barPaddingV),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
+      ),
+      child: SizedBox(
+        height: barHeight,
         child: ListView.builder(
           scrollDirection: Axis.horizontal,
           itemCount: 7,
@@ -119,8 +189,12 @@ class _SlotsBlockState extends State<SlotsBlock> {
                 });
               },
               child: Container(
-                margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                margin: EdgeInsets.only(right: index == 6 ? 0 : pillGap),
+                padding: EdgeInsets.symmetric(horizontal: pillPadH, vertical: pillPadV),
+                constraints: BoxConstraints(
+                  minWidth: _scale(sw, 45, 50, 55),
+                  maxWidth: _scale(sw, 65, 70, 75),
+                ),
                 decoration: BoxDecoration(
                   color: isSelected ? const Color(0xFFEF4444) : const Color(0xFFF8F9FA),
                   border: Border.all(
@@ -130,29 +204,30 @@ class _SlotsBlockState extends State<SlotsBlock> {
                 ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       DateFormat('EEE').format(date).toUpperCase(),
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: dowSize,
                         fontWeight: FontWeight.w500,
                         color: isSelected ? Colors.white : Colors.black.withOpacity(0.7),
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: _scale(sw, 1, 1, 2)),
                     Text(
                       DateFormat('d').format(date),
                       style: TextStyle(
-                        fontSize: 18,
+                        fontSize: daySize,
                         fontWeight: FontWeight.w600,
                         color: isSelected ? Colors.white : Colors.black,
                       ),
                     ),
-                    const SizedBox(height: 2),
+                    SizedBox(height: _scale(sw, 1, 1, 2)),
                     Text(
                       DateFormat('MMM').format(date).toUpperCase(),
                       style: TextStyle(
-                        fontSize: 11,
+                        fontSize: monSize,
                         color: isSelected ? Colors.white : Colors.black.withOpacity(0.7),
                       ),
                     ),
@@ -167,14 +242,17 @@ class _SlotsBlockState extends State<SlotsBlock> {
   }
 
   // ————————————————— Firestore stream + list —————————————————
-  Widget _buildSlotsContent() {
-    final ts = Timestamp.fromDate(selectedDate); // matches AddSlotsPage storage
+  Widget _buildSlotsContent(BuildContext context) {
+    if (!_roleLoaded) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final ts = Timestamp.fromDate(selectedDate);
 
     return StreamBuilder<QuerySnapshot>(
       stream: FirebaseFirestore.instance
           .collection('slots')
           .where('slot_day', isEqualTo: ts)
-          // No orderBy; we'll sort client-side by parsed start time
           .snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
@@ -186,7 +264,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
 
         final docs = List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? const []);
         if (docs.isEmpty) {
-          return _buildEmptyState();
+          return _buildEmptyState(context);
         }
 
         // Sort by parsed start time
@@ -199,8 +277,13 @@ class _SlotsBlockState extends State<SlotsBlock> {
         // Group by period
         final grouped = _groupSlotsByTimePeriod(docs);
 
+        final media = MediaQuery.of(context);
+        final sw = media.size.width;
+        final outerMargin = _scale(sw, 12, 20, 28);
+        final headerPad = _scale(sw, 10, 12, 14);
+
         return Container(
-          margin: const EdgeInsets.all(20),
+          margin: EdgeInsets.all(outerMargin),
           decoration: BoxDecoration(
             color: Colors.white,
             borderRadius: BorderRadius.circular(8),
@@ -216,7 +299,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
             children: [
               // Header
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: EdgeInsets.all(headerPad),
                 decoration: const BoxDecoration(
                   color: Color(0xFFF8F9FA),
                   borderRadius: BorderRadius.only(
@@ -227,13 +310,15 @@ class _SlotsBlockState extends State<SlotsBlock> {
                 ),
                 child: Row(
                   children: [
-                    const Text('🎯', style: TextStyle(fontSize: 16)),
+                    Text('🎯', style: TextStyle(fontSize: _scale(sw, 14, 16, 18))),
                     const SizedBox(width: 6),
-                    Text(
-                      'Available slots for ${DateFormat('EEEE, d MMM').format(selectedDate)} - Select your preferred time',
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: Color(0xFF6B7280),
+                    Expanded(
+                      child: Text(
+                        'Available slots for ${DateFormat('EEEE, d MMM').format(selectedDate)} - Select your preferred time',
+                        style: TextStyle(
+                          fontSize: _scale(sw, 12, 13, 14),
+                          color: const Color(0xFF6B7280),
+                        ),
                       ),
                     ),
                   ],
@@ -243,7 +328,9 @@ class _SlotsBlockState extends State<SlotsBlock> {
               // Slots
               Expanded(
                 child: ListView(
-                  children: grouped.entries.map((e) => _buildTimeSlotGroup(e.key, e.value)).toList(),
+                  children: grouped.entries
+                      .map((e) => _buildTimeSlotGroup(context, e.key, e.value))
+                      .toList(),
                 ),
               ),
             ],
@@ -253,21 +340,25 @@ class _SlotsBlockState extends State<SlotsBlock> {
     );
   }
 
-  Widget _buildEmptyState() {
+  Widget _buildEmptyState(BuildContext context) {
+    final sw = MediaQuery.of(context).size.width;
     return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Text('📅', style: TextStyle(fontSize: 64, color: Colors.grey)),
-          const SizedBox(height: 16),
-          Text(
-            'No slots available for ${DateFormat('EEEE, MMM d').format(selectedDate)}',
-            style: const TextStyle(fontSize: 18, color: Colors.grey),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 8),
-          const Text('Try selecting a different date', style: TextStyle(color: Colors.grey)),
-        ],
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: _scale(sw, 16, 20, 28)),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text('📅', style: TextStyle(fontSize: _scale(sw, 56, 64, 72), color: Colors.grey)),
+            const SizedBox(height: 16),
+            Text(
+              'No slots available for ${DateFormat('EEEE, MMM d').format(selectedDate)}',
+              style: TextStyle(fontSize: _scale(sw, 16, 18, 20), color: Colors.grey),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 8),
+            const Text('Try selecting a different date', style: TextStyle(color: Colors.grey)),
+          ],
+        ),
       ),
     );
   }
@@ -294,13 +385,18 @@ class _SlotsBlockState extends State<SlotsBlock> {
       }
     }
 
-    // Remove empty groups
     grouped.removeWhere((_, v) => v.isEmpty);
     return grouped;
   }
 
   // ————————————————— Group section —————————————————
-  Widget _buildTimeSlotGroup(String period, List<QueryDocumentSnapshot> slots) {
+  Widget _buildTimeSlotGroup(BuildContext context, String period, List<QueryDocumentSnapshot> slots) {
+    final sw = MediaQuery.of(context).size.width;
+    final emojiSize = _scale(sw, 14, 16, 18);
+    final titleSize = _scale(sw, 13, 14, 16);
+    final groupPad = _scale(sw, 12, 16, 20);
+    final chipGap = _scale(sw, 10, 12, 14);
+
     String emoji = '🌅';
     String timeRange = '';
 
@@ -320,7 +416,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
     }
 
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: EdgeInsets.all(groupPad),
       decoration: const BoxDecoration(
         border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6))),
       ),
@@ -329,17 +425,23 @@ class _SlotsBlockState extends State<SlotsBlock> {
         children: [
           Text(
             '$emoji $period $timeRange',
-            style: const TextStyle(
-              fontSize: 14,
+            style: TextStyle(
+              fontSize: titleSize,
               fontWeight: FontWeight.w600,
-              color: Color(0xFF374151),
+              color: const Color(0xFF374151),
             ),
           ),
           const SizedBox(height: 12),
-          Wrap(
-            spacing: 12,
-            runSpacing: 12,
-            children: slots.map((s) => _buildSlotCard(s)).toList(),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = _columnsForWidth(constraints.maxWidth);
+              final cardW = _cardWidth(constraints.maxWidth, columns, chipGap);
+              return Wrap(
+                spacing: chipGap,
+                runSpacing: chipGap,
+                children: slots.map((s) => _buildSlotCard(context, s, cardW)).toList(),
+              );
+            },
           ),
         ],
       ),
@@ -347,15 +449,37 @@ class _SlotsBlockState extends State<SlotsBlock> {
   }
 
   // ————————————————— Slot card —————————————————
-  Widget _buildSlotCard(QueryDocumentSnapshot slot) {
+  Widget _buildSlotCard(BuildContext context, QueryDocumentSnapshot slot, double cardWidth) {
+    final sw = MediaQuery.of(context).size.width;
+    final ts = MediaQuery.of(context).textScaleFactor.clamp(0.9, 1.2);
     final data = slot.data() as Map<String, dynamic>;
     final slotId = data['slot_id']?.toString() ?? slot.id;
     final vehicleType = data['vehicle_type']?.toString() ?? 'Unknown';
-    final instructorName = data['instructor_name']?.toString() ?? (data['instructor_user_id']?.toString() ?? 'Unknown');
-    final seats = (data['seat'] is num) ? (data['seat'] as num).toInt() : int.tryParse('${data['seat']}') ?? 0;
+    final instructorName = data['instructor_name']?.toString() ??
+        (data['instructor_user_id']?.toString() ?? 'Unknown');
+    final seats = (data['seat'] is num)
+        ? (data['seat'] as num).toInt()
+        : int.tryParse('${data['seat']}') ?? 0;
     final timeString = data['slot_time']?.toString() ?? '';
 
+    // NEW: costs
+    final vehicleCost = _asNum(data['vehicle_cost']);
+    final additionalCost = _asNum(data['additional_cost']);
+
     final isSelected = selectedSlotId == slotId;
+
+    final padAll = _scale(sw, 10, 12, 14);
+    final badgePadH = _scale(sw, 6, 8, 10);
+    final badgePadV = _scale(sw, 2, 3, 4);
+    final deleteBtn = _scale(sw, 18, 20, 22);
+    final deleteIcon = _scale(sw, 10, 12, 14);
+
+    final timeSize = _scale(sw, 12, 13, 14) * ts;
+    final vehSize = _scale(sw, 9, 10, 11) * ts;
+    final seatsSize = _scale(sw, 10, 11, 12) * ts;
+    final instSize = _scale(sw, 9, 10, 11) * ts;
+    final availSize = _scale(sw, 9, 10, 11) * ts;
+    final moneySize = _scale(sw, 11, 12, 13) * ts;
 
     return GestureDetector(
       onTap: () {
@@ -364,8 +488,8 @@ class _SlotsBlockState extends State<SlotsBlock> {
         });
       },
       child: Container(
-        width: 150,
-        padding: const EdgeInsets.all(12),
+        width: cardWidth,
+        padding: EdgeInsets.all(padAll),
         decoration: BoxDecoration(
           color: isSelected ? const Color(0xFF10B981) : Colors.white,
           border: Border.all(
@@ -377,54 +501,136 @@ class _SlotsBlockState extends State<SlotsBlock> {
         child: Stack(
           children: [
             Column(
+              mainAxisSize: MainAxisSize.min,
               children: [
                 Text(
                   _formatTimeRange(timeString),
                   textAlign: TextAlign.center,
                   style: TextStyle(
-                    fontSize: 13,
+                    fontSize: timeSize,
                     fontWeight: FontWeight.w600,
                     color: isSelected ? Colors.white : Colors.black,
                   ),
                 ),
-                const SizedBox(height: 6),
+                SizedBox(height: _scale(sw, 4, 6, 8)),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  padding: EdgeInsets.symmetric(horizontal: badgePadH, vertical: badgePadV),
                   decoration: BoxDecoration(
                     color: isSelected ? Colors.white.withOpacity(0.2) : const Color(0xFFEFF6FF),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     vehicleType,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 10,
+                      fontSize: vehSize,
                       fontWeight: FontWeight.w500,
                       color: isSelected ? Colors.white : const Color(0xFF1D4ED8),
                     ),
                   ),
                 ),
-                const SizedBox(height: 6),
+                SizedBox(height: _scale(sw, 4, 6, 8)),
                 Text(
                   '$seats seats',
                   style: TextStyle(
-                    fontSize: 11,
+                    fontSize: seatsSize,
                     color: isSelected ? Colors.white.withOpacity(0.9) : Colors.black.withOpacity(0.8),
                   ),
                 ),
-                const SizedBox(height: 6),
+                SizedBox(height: _scale(sw, 4, 6, 8)),
                 Text(
-                  instructorName.length > 18 ? '${instructorName.substring(0, 18)}…' : instructorName,
+                  instructorName.length > 22 ? '${instructorName.substring(0, 22)}…' : instructorName,
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: instSize,
                     color: isSelected ? Colors.white.withOpacity(0.9) : const Color(0xFF6B7280),
                   ),
                   textAlign: TextAlign.center,
                 ),
-                const SizedBox(height: 4),
+
+                // --- NEW: Costs display block ---
+                SizedBox(height: _scale(sw, 8, 10, 12)),
+                Container(
+                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: isSelected ? Colors.white.withOpacity(0.12) : const Color(0xFFFAFAFA),
+                    border: Border.all(
+                      color: isSelected ? Colors.white.withOpacity(0.25) : const Color(0xFFE5E7EB),
+                    ),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Vehicle Cost',
+                            style: TextStyle(
+                              fontSize: moneySize,
+                              fontWeight: FontWeight.w500,
+                              color: isSelected ? Colors.white.withOpacity(0.95) : const Color(0xFF374151),
+                            ),
+                          ),
+                          Text(
+                            _formatCurrency(vehicleCost),
+                            style: TextStyle(
+                              fontSize: moneySize,
+                              fontWeight: FontWeight.w600,
+                              color: isSelected ? Colors.white : const Color(0xFF111827),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            'Additional Cost',
+                            style: TextStyle(
+                              fontSize: moneySize,
+                              fontWeight: FontWeight.w500,
+                              color: isSelected ? Colors.white.withOpacity(0.95) : const Color(0xFF374151),
+                            ),
+                          ),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                _formatCurrency(additionalCost),
+                                style: TextStyle(
+                                  fontSize: moneySize,
+                                  fontWeight: FontWeight.w600,
+                                  color: isSelected ? Colors.white : const Color(0xFF111827),
+                                ),
+                              ),
+                              if (isAdmin) ...[
+                                const SizedBox(width: 6),
+                                InkWell(
+                                  onTap: () => _editAdditionalCost(slot.id, additionalCost),
+                                  child: Icon(
+                                    Icons.edit,
+                                    size: 16,
+                                    color: isSelected ? Colors.white : const Color(0xFF1F2937),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                // --- END costs block ---
+
+                SizedBox(height: _scale(sw, 2, 4, 6)),
                 Text(
                   'Available',
                   style: TextStyle(
-                    fontSize: 10,
+                    fontSize: availSize,
                     color: isSelected ? Colors.white.withOpacity(0.95) : const Color(0xFF10B981),
                     fontWeight: FontWeight.w600,
                   ),
@@ -432,38 +638,21 @@ class _SlotsBlockState extends State<SlotsBlock> {
               ],
             ),
 
-            // Edit / Delete
+            // Only Delete button (removed Edit button)
             Positioned(
               top: 0,
               right: 0,
-              child: Row(
-                children: [
-                  GestureDetector(
-                    onTap: () => _editSlot(slot.id, data),
-                    child: Container(
-                      width: 20,
-                      height: 20,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFDBEAFE),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Icon(Icons.edit, size: 12, color: Color(0xFF1D4ED8)),
-                    ),
+              child: GestureDetector(
+                onTap: () => _deleteSlot(slot),
+                child: Container(
+                  width: deleteBtn,
+                  height: deleteBtn,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFFEE2E2),
+                    borderRadius: BorderRadius.circular(4),
                   ),
-                  const SizedBox(width: 4),
-                  GestureDetector(
-                    onTap: () => _deleteSlot(slot),
-                    child: Container(
-                      width: 20,
-                      height: 20,
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFFEE2E2),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Icon(Icons.delete, size: 12, color: Color(0xFFDC2626)),
-                    ),
-                  ),
-                ],
+                  child: Icon(Icons.delete, size: deleteIcon, color: const Color(0xFFDC2626)),
+                ),
               ),
             ),
           ],
@@ -472,133 +661,81 @@ class _SlotsBlockState extends State<SlotsBlock> {
     );
   }
 
-  // ————————————————— Edit / Delete —————————————————
-  Future<void> _editSlot(String docId, Map<String, dynamic> data) async {
-    final slotIdCtrl = TextEditingController(text: data['slot_id']?.toString() ?? '');
-    final vehicleTypeCtrl = TextEditingController(text: data['vehicle_type']?.toString() ?? '');
-    final instructorCtrl = TextEditingController(text: data['instructor_user_id']?.toString() ?? '');
-    final seatsCtrl = TextEditingController(text: (data['seat']?.toString() ?? ''));
-    final timeCtrl = TextEditingController(text: data['slot_time']?.toString() ?? '');
-    DateTime dialogDate = (data['slot_day'] is Timestamp)
-        ? (data['slot_day'] as Timestamp).toDate()
-        : selectedDate;
+  // ————————————————— Edit Additional Cost (kept) —————————————————
+  // NEW: admin-only inline editor for additional_cost
+  Future<void> _editAdditionalCost(String docId, num? current) async {
+    if (!isAdmin) return;
+    final ctrl = TextEditingController(text: current?.toString() ?? '');
 
-    await showDialog(
+    final confirmed = await showDialog<bool>(
       context: context,
-      builder: (_) => StatefulBuilder(
-        builder: (context, setStateDialog) => AlertDialog(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          title: const Text('Edit Slot', style: TextStyle(fontWeight: FontWeight.w600)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _buildFormField('Slot ID', slotIdCtrl),
-                const SizedBox(height: 12),
-                _buildFormField('Vehicle Type', vehicleTypeCtrl),
-                const SizedBox(height: 12),
-                _buildFormField('Instructor ID', instructorCtrl),
-                const SizedBox(height: 12),
-                _buildFormField('Seats', seatsCtrl, isNumber: true),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
-                  child: Text('Day', style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.w500)),
-                ),
-                const SizedBox(height: 6),
-                InkWell(
-                  onTap: () async {
-                    final picked = await showDatePicker(
-                      context: context,
-                      firstDate: DateTime(2020),
-                      lastDate: DateTime(2100),
-                      initialDate: dialogDate,
-                    );
-                    if (picked != null) {
-                      setStateDialog(() => dialogDate = _atMidnight(picked));
-                    }
-                  },
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                    decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xFFE5E7EB)),
-                      borderRadius: BorderRadius.circular(6),
-                    ),
-                    child: Text(DateFormat('yyyy-MM-dd').format(dialogDate)),
-                  ),
-                ),
-                const SizedBox(height: 12),
-                _buildFormField('Time (e.g. 09:00 AM - 10:00 AM)', timeCtrl),
-              ],
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: const Text('Edit Additional Cost'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Align(
+              alignment: Alignment.centerLeft,
+              child: Text('Enter amount (INR):'),
             ),
-          ),
-          actions: [
-            TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
-            ElevatedButton(
-              onPressed: () async {
-                try {
-                  await FirebaseFirestore.instance.collection('slots').doc(docId).update({
-                    'slot_id': slotIdCtrl.text.trim(),
-                    'vehicle_type': vehicleTypeCtrl.text.trim(),
-                    'instructor_user_id': instructorCtrl.text.trim(),
-                    'seat': int.tryParse(seatsCtrl.text.trim()) ?? data['seat'],
-                    'slot_day': Timestamp.fromDate(_atMidnight(dialogDate)),
-                    'slot_time': timeCtrl.text.trim(),
-                    'updated_at': FieldValue.serverTimestamp(),
-                  });
-
-                  if (context.mounted) {
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text('Slot updated successfully')),
-                    );
-                  }
-                } catch (e) {
-                  if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error updating slot: $e')),
-                    );
-                  }
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6366F1),
-                foregroundColor: Colors.white,
+            const SizedBox(height: 8),
+            TextField(
+              controller: ctrl,
+              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                hintText: 'e.g. 250',
               ),
-              child: const Text('Save Changes'),
             ),
           ],
         ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFF6366F1),
+              foregroundColor: Colors.white,
+            ),
+            child: const Text('Save'),
+          ),
+        ],
       ),
     );
+
+    if (confirmed != true) return;
+
+    final newVal = num.tryParse(ctrl.text.trim());
+    if (newVal == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Invalid amount')),
+        );
+      }
+      return;
+    }
+
+    try {
+      await FirebaseFirestore.instance.collection('slots').doc(docId).update({
+        'additional_cost': newVal,
+        'updated_at': FieldValue.serverTimestamp(),
+      });
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Additional cost updated')),
+        );
+      }
+    } catch (e) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error: $e')),
+        );
+      }
+    }
   }
 
-  Widget _buildFormField(String label, TextEditingController controller, {bool isNumber = false}) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w500, color: Color(0xFF374151))),
-        const SizedBox(height: 6),
-        TextField(
-          controller: controller,
-          keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-          decoration: InputDecoration(
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6),
-              borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(6),
-              borderSide: const BorderSide(color: Color(0xFF6366F1)),
-            ),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          ),
-        ),
-      ],
-    );
-  }
-
+  // ————————————————— Delete (kept) —————————————————
   Future<void> _deleteSlot(QueryDocumentSnapshot slot) async {
     final data = slot.data() as Map<String, dynamic>;
     final slotId = data['slot_id']?.toString() ?? slot.id;
@@ -644,21 +781,42 @@ class _SlotsBlockState extends State<SlotsBlock> {
   // ————————————————— Helpers —————————————————
   static DateTime _atMidnight(DateTime d) => DateTime(d.year, d.month, d.day);
 
-  /// Parse start time from "09:00 AM - 10:00 AM". Falls back to 00:00 if invalid.
+  /// Breakpoints → columns (2–5)
+  int _columnsForWidth(double width) {
+    if (width >= 1200) return 5;
+    if (width >= 900) return 4;
+    if (width >= 600) return 3;
+    return 2;
+  }
+
+  /// Compute card width from available width, columns, and spacing
+  double _cardWidth(double maxWidth, int columns, double gap) {
+    final totalGaps = gap * (columns - 1);
+    final usable = (maxWidth - totalGaps).clamp(200.0, maxWidth);
+    final base = usable / columns;
+    return base.clamp(160.0, 320.0);
+  }
+
+  /// Simple scaler that grows values with width
+  static double _scale(double width, double small, double medium, double large) {
+    if (width >= 1200) return large;
+    if (width >= 800) return medium;
+    return small;
+  }
+
+  /// Parse start time from "09:00 AM - 10:00 AM". Falls back to epoch if invalid.
   DateTime _parseStartTime(String slotTime) {
     try {
       final start = slotTime.split(' - ').first.trim();
       final t = DateFormat('hh:mm a').parseStrict(start);
-      // Return with today's date just for ordering/grouping
       final now = DateTime.now();
       return DateTime(now.year, now.month, now.day, t.hour, t.minute);
     } catch (_) {
-      return DateTime(1970); // minimal
+      return DateTime(1970);
     }
   }
 
   String _formatTimeRange(String slotTime) {
-    // Already stored as "hh:mm a - hh:mm a"; if malformed, just return it.
     try {
       final parts = slotTime.split(' - ');
       if (parts.length != 2) return slotTime;
@@ -668,5 +826,18 @@ class _SlotsBlockState extends State<SlotsBlock> {
     } catch (_) {
       return slotTime;
     }
+  }
+
+  // NEW helpers
+  num? _asNum(dynamic v) {
+    if (v == null) return null;
+    if (v is num) return v;
+    return num.tryParse(v.toString());
+  }
+
+  String _formatCurrency(num? v) {
+    final f = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+    if (v == null) return '—';
+    return f.format(v);
   }
 }
