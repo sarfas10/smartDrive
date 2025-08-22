@@ -1,0 +1,426 @@
+// admin_dashboard.dart
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:smart_drive/reusables/branding.dart';
+
+import 'ui_common.dart';
+import 'users_block.dart';
+import 'materials_block.dart';
+import 'tests_block.dart';
+import 'notifications_block.dart';
+import 'attendance_block.dart';
+import 'settings_block.dart';
+import 'slots_block.dart'; // ⬅ NEW
+
+class AdminDashboard extends StatefulWidget {
+  const AdminDashboard({super.key});
+  @override
+  State<AdminDashboard> createState() => _AdminDashboardState();
+}
+
+class _AdminDashboardState extends State<AdminDashboard> {
+  // Sections: dashboard | users | slots | materials | tests | notifications | attendance | settings
+  String selected = 'dashboard';
+
+  void _pick(String s) => setState(() => selected = s);
+  void _snack(String msg) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+  String get _title {
+    switch (selected) {
+      case 'dashboard':
+        return 'Dashboard Overview';
+      case 'users':
+        return 'User Control';
+      case 'slots':
+        return 'Slot Scheduling';
+      case 'materials':
+        return 'Study Materials';
+      case 'tests':
+        return 'Tests & Questions';
+      case 'notifications':
+        return 'Push Notifications';
+      case 'attendance':
+        return 'Attendance';
+      case 'settings':
+        return 'System Settings';
+      default:
+        return AppBrand.appName;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, c) {
+        final double w = c.maxWidth;
+        // Breakpoints
+        final bool isMobile = w < 768;
+        final bool isTablet = w >= 768 && w < 1080;
+        final bool isDesktop = w >= 1080;
+
+        final double sidebarWidth = isDesktop ? 280 : (isTablet ? 260 : 0);
+
+        return Scaffold(
+          // Drawer on mobile & small tablets
+          drawer: isDesktop
+              ? null
+              : Drawer(
+                  backgroundColor: Colors.transparent, // let outer bg show
+                  elevation: 0,
+                  child: Sidebar(
+                    selected: selected,
+                    onPick: _pick,
+                    // make it scrollable inside drawer
+                    isInDrawer: true,
+                  ),
+                ),
+          appBar: isDesktop
+              ? null
+              : AppBar(
+                  backgroundColor: Colors.transparent,
+                  elevation: 0,
+                  iconTheme: const IconThemeData(color: Colors.white),
+                  title: Row(
+                    children: [
+                      const AppLogo(size: 22, color: Colors.white),
+                      const SizedBox(width: 12),
+                      Text(
+                        _title,
+                        style: const TextStyle(color: Colors.white, fontSize: 16),
+                      ),
+                    ],
+                  ),
+                ),
+          body: Stack(
+            children: [
+              const BgGradient(),
+              SafeArea(
+                bottom: false,
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    // Fixed sidebar on wide screens
+                    if (!isMobile) SizedBox(width: sidebarWidth, child: Sidebar(selected: selected, onPick: _pick)),
+                    // Main content
+                    Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.fromLTRB(16, isDesktop ? 16 : 8, 16, 12),
+                        child: Column(
+                          children: [
+                            // Sticky header on dashboard (optional)
+                            if (selected == 'dashboard') ...[
+                              Glass(child: HeaderBar(title: _title)),
+                              const SizedBox(height: 12),
+                            ],
+                            // Content card
+                            Expanded(
+                              child: Glass(
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 6),
+                                  child: _section(),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _section() {
+    switch (selected) {
+      case 'dashboard':
+        return const DashboardBlock();
+      case 'users':
+        return const UsersBlock();
+      case 'slots': // ⬅ NEW
+        return const SlotsBlock();
+      case 'materials':
+        return const MaterialsBlock();
+      case 'tests':
+        return TestsBlock(onCreatePool: _openCreatePool);
+      case 'notifications':
+        return const NotificationsBlock();
+      case 'attendance':
+        return const AttendanceBlock();
+      case 'settings':
+        return const SettingsBlock();
+      default:
+        return const SizedBox.shrink();
+    }
+  }
+
+  Future<void> _openCreatePool() async {
+    final titleCtrl = TextEditingController();
+    final categoryCtrl = TextEditingController();
+    final durationCtrl = TextEditingController(text: '30');
+    final passCtrl = TextEditingController(text: '80');
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Create Test Pool'),
+        content: SingleChildScrollView(
+          child: Column(
+            children: [
+              field('Title', titleCtrl),
+              const SizedBox(height: 8),
+              field('Category', categoryCtrl),
+              const SizedBox(height: 8),
+              field('Duration (minutes)', durationCtrl, number: true),
+              const SizedBox(height: 8),
+              field('Passing Score (%)', passCtrl, number: true),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+          ElevatedButton(
+            onPressed: () async {
+              final doc = {
+                'title': titleCtrl.text.trim(),
+                'category': categoryCtrl.text.trim(),
+                'duration_minutes': int.tryParse(durationCtrl.text.trim()) ?? 30,
+                'passing_score_pct': int.tryParse(passCtrl.text.trim()) ?? 80,
+                'status': 'active',
+                'created_at': FieldValue.serverTimestamp(),
+              };
+              await FirebaseFirestore.instance.collection('tests_pools').add(doc);
+              if (mounted) Navigator.pop(context);
+              _snack('Test pool created');
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sidebar (consistent dark on web + mobile)
+// ─────────────────────────────────────────────────────────────────────────────
+
+class Sidebar extends StatelessWidget {
+  final String selected;
+  final void Function(String) onPick;
+  final bool isInDrawer;
+  const Sidebar({
+    super.key,
+    required this.selected,
+    required this.onPick,
+    this.isInDrawer = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final items = [
+      (Icons.query_stats_rounded, 'Dashboard', 'dashboard'),
+      (Icons.group_rounded, 'User Control', 'users'),
+      (Icons.event_available_rounded, 'Slot Scheduling', 'slots'),
+      (Icons.menu_book_rounded, 'Study Materials', 'materials'),
+      (Icons.quiz_rounded, 'Tests & Questions', 'tests'),
+      (Icons.notifications_active_rounded, 'Push Notifications', 'notifications'),
+      (Icons.checklist_rtl_rounded, 'Attendance', 'attendance'),
+      (Icons.settings_rounded, 'System Settings', 'settings'),
+    ];
+
+    // Force a consistent dark surface regardless of parent (Glass/Drawer)
+    final sidebar = Container(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF0F1115), Color(0xFF161A1D)],
+        ),
+        border: Border(
+          right: BorderSide(color: Color(0x1FFFFFFF), width: 0.6),
+        ),
+      ),
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 12, 20, 16),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  AppLogo(size: 22, color: Color(0xFF4c63d2)),
+                  SizedBox(height: 10),
+                  Divider(color: Colors.white24, height: 1),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView.builder(
+                padding: const EdgeInsets.only(bottom: 12),
+                itemCount: items.length,
+                itemBuilder: (context, i) {
+                  final e = items[i];
+                  final bool active = selected == e.$3;
+                  return InkWell(
+                    onTap: () {
+                      Navigator.maybePop(context); // close drawer if open
+                      onPick(e.$3);
+                    },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 160),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: active ? const Color(0x1A4c63d2) : Colors.transparent,
+                        border: Border(
+                          left: BorderSide(
+                            width: 3,
+                            color: active ? const Color(0xFF4c63d2) : Colors.transparent,
+                          ),
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(e.$1, color: active ? const Color(0xFF4c63d2) : Colors.white, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              e.$2,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontWeight: FontWeight.w500,
+                                color: active ? const Color(0xFF4c63d2) : Colors.white,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+
+    // In drawers, provide natural scrolling if content overflows vertically
+    if (isInDrawer) {
+      return sidebar;
+    }
+
+    // In fixed layout, keep it non-scrollable (page scrolls), but still expands vertically.
+    return SizedBox.expand(child: sidebar);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dashboard widgets
+// ─────────────────────────────────────────────────────────────────────────────
+
+class DashboardBlock extends StatelessWidget {
+  const DashboardBlock({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final db = FirebaseFirestore.instance;
+
+    // Futures
+    final slotsAgg = db.collection('slots').where('available', isEqualTo: true).count().get();
+    final instructorsColl = db.collection('slots').get(); // proxy for unique instructor_id
+    final paymentsColl = db.collection('payments').where('status', isEqualTo: 'success').get();
+    final studentsAgg = db
+        .collection('users')
+        .where('role', isEqualTo: 'student')
+        .where('status', whereIn: ['active', 'approved']) // adjust if you use a different flag
+        .count()
+        .get();
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 8),
+      children: [
+        Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: FutureBuilder<List<dynamic>>(
+            future: Future.wait([slotsAgg, instructorsColl, paymentsColl, studentsAgg]),
+            builder: (context, snap) {
+              if (!snap.hasData) {
+                return const StatsGrid(cards: [
+                  StatCard(value: '—', label: 'Available Slots'),
+                  StatCard(value: '—', label: 'Active Instructors'),
+                  StatCard(value: '—', label: 'Total Revenue'),
+                  StatCard(value: '—', label: 'Active Students'), // NEW placeholder
+                ]);
+              }
+
+              final aggSlots = snap.data![0] as AggregateQuerySnapshot;
+              final int slotsCount = (aggSlots.count ?? 0);
+
+              final instrSnap = snap.data![1] as QuerySnapshot;
+              final instrIds = <String>{};
+              for (final d in instrSnap.docs) {
+                final id = (d.data() as Map?)?['instructor_id']?.toString() ?? '';
+                if (id.isNotEmpty) instrIds.add(id);
+              }
+
+              final paySnap = snap.data![2] as QuerySnapshot;
+              int revenue = 0;
+              for (final d in paySnap.docs) {
+                final a = (d.data() as Map?)?['amount'];
+                if (a is int) revenue += a;
+                if (a is double) revenue += a.round();
+              }
+
+              final aggStudents = snap.data![3] as AggregateQuerySnapshot;
+              final int activeStudents = (aggStudents.count ?? 0);
+
+              return StatsGrid(cards: [
+                StatCard(value: _sep(slotsCount), label: 'Available Slots'),
+                StatCard(value: _sep(instrIds.length), label: 'Active Instructors'),
+                StatCard(value: '₹${_sep(revenue)}', label: 'Total Revenue'),
+                StatCard(value: _sep(activeStudents), label: 'Active Students'), // NEW
+              ]);
+            },
+          ),
+        ),
+        const SizedBox(height: 4),
+        const SectionHeader(title: 'Recent Activities'),
+        const Divider(height: 1),
+        Padding(
+          padding: const EdgeInsets.all(12.0),
+          child: StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance
+                .collection('bookings')
+                .orderBy('created_at', descending: true)
+                .limit(10)
+                .snapshots(),
+            builder: (context, snap) {
+              final rows = <List<Widget>>[];
+              if (snap.hasData) {
+                for (final d in snap.data!.docs) {
+                  final m = d.data() as Map;
+                  rows.add([
+                    Text(m['slot_id']?.toString() ?? '-', overflow: TextOverflow.ellipsis),
+                    Text(m['student_id']?.toString() ?? '-', overflow: TextOverflow.ellipsis),
+                    Text(m['status']?.toString() ?? '-', overflow: TextOverflow.ellipsis),
+                    Text((m['created_at'] as Timestamp?)?.toDate().toString().split('.').first ?? '-'),
+                  ]);
+                }
+              }
+              return DataTableWrap(columns: const ['Slot', 'Student', 'Status', 'Time'], rows: rows);
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  static String _sep(num n) =>
+      n.toString().replaceAllMapped(RegExp(r'(\d)(?=(\d{3})+(?!\d))'), (m) => '${m[1]},');
+}

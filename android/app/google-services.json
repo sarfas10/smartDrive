@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "343143480425",
+    "project_id": "smartdrive-8a6a9",
+    "storage_bucket": "smartdrive-8a6a9.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:343143480425:android:a198df99dd94fab60d76f8",
+        "android_client_info": {
+          "package_name": "com.example.smart_drive"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDxRT1RmSChLbt-wA1wP2ssyl7qM35XEAo"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
