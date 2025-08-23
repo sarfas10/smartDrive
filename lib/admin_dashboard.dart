@@ -28,20 +28,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
   void _snack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
-  String get _title {
-    const titles = {
-      'dashboard': 'Dashboard Overview',
-      'users': 'User Control',
-      'slots': 'Slot Scheduling',
-      'materials': 'Study Materials',
-      'tests': 'Tests & Questions',
-      'notifications': 'Push Notifications',
-      'attendance': 'Attendance',
-      'settings': 'System Settings',
-    };
-    return titles[selected] ?? AppBrand.appName;
-  }
-
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
@@ -100,7 +86,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  // Parent is NOT scrollable; each section owns its own scrolling.
   Widget _buildMainContent(bool isDesktop) {
     return Expanded(
       child: Padding(
@@ -108,21 +93,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
         child: _CardSurface(
           child: Padding(
             padding: const EdgeInsets.all(16.0),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildHeader(),
-                const SizedBox(height: 16),
-                Expanded(child: _buildSection()),
-              ],
-            ),
+            child: _buildSection(), // no header, just content
           ),
         ),
       ),
     );
   }
-
-  Widget _buildHeader() => const _HeaderTitle();
 
   Widget _buildSection() {
     switch (selected) {
@@ -229,24 +205,6 @@ class _AdminDashboardState extends State<AdminDashboard> {
   }
 }
 
-class _HeaderTitle extends StatelessWidget {
-  const _HeaderTitle();
-
-  @override
-  Widget build(BuildContext context) {
-    final state = context.findAncestorStateOfType<_AdminDashboardState>();
-    final title = state?._title ?? AppBrand.appName;
-    return Text(
-      title,
-      style: const TextStyle(
-        color: Color(0xFF1F2937),
-        fontSize: 20,
-        fontWeight: FontWeight.w700,
-      ),
-    );
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Sidebar
 // ─────────────────────────────────────────────────────────────────────────────
@@ -328,7 +286,6 @@ class Sidebar extends StatelessWidget {
     );
   }
 }
-
 
 class _MenuItem extends StatelessWidget {
   final IconData icon;
@@ -435,6 +392,8 @@ class DashboardBlock extends StatelessWidget {
             return Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                const _DashboardHeader(), // 👈 Title only for dashboard
+                const SizedBox(height: 16),
                 Expanded(
                   flex: 3,
                   child: _StatsViewport(stats: stats, maxWidth: c.maxWidth),
@@ -488,7 +447,6 @@ class DashboardBlock extends StatelessWidget {
   }
 }
 
-/// Stats grid inside its own viewport (smaller cards, scroll if overflow)
 class _StatsViewport extends StatelessWidget {
   final Map<String, String> stats;
   final double maxWidth;
@@ -522,7 +480,6 @@ class _StatsViewport extends StatelessWidget {
   }
 }
 
-/// Recent activities: scrollable list/table under stats
 class _RecentActivities extends StatelessWidget {
   final bool isCompact;
   const _RecentActivities({required this.isCompact});
@@ -555,7 +512,6 @@ class _RecentActivities extends StatelessWidget {
               final bookings = docs.map((d) => d.data()).toList();
 
               if (isCompact) {
-                // Mobile: vertical list
                 return ListView.separated(
                   physics: const AlwaysScrollableScrollPhysics(),
                   itemCount: bookings.length,
@@ -585,7 +541,6 @@ class _RecentActivities extends StatelessWidget {
                   },
                 );
               } else {
-                // Desktop: vertical + horizontal scroll for table
                 return Scrollbar(
                   child: SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
@@ -716,7 +671,6 @@ class _CardSurface extends StatelessWidget {
   }
 }
 
-// number formatting + small key/value row
 String _formatNumber(num? number) {
   final n = number ?? 0;
   final s = n.toString();
@@ -734,4 +688,20 @@ Widget _kv(String k, String v) {
       ],
     ),
   );
+}
+
+class _DashboardHeader extends StatelessWidget {
+  const _DashboardHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Text(
+      "Dashboard Overview",
+      style: TextStyle(
+        fontSize: 20,
+        fontWeight: FontWeight.w700,
+        color: Color(0xFF1F2937),
+      ),
+    );
+  }
 }

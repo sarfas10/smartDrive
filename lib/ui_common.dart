@@ -178,7 +178,7 @@ class DataTableWrap extends StatelessWidget {
     final cellPadV = _clamp(context.hp(0.9), 4, 10);
 
     final table = DataTable(
-      headingRowColor: const MaterialStatePropertyAll(Color(0x1A4c63d2)),
+      headingRowColor: const WidgetStatePropertyAll(Color(0x1A4c63d2)),
       columnSpacing: colSpacing,
       dataRowMinHeight: rowMinH,
       dataRowMaxHeight: rowMaxH,
