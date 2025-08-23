@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:smart_drive/maps_page_admin.dart';
 import 'package:smart_drive/reusables/branding.dart';
 import 'onboard.dart';
 
@@ -35,6 +36,7 @@ class SmartDriveApp extends StatelessWidget {
         fontFamily: 'Inter',
       ),
       home: OnboardingScreen(),
+      //home: MapsPageAdmin(),
       debugShowCheckedModeBanner: false,
     );
   }

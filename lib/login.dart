@@ -5,9 +5,10 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:smart_drive/admin_dashboard';
+import 'package:smart_drive/admin_dashboard.dart';
 import 'package:smart_drive/instructor_dashboard.dart';
 import 'package:smart_drive/student_dashboard.dart';
+import 'package:smart_drive/reusables/branding.dart';
 
 import 'register.dart';
 
@@ -91,87 +92,85 @@ class _LoginScreenState extends State<LoginScreen>
     super.dispose();
   }
 
-Future<void> _handleLogin() async {
-  if (!_formKey.currentState!.validate()) return;
+  Future<void> _handleLogin() async {
+    if (!_formKey.currentState!.validate()) return;
 
-  setState(() => _isLoading = true);
+    setState(() => _isLoading = true);
 
-  try {
-    // (Optional on web) persistence already handled earlier in your code
-    final userCred = await FirebaseAuth.instance.signInWithEmailAndPassword(
-      email: _emailController.text.trim(),
-      password: _passwordController.text,
-    );
+    try {
+      final userCred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+      );
 
-    final user = userCred.user;
-    if (user == null) {
-      _showError('Could not sign in. Please try again.');
-      return;
+      final user = userCred.user;
+      if (user == null) {
+        _showError('Could not sign in. Please try again.');
+        return;
+      }
+
+      // Fetch role from Firestore: users/{uid}.role
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
+
+      if (!doc.exists) {
+        _showError('Profile not found. Contact support.');
+        return;
+      }
+
+      final data = doc.data();
+      final rawRole = (data?['role'] ?? '').toString().trim().toLowerCase();
+
+      // Optional: remember-me email save/clear
+      final prefs = await SharedPreferences.getInstance();
+      if (rememberMe) {
+        await prefs.setString('sd_saved_email', _emailController.text.trim());
+        await prefs.setBool('sd_remember_me', true);
+      } else {
+        await prefs.remove('sd_saved_email');
+        await prefs.setBool('sd_remember_me', false);
+      }
+
+      if (!mounted) return;
+
+      // Route by role
+      switch (rawRole) {
+        case 'student':
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) =>  StudentDashboard()),
+          );
+          break;
+
+        case 'instructor':
+        case 'intsrtuctor': // tolerate the typo if it exists in stored data
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const InstructorDashboard()),
+          );
+          break;
+
+        case 'admin':
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const AdminDashboard()),
+          );
+          break;
+
+        default:
+          _showError('Unknown role "$rawRole". Contact support.');
+          break;
+      }
+    } on FirebaseAuthException catch (e) {
+      _showError(_mapAuthError(e));
+    } catch (_) {
+      _showError('Something went wrong. Please try again.');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
     }
-
-    // Fetch role from Firestore: users/{uid}.role
-    final doc = await FirebaseFirestore.instance
-        .collection('users')
-        .doc(user.uid)
-        .get();
-
-    if (!doc.exists) {
-      _showError('Profile not found. Contact support.');
-      return;
-    }
-
-    final data = doc.data();
-    final rawRole = (data?['role'] ?? '').toString().trim().toLowerCase();
-
-    // Optional: remember-me email save/clear
-    final prefs = await SharedPreferences.getInstance();
-    if (rememberMe) {
-      await prefs.setString('sd_saved_email', _emailController.text.trim());
-      await prefs.setBool('sd_remember_me', true);
-    } else {
-      await prefs.remove('sd_saved_email');
-      await prefs.setBool('sd_remember_me', false);
-    }
-
-    if (!mounted) return;
-
-    // Route by role (accepts "student", "instructor" (or the common typo), "admin")
-    switch (rawRole) {
-      case 'student':
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) =>  StudentDashboard()),
-        );
-        break;
-
-      case 'instructor':
-      case 'intsrtuctor': // tolerate the typo if it exists in stored data
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) =>  InstructorDashboard()),
-        );
-        break;
-
-      case 'admin':
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => AdminDashboard()),
-        );
-        break;
-
-      default:
-        _showError('Unknown role "$rawRole". Contact support.');
-        break;
-    }
-  } on FirebaseAuthException catch (e) {
-    _showError(_mapAuthError(e));
-  } catch (_) {
-    _showError('Something went wrong. Please try again.');
-  } finally {
-    if (mounted) setState(() => _isLoading = false);
   }
-}
-
 
   String _mapAuthError(FirebaseAuthException e) {
     switch (e.code) {
@@ -299,48 +298,21 @@ Future<void> _handleLogin() async {
     );
   }
 
+  // === BRANDING: Plain logo + app name (no glassmorphism, no car icon) ===
   Widget _buildLogo() {
     return Column(
-      children: [
-        Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white.withOpacity(0.2),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
-              color: Colors.white.withOpacity(0.3),
-              width: 1,
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 20,
-                offset: const Offset(0, 10),
-              ),
-            ],
-          ),
-          child: const Icon(
-            Icons.directions_car_rounded,
-            size: 48,
-            color: Colors.white,
-          ),
-        ),
-        const SizedBox(height: 16),
-        const Text(
+      children: const [
+        AppLogo(size: 100),
+        SizedBox(height: 12),
+        AppNameText(size: 28, color: Colors.white),
+        SizedBox(height: 8),
+        Text(
           'Welcome Back',
           style: TextStyle(
-            fontSize: 32,
-            fontWeight: FontWeight.bold,
+            fontSize: 20,
+            fontWeight: FontWeight.w600,
             color: Colors.white,
-            letterSpacing: 1.2,
-          ),
-        ),
-        Text(
-          'Sign in to continue your driving journey',
-          style: TextStyle(
-            fontSize: 16,
-            color: Colors.white.withOpacity(0.8),
-            fontWeight: FontWeight.w300,
+            letterSpacing: 0.8,
           ),
         ),
       ],
@@ -389,7 +361,6 @@ Future<void> _handleLogin() async {
             const SizedBox(height: 20),
             _buildLoginButton(),
             const SizedBox(height: 12),
-            
             _buildRegisterButton(),
           ],
         ),
@@ -609,8 +580,6 @@ Future<void> _handleLogin() async {
             TextButton(
               onPressed: () {
                 Navigator.of(context).pop();
-                // TODO: Navigate to your app's dashboard/home:
-                // Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const HomeScreen()));
               },
               child: const Text('Continue'),
             ),

@@ -40,7 +40,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
       ),
     );
 
-    // 👇 Titles now are base strings without app name
     pages = const [
       OnboardingData(
         title: "Welcome to ",
@@ -158,7 +157,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           SafeArea(
             child: Column(
               children: [
-                OnboardingHeader(onSkip: skipOnboarding),
+                // removed OnboardingHeader (top-left logo & Skip)
                 Expanded(
                   child: PageView.builder(
                     controller: _pageController,
@@ -189,29 +188,20 @@ class _OnboardingScreenState extends State<OnboardingScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Container(
-              width: 120,
-              height: 120,
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.18),
-                borderRadius: BorderRadius.circular(30),
-                border: Border.all(
-                  color: Colors.white.withOpacity(0.28),
-                  width: 2,
-                ),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withOpacity(0.12),
-                    blurRadius: 24,
-                    offset: const Offset(0, 10),
-                  ),
-                ],
-              ),
-              child: Icon(data.icon, size: 60, color: Colors.white),
+            // === Just logo (no container) ===
+            AppLogo(size: 100),
+            const SizedBox(height: 16),
+
+            // === App name below logo ===
+            const AppNameText(
+              size: 26,
+              color: Colors.white,
             ),
-            const SizedBox(height: 48),
+
+            const SizedBox(height: 40),
+
+            // === Title ===
             Text(
-              // 👇 If title contains "Welcome to ", append appName
               data.title.contains("Welcome to ")
                   ? "${data.title}${AppBrand.appName}"
                   : data.title,
@@ -224,7 +214,10 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               textAlign: TextAlign.center,
               maxLines: 2,
             ),
+
             const SizedBox(height: 24),
+
+            // === Description ===
             Text(
               data.description,
               style: TextStyle(
