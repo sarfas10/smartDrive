@@ -418,8 +418,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
     return Container(
       padding: EdgeInsets.all(groupPad),
       decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6))),
-      ),
+        border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6)))),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -436,10 +435,27 @@ class _SlotsBlockState extends State<SlotsBlock> {
             builder: (context, constraints) {
               final columns = _columnsForWidth(constraints.maxWidth);
               final cardW = _cardWidth(constraints.maxWidth, columns, chipGap);
+
+              final slotCards = slots
+                  .map((s) => _buildSlotCard(context, s, cardW))
+                  .toList();
+
+              // NEW: single-column, center-aligned when width is too narrow for 2 columns
+              if (columns == 1) {
+                return Wrap(
+                  spacing: 0,
+                  runSpacing: chipGap,
+                  alignment: WrapAlignment.center,
+                  children: slotCards,
+                );
+              }
+
+              // Default: multi-column responsive grid
               return Wrap(
                 spacing: chipGap,
                 runSpacing: chipGap,
-                children: slots.map((s) => _buildSlotCard(context, s, cardW)).toList(),
+                alignment: WrapAlignment.start,
+                children: slotCards,
               );
             },
           ),
@@ -550,7 +566,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
                 // --- NEW: Costs display block ---
                 SizedBox(height: _scale(sw, 8, 10, 12)),
                 Container(
-                  padding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
                     color: isSelected ? Colors.white.withOpacity(0.12) : const Color(0xFFFAFAFA),
                     border: Border.all(
@@ -638,7 +654,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
               ],
             ),
 
-            // Only Delete button (removed Edit button)
+            // Only Delete button (kept)
             Positioned(
               top: 0,
               right: 0,
@@ -662,7 +678,6 @@ class _SlotsBlockState extends State<SlotsBlock> {
   }
 
   // ————————————————— Edit Additional Cost (kept) —————————————————
-  // NEW: admin-only inline editor for additional_cost
   Future<void> _editAdditionalCost(String docId, num? current) async {
     if (!isAdmin) return;
     final ctrl = TextEditingController(text: current?.toString() ?? '');
@@ -682,7 +697,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
             const SizedBox(height: 8),
             TextField(
               controller: ctrl,
-              keyboardType: TextInputType.numberWithOptions(decimal: true),
+              keyboardType: const TextInputType.numberWithOptions(decimal: true),
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
                 hintText: 'e.g. 250',
@@ -781,8 +796,10 @@ class _SlotsBlockState extends State<SlotsBlock> {
   // ————————————————— Helpers —————————————————
   static DateTime _atMidnight(DateTime d) => DateTime(d.year, d.month, d.day);
 
-  /// Breakpoints → columns (2–5)
+  /// Breakpoints → columns (1–5)
   int _columnsForWidth(double width) {
+    // NEW: allow a single-column layout for very narrow screens
+    if (width < 360) return 1;
     if (width >= 1200) return 5;
     if (width >= 900) return 4;
     if (width >= 600) return 3;
@@ -839,5 +856,5 @@ class _SlotsBlockState extends State<SlotsBlock> {
     final f = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
     if (v == null) return '—';
     return f.format(v);
-  }
+    }
 }
