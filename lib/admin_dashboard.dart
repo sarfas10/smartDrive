@@ -11,6 +11,7 @@ import 'notifications_block.dart';
 import 'attendance_block.dart';
 import 'settings_block.dart';
 import 'slots_block.dart';
+import 'plans_block.dart'; // New import for plans management
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -112,6 +113,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return const MaterialsBlock();
       case 'tests':
         return TestsBlock(onCreatePool: _openCreatePool);
+      case 'plans':
+        return const PlansBlock(); // New plans block
       case 'notifications':
         return const NotificationsBlock();
       case 'attendance':
@@ -226,6 +229,7 @@ class Sidebar extends StatelessWidget {
     (Icons.event_available_rounded, 'Slots', 'slots'),
     (Icons.menu_book_rounded, 'Materials', 'materials'),
     (Icons.quiz_rounded, 'Tests', 'tests'),
+    (Icons.payment_rounded, 'Plans', 'plans'), // New plans menu item
     (Icons.notifications_rounded, 'Notifications', 'notifications'),
     (Icons.checklist_rtl_rounded, 'Attendance', 'attendance'),
     (Icons.settings_rounded, 'Settings', 'settings'),

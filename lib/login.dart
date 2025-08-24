@@ -1,10 +1,11 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:smart_drive/admin_dashboard.dart';
 import 'package:smart_drive/instructor_dashboard.dart';
 import 'package:smart_drive/student_dashboard.dart';
@@ -21,13 +22,14 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen>
     with TickerProviderStateMixin {
-  // Background gradient animation (new)
+  // Background gradient animation
   late final AnimationController _bgController;
 
-  // Card/content animations (existing)
+  // Card/content animations
   late final AnimationController _cardController;
-  late final Animation<double> _cardAnimation;
-  late final Animation<Offset> _slideAnimation;
+  late final Animation<double> _scaleIn;
+  late final Animation<Offset> _slideUp;
+  late final Animation<double> _fadeIn;
 
   bool obscurePassword = true;
   bool rememberMe = false;
@@ -36,6 +38,10 @@ class _LoginScreenState extends State<LoginScreen>
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+
+  // Focus nodes for better keyboard handling
+  final _emailFocusNode = FocusNode();
+  final _passwordFocusNode = FocusNode();
 
   final _auth = FirebaseAuth.instance;
 
@@ -49,25 +55,29 @@ class _LoginScreenState extends State<LoginScreen>
     )..repeat();
 
     _cardController = AnimationController(
-      duration: const Duration(milliseconds: 800),
+      duration: const Duration(milliseconds: 600),
       vsync: this,
     );
 
-    _cardAnimation = CurvedAnimation(
+    _scaleIn = CurvedAnimation(
       parent: _cardController,
-      curve: Curves.elasticOut,
+      curve: Curves.easeOutBack,
     );
 
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.3),
+    _slideUp = Tween<Offset>(
+      begin: const Offset(0, 0.2),
       end: Offset.zero,
     ).animate(CurvedAnimation(
       parent: _cardController,
       curve: Curves.easeOutCubic,
     ));
 
-    _cardController.forward();
+    _fadeIn = CurvedAnimation(
+      parent: _cardController,
+      curve: Curves.easeOut,
+    );
 
+    _cardController.forward();
     _restoreRemembered();
   }
 
@@ -75,10 +85,10 @@ class _LoginScreenState extends State<LoginScreen>
     final prefs = await SharedPreferences.getInstance();
     final savedEmail = prefs.getString('sd_saved_email');
     final savedRemember = prefs.getBool('sd_remember_me') ?? false;
-    if (savedRemember && savedEmail != null && savedEmail.isNotEmpty) {
+    if (savedRemember && (savedEmail?.isNotEmpty ?? false)) {
       setState(() {
         rememberMe = true;
-        _emailController.text = savedEmail;
+        _emailController.text = savedEmail!;
       });
     }
   }
@@ -89,41 +99,67 @@ class _LoginScreenState extends State<LoginScreen>
     _cardController.dispose();
     _emailController.dispose();
     _passwordController.dispose();
+    _emailFocusNode.dispose();
+    _passwordFocusNode.dispose();
     super.dispose();
   }
 
+  bool _validateInputs() {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+
+    if (email.isEmpty) {
+      _showToast('Please enter your email', isError: true);
+      return false;
+    }
+
+    if (!email.contains('@') || !email.contains('.')) {
+      _showToast('Please enter a valid email address', isError: true);
+      return false;
+    }
+
+    if (password.isEmpty) {
+      _showToast('Please enter your password', isError: true);
+      return false;
+    }
+
+    return true;
+  }
+
   Future<void> _handleLogin() async {
-    if (!_formKey.currentState!.validate()) return;
+    // Dismiss keyboard
+    _emailFocusNode.unfocus();
+    _passwordFocusNode.unfocus();
+    
+    if (!_validateInputs()) return;
 
     setState(() => _isLoading = true);
 
     try {
-      final userCred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final userCred = await _auth.signInWithEmailAndPassword(
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
 
       final user = userCred.user;
       if (user == null) {
-        _showError('Could not sign in. Please try again.');
+        _showToast('Could not sign in. Please try again.', isError: true);
         return;
       }
 
-      // Fetch role from Firestore: users/{uid}.role
       final doc = await FirebaseFirestore.instance
           .collection('users')
           .doc(user.uid)
           .get();
 
       if (!doc.exists) {
-        _showError('Profile not found. Contact support.');
+        _showToast('Profile not found. Contact support.', isError: true);
         return;
       }
 
       final data = doc.data();
       final rawRole = (data?['role'] ?? '').toString().trim().toLowerCase();
 
-      // Optional: remember-me email save/clear
       final prefs = await SharedPreferences.getInstance();
       if (rememberMe) {
         await prefs.setString('sd_saved_email', _emailController.text.trim());
@@ -135,38 +171,33 @@ class _LoginScreenState extends State<LoginScreen>
 
       if (!mounted) return;
 
-      // Route by role
+      Widget next;
       switch (rawRole) {
         case 'student':
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) =>  StudentDashboard()),
-          );
+          next = StudentDashboard();
           break;
-
         case 'instructor':
-        case 'intsrtuctor': // tolerate the typo if it exists in stored data
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const InstructorDashboard()),
-          );
+        case 'intsrtuctor': // handle typo
+          next = const InstructorDashboard();
           break;
-
         case 'admin':
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const AdminDashboard()),
-          );
+          next = const AdminDashboard();
           break;
-
         default:
-          _showError('Unknown role "$rawRole". Contact support.');
-          break;
+          _showToast('Unknown role "$rawRole". Contact support.', isError: true);
+          return;
       }
+
+      await Navigator.of(context).pushReplacement(PageRouteBuilder(
+        pageBuilder: (_, __, ___) => next,
+        transitionsBuilder: (_, animation, __, child) =>
+            FadeTransition(opacity: animation, child: child),
+        transitionDuration: const Duration(milliseconds: 220),
+      ));
     } on FirebaseAuthException catch (e) {
-      _showError(_mapAuthError(e));
+      _showToast(_mapAuthError(e), isError: true);
     } catch (_) {
-      _showError('Something went wrong. Please try again.');
+      _showToast('Something went wrong. Please try again.', isError: true);
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -192,52 +223,61 @@ class _LoginScreenState extends State<LoginScreen>
   }
 
   void _navigateToRegister() {
+    _emailFocusNode.unfocus();
+    _passwordFocusNode.unfocus();
     Navigator.push(
       context,
       MaterialPageRoute(builder: (context) => const RegisterScreen()),
     );
   }
 
-  void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
+  void _showToast(String message, {bool isError = false}) {
+    final overlay = Overlay.of(context);
+    late OverlayEntry overlayEntry;
+    
+    overlayEntry = OverlayEntry(
+      builder: (context) => _ToastWidget(
+        message: message,
+        isError: isError,
+        onDismiss: () => overlayEntry.remove(),
       ),
     );
+    
+    overlay.insert(overlayEntry);
+    
+    // Auto dismiss after 3 seconds
+    Future.delayed(const Duration(seconds: 3), () {
+      if (overlayEntry.mounted) {
+        overlayEntry.remove();
+      }
+    });
   }
 
   Future<void> _sendResetLink() async {
     final email = _emailController.text.trim();
     if (email.isEmpty || !email.contains('@')) {
-      _showError('Enter your email above before tapping reset.');
+      _showToast('Enter your email above before tapping reset.', isError: true);
       return;
     }
     try {
       await _auth.sendPasswordResetEmail(email: email);
-      _showError('Password reset email sent to $email');
+      _showToast('Password reset email sent to $email');
     } on FirebaseAuthException catch (e) {
-      _showError(_mapAuthError(e));
+      _showToast(_mapAuthError(e), isError: true);
     } catch (_) {
-      _showError('Could not send reset email. Try again.');
+      _showToast('Could not send reset email. Try again.', isError: true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      // Prevent the body from resizing when keyboard appears
+      resizeToAvoidBottomInset: false,
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // 🔮 Animated multi-blob gradient background
-          RepaintBoundary(
-            child: CustomPaint(
-              painter: _BlobGradientPainter(animation: _bgController),
-              child: const SizedBox.expand(),
-            ),
-          ),
-
-          // Optional soft vignette for depth
+          const RepaintBoundary(child: _AnimatedBackground()),
           IgnorePointer(
             child: DecoratedBox(
               decoration: BoxDecoration(
@@ -246,38 +286,45 @@ class _LoginScreenState extends State<LoginScreen>
                   radius: 1.2,
                   colors: [
                     Colors.transparent,
-                    Colors.black.withOpacity(0.05),
+                    Colors.black.withValues(alpha: 0.05),
                   ],
                   stops: const [0.7, 1.0],
                 ),
               ),
             ),
           ),
-
-          // Foreground content
-          SafeArea(
-            child: SizedBox.expand(
-              child: SingleChildScrollView(
-                padding: const EdgeInsets.all(24.0),
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    minHeight: MediaQuery.of(context).size.height -
-                        MediaQuery.of(context).padding.top -
-                        MediaQuery.of(context).padding.bottom,
-                  ),
-                  child: IntrinsicHeight(
-                    child: SlideTransition(
-                      position: _slideAnimation,
-                      child: ScaleTransition(
-                        scale: _cardAnimation,
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            _buildLogo(),
-                            const SizedBox(height: 32),
-                            _buildLoginCard(),
-                          ],
-                        ),
+          // Use Positioned instead of SafeArea for better control
+          Positioned(
+            top: MediaQuery.of(context).padding.top,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: SingleChildScrollView(
+              // Add keyboard padding manually
+              padding: EdgeInsets.only(
+                left: 24.0,
+                right: 24.0,
+                top: 24.0,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 24.0,
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: MediaQuery.of(context).size.height - 
+                             MediaQuery.of(context).padding.vertical - 48,
+                ),
+                child: FadeTransition(
+                  opacity: _fadeIn,
+                  child: SlideTransition(
+                    position: _slideUp,
+                    child: ScaleTransition(
+                      scale: _scaleIn,
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildLogo(),
+                          const SizedBox(height: 28),
+                          _buildLoginCard(),
+                        ],
                       ),
                     ),
                   ),
@@ -285,12 +332,14 @@ class _LoginScreenState extends State<LoginScreen>
               ),
             ),
           ),
-
           if (_isLoading)
-            Container(
-              color: Colors.black.withOpacity(0.25),
-              child: const Center(
-                child: CircularProgressIndicator(),
+            IgnorePointer(
+              ignoring: true,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.25),
+                ),
+                child: const Center(child: CircularProgressIndicator()),
               ),
             ),
         ],
@@ -298,21 +347,21 @@ class _LoginScreenState extends State<LoginScreen>
     );
   }
 
-  // === BRANDING: Plain logo + app name (no glassmorphism, no car icon) ===
+  // === BRANDING ===
   Widget _buildLogo() {
     return Column(
       children: const [
-        AppLogo(size: 100),
-        SizedBox(height: 12),
-        AppNameText(size: 28, color: Colors.white),
-        SizedBox(height: 8),
+        AppLogo(size: 92),
+        SizedBox(height: 10),
+        AppNameText(size: 26, color: Colors.white),
+        SizedBox(height: 6),
         Text(
           'Welcome Back',
           style: TextStyle(
-            fontSize: 20,
+            fontSize: 18,
             fontWeight: FontWeight.w600,
             color: Colors.white,
-            letterSpacing: 0.8,
+            letterSpacing: 0.6,
           ),
         ),
       ],
@@ -323,46 +372,58 @@ class _LoginScreenState extends State<LoginScreen>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.2),
+        color: Colors.white.withValues(alpha: 0.18),
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
-            blurRadius: 20,
+            color: Colors.black.withValues(alpha: 0.10),
+            blurRadius: 18,
             offset: const Offset(0, 10),
           ),
         ],
       ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            const Text(
-              'Sign In',
-              style: TextStyle(
-                fontSize: 21,
-                fontWeight: FontWeight.bold,
-                color: Colors.white,
+      child: FocusTraversalGroup(
+        policy: OrderedTraversalPolicy(),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Sign In',
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: Colors.white,
+                  letterSpacing: 0.2,
+                ),
+                textAlign: TextAlign.center,
               ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 24),
-            _buildTextField(
-              controller: _emailController,
-              label: 'Email',
-              icon: Icons.email_outlined,
-              keyboardType: TextInputType.emailAddress,
-            ),
-            const SizedBox(height: 12),
-            _buildPasswordField(),
-            const SizedBox(height: 12),
-            _buildRememberMeRow(),
-            const SizedBox(height: 20),
-            _buildLoginButton(),
-            const SizedBox(height: 12),
-            _buildRegisterButton(),
-          ],
+              const SizedBox(height: 20),
+
+              // Email field
+              _buildTextField(
+                controller: _emailController,
+                focusNode: _emailFocusNode,
+                hint: 'Email',
+                icon: Icons.email_outlined,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                onFieldSubmitted: (_) => _passwordFocusNode.requestFocus(),
+              ),
+              const SizedBox(height: 16),
+
+              // Password field
+              _buildPasswordField(),
+              const SizedBox(height: 16),
+
+              _buildRememberMeRow(),
+              const SizedBox(height: 18),
+              _buildLoginButton(),
+              const SizedBox(height: 10),
+              _buildRegisterButton(),
+            ],
+          ),
         ),
       ),
     );
@@ -370,43 +431,50 @@ class _LoginScreenState extends State<LoginScreen>
 
   Widget _buildTextField({
     required TextEditingController controller,
-    required String label,
+    required FocusNode focusNode,
+    required String hint,
     required IconData icon,
     TextInputType keyboardType = TextInputType.text,
+    TextInputAction textInputAction = TextInputAction.done,
+    Function(String)? onFieldSubmitted,
   }) {
     return Container(
       height: 48,
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
+        color: Colors.white.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.2),
-          width: 1,
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.20), width: 1),
       ),
-      child: TextFormField(
+      child: TextField(
         controller: controller,
+        focusNode: focusNode,
         keyboardType: keyboardType,
-        style: const TextStyle(color: Colors.white, fontSize: 14),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle:
-              TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 14),
-          prefixIcon:
-              Icon(icon, color: Colors.white.withOpacity(0.7), size: 18),
-          border: InputBorder.none,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        textInputAction: textInputAction,
+        autocorrect: false,
+        enableSuggestions: false,
+        textAlign: TextAlign.left, // Left align text
+        style: const TextStyle(
+          color: Colors.white, 
+          fontSize: 14,
+          decorationThickness: 0,
         ),
-        validator: (value) {
-          if (value == null || value.isEmpty) {
-            return 'Please enter your $label';
-          }
-          if (label == 'Email' && !value.contains('@')) {
-            return 'Please enter a valid email';
-          }
-          return null;
-        },
+        cursorColor: Colors.white,
+        cursorWidth: 2,
+        decoration: InputDecoration(
+          hintText: hint,
+          hintStyle: TextStyle(
+            color: Colors.white.withValues(alpha: 0.72),
+            fontSize: 14,
+          ),
+          prefixIcon: Icon(
+            icon, 
+            color: Colors.white.withValues(alpha: 0.72), 
+            size: 18
+          ),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        ),
+        onSubmitted: onFieldSubmitted,
       ),
     );
   }
@@ -415,45 +483,49 @@ class _LoginScreenState extends State<LoginScreen>
     return Container(
       height: 48,
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
+        color: Colors.white.withValues(alpha: 0.10),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: Colors.white.withOpacity(0.2),
-          width: 1,
-        ),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.20), width: 1),
       ),
-      child: TextFormField(
+      child: TextField(
         controller: _passwordController,
+        focusNode: _passwordFocusNode,
         obscureText: obscurePassword,
-        style: const TextStyle(color: Colors.white, fontSize: 14),
+        autocorrect: false,
+        enableSuggestions: false,
+        textInputAction: TextInputAction.done,
+        textAlign: TextAlign.left, // Left align text
+        onSubmitted: (_) => _handleLogin(),
+        style: const TextStyle(
+          color: Colors.white, 
+          fontSize: 14,
+          decorationThickness: 0,
+        ),
+        cursorColor: Colors.white,
+        cursorWidth: 2,
         decoration: InputDecoration(
-          labelText: 'Password',
-          labelStyle:
-              TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 14),
-          prefixIcon: Icon(Icons.lock_outline,
-              color: Colors.white.withOpacity(0.7), size: 18),
+          hintText: 'Password',
+          hintStyle: TextStyle(
+            color: Colors.white.withValues(alpha: 0.72), 
+            fontSize: 14
+          ),
+          prefixIcon: Icon(
+            Icons.lock_outline,
+            color: Colors.white.withValues(alpha: 0.72),
+            size: 18,
+          ),
           suffixIcon: IconButton(
+            splashRadius: 18,
             icon: Icon(
               obscurePassword ? Icons.visibility_off : Icons.visibility,
               size: 18,
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withValues(alpha: 0.72),
             ),
-            onPressed: () {
-              setState(() {
-                obscurePassword = !obscurePassword;
-              });
-            },
+            onPressed: () => setState(() => obscurePassword = !obscurePassword),
           ),
           border: InputBorder.none,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         ),
-        validator: (value) {
-          if (value == null || value.isEmpty) {
-            return 'Please enter your password';
-          }
-          return null;
-        },
       ),
     );
   }
@@ -463,30 +535,33 @@ class _LoginScreenState extends State<LoginScreen>
       children: [
         Checkbox(
           value: rememberMe,
-          onChanged: (value) {
-            setState(() {
-              rememberMe = value ?? false;
-            });
-          },
-          fillColor: MaterialStateProperty.all(
-            Colors.white.withOpacity(0.8),
-          ),
+          onChanged: (value) => setState(() => rememberMe = value ?? false),
+          fillColor: MaterialStateProperty.resolveWith((states) {
+            if (states.contains(MaterialState.selected)) {
+              return Colors.white.withValues(alpha: 0.95);
+            }
+            return Colors.white.withValues(alpha: 0.8);
+          }),
           checkColor: const Color(0xFF6366F1),
+          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          visualDensity: VisualDensity.compact,
         ),
         Text(
           'Remember me',
           style: TextStyle(
-            color: Colors.white.withOpacity(0.8),
+            color: Colors.white.withValues(alpha: 0.85),
             fontSize: 13,
           ),
         ),
         const Spacer(),
         TextButton(
+          style: TextButton.styleFrom(
+            foregroundColor: Colors.white,
+          ),
           onPressed: _sendResetLink,
-          child: Text(
+          child: const Text(
             'Forgot Password?',
             style: TextStyle(
-              color: Colors.white.withOpacity(0.9),
               fontSize: 13,
               fontWeight: FontWeight.w600,
               decoration: TextDecoration.underline,
@@ -503,35 +578,47 @@ class _LoginScreenState extends State<LoginScreen>
       child: ElevatedButton(
         onPressed: _isLoading ? null : _handleLogin,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white.withOpacity(0.9),
+          backgroundColor: Colors.white.withValues(alpha: 0.95),
           foregroundColor: const Color(0xFF6366F1),
           elevation: 8,
-          shadowColor: Colors.black.withOpacity(0.3),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(14),
-          ),
+          shadowColor: Colors.black.withValues(alpha: 0.30),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            if (_isLoading) ...[
-              const SizedBox(
-                height: 20,
-                width: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              ),
-              const SizedBox(width: 10),
-            ],
-            const Text(
-              'Sign In',
-              style: TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-            const SizedBox(width: 6),
-            const Icon(Icons.arrow_forward_rounded, size: 18),
-          ],
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          transitionBuilder: (child, anim) =>
+              FadeTransition(opacity: anim, child: child),
+          child: _isLoading
+              ? Row(
+                  key: const ValueKey('loading'),
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    SizedBox(
+                      height: 20,
+                      width: 20,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: 10),
+                    Text(
+                      'Signing you in…',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                )
+              : Row(
+                  key: const ValueKey('signin'),
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Text(
+                      'Sign In',
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(width: 6),
+                    Icon(Icons.arrow_forward_rounded, size: 18),
+                  ],
+                ),
         ),
       ),
     );
@@ -542,55 +629,192 @@ class _LoginScreenState extends State<LoginScreen>
       onPressed: _navigateToRegister,
       child: RichText(
         text: TextSpan(
-          style:
-              TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13),
+          style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
           children: const [
             TextSpan(text: "Don't have an account? "),
             TextSpan(
               text: 'Sign Up',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.bold,
-              ),
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
           ],
         ),
       ),
     );
   }
+}
 
-  void _showSuccessDialog(String title) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: Colors.white.withOpacity(0.95),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(20),
-          ),
-          title: Row(
-            children: const [
-              Icon(Icons.check_circle, color: Colors.green, size: 28),
-              SizedBox(width: 12),
-              Text('Welcome Back!'),
-            ],
-          ),
-          content: Text(title),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text('Continue'),
+// Custom Toast Widget
+class _ToastWidget extends StatefulWidget {
+  final String message;
+  final bool isError;
+  final VoidCallback onDismiss;
+
+  const _ToastWidget({
+    required this.message,
+    required this.isError,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_ToastWidget> createState() => _ToastWidgetState();
+}
+
+class _ToastWidgetState extends State<_ToastWidget>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _slideAnimation;
+  late Animation<double> _fadeAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      duration: const Duration(milliseconds: 300),
+      vsync: this,
+    );
+
+    _slideAnimation = Tween<Offset>(
+      begin: const Offset(0, -1),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+    ));
+
+    _fadeAnimation = Tween<double>(
+      begin: 0,
+      end: 1,
+    ).animate(CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOut,
+    ));
+
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _dismiss() async {
+    await _controller.reverse();
+    widget.onDismiss();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 16,
+      left: 16,
+      right: 16,
+      child: FadeTransition(
+        opacity: _fadeAnimation,
+        child: SlideTransition(
+          position: _slideAnimation,
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: widget.isError 
+                    ? Colors.red.shade600.withValues(alpha: 0.95)
+                    : Colors.green.shade600.withValues(alpha: 0.95),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.15),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    widget.isError ? Icons.error_outline : Icons.check_circle_outline,
+                    color: Colors.white,
+                    size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      widget.message,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: _dismiss,
+                    child: const Icon(
+                      Icons.close,
+                      color: Colors.white,
+                      size: 18,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ],
-        );
-      },
+          ),
+        ),
+      ),
     );
   }
 }
 
-/// ===== Animated multi-blob gradient painter (same as onboarding) =====
+/// ===== Lightweight animated background =====
+class _AnimatedBackground extends StatelessWidget {
+  const _AnimatedBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return const _BlobGradient(animDuration: Duration(seconds: 18));
+  }
+}
+
+class _BlobGradient extends StatefulWidget {
+  final Duration animDuration;
+  const _BlobGradient({required this.animDuration});
+
+  @override
+  State<_BlobGradient> createState() => _BlobGradientState();
+}
+
+class _BlobGradientState extends State<_BlobGradient>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(vsync: this, duration: widget.animDuration)
+      ..repeat();
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (_, __) => CustomPaint(
+          painter: _BlobGradientPainter(animation: _ctrl),
+          child: const SizedBox.expand(),
+        ),
+      ),
+    );
+  }
+}
+
 class _BlobGradientPainter extends CustomPainter {
   final Animation<double> animation;
 
@@ -608,7 +832,7 @@ class _BlobGradientPainter extends CustomPainter {
     final basePaint = Paint()..color = const Color(0xFF0B1020);
     canvas.drawRect(Offset.zero & size, basePaint);
 
-    // Centers drifting over time
+    // Drift centers
     final c1 = Offset(
       _wave(time, amp: 0.30, phase: 0.00) * size.width,
       _wave(time, amp: 0.22, phase: 0.15) * size.height,
@@ -638,7 +862,7 @@ class _BlobGradientPainter extends CustomPainter {
       ..shader = ui.Gradient.radial(
         c1,
         r1,
-        [const Color(0xFF6D28D9).withOpacity(0.65), const Color(0x006D28D9)],
+        [const Color(0xFF6D28D9).withValues(alpha: 0.65), const Color(0x006D28D9)],
         const [0.0, 1.0],
       )
       ..blendMode = BlendMode.plus;
@@ -646,7 +870,7 @@ class _BlobGradientPainter extends CustomPainter {
       ..shader = ui.Gradient.radial(
         c2,
         r2,
-        [const Color(0xFF2563EB).withOpacity(0.60), const Color(0x002563EB)],
+        [const Color(0xFF2563EB).withValues(alpha: 0.60), const Color(0x002563EB)],
         const [0.0, 1.0],
       )
       ..blendMode = BlendMode.plus;
@@ -654,7 +878,7 @@ class _BlobGradientPainter extends CustomPainter {
       ..shader = ui.Gradient.radial(
         c3,
         r3,
-        [const Color(0xFFF43F5E).withOpacity(0.55), const Color(0x00F43F5E)],
+        [const Color(0xFFF43F5E).withValues(alpha: 0.55), const Color(0x00F43F5E)],
         const [0.0, 1.0],
       )
       ..blendMode = BlendMode.plus;
@@ -662,7 +886,7 @@ class _BlobGradientPainter extends CustomPainter {
       ..shader = ui.Gradient.radial(
         c4,
         r4,
-        [const Color(0xFF06B6D4).withOpacity(0.55), const Color(0x0006B6D4)],
+        [const Color(0xFF06B6D4).withValues(alpha: 0.55), const Color(0x0006B6D4)],
         const [0.0, 1.0],
       )
       ..blendMode = BlendMode.plus;
@@ -677,7 +901,7 @@ class _BlobGradientPainter extends CustomPainter {
       ..shader = ui.Gradient.linear(
         const Offset(0, 0),
         Offset(0, size.height),
-        [Colors.white.withOpacity(0.05), Colors.transparent],
+        [Colors.white.withValues(alpha: 0.05), Colors.transparent],
         const [0.0, 1.0],
       )
       ..blendMode = BlendMode.plus;

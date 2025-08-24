@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:smart_drive/booking.dart';
+
 
 class UserSlotBooking extends StatefulWidget {
   const UserSlotBooking({super.key});
@@ -624,7 +626,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
             ),
             const SizedBox(width: 16),
             ElevatedButton(
-              onPressed: _isBooking ? null : _bookSlot,
+              onPressed: _isBooking ? null : _proceedToBooking,
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF10B981),
                 foregroundColor: Colors.white,
@@ -651,11 +653,11 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                     ),
                     const SizedBox(width: 8),
                   ] else ...[
-                    Icon(Icons.check_circle, size: _scale(sw, 16, 18, 20)),
+                    Icon(Icons.map_outlined, size: _scale(sw, 16, 18, 20)),
                     const SizedBox(width: 8),
                   ],
                   Text(
-                    _isBooking ? 'Booking...' : 'Book Slot',
+                    _isBooking ? 'Loading...' : 'Book Slot',
                     style: TextStyle(
                       fontSize: _scale(sw, 14, 16, 18) * ts,
                       fontWeight: FontWeight.w600,
@@ -670,8 +672,8 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     );
   }
 
-  // ————————————————— Book Slot Function —————————————————
-  Future<void> _bookSlot() async {
+  // ————————————————— Navigate to Booking Page —————————————————
+  Future<void> _proceedToBooking() async {
     if (selectedSlotId == null || _isBooking) return;
 
     final user = FirebaseAuth.instance.currentUser;
@@ -689,7 +691,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     });
 
     try {
-      // Check if slot is still available before booking
+      // Check if slot is still available before proceeding
       final existingBooking = await FirebaseFirestore.instance
           .collection('bookings')
           .where('slot_id', isEqualTo: selectedSlotId)
@@ -705,54 +707,46 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
             ),
           );
         }
-        return;
-      }
-
-      // Create booking record
-      final bookingRef = FirebaseFirestore.instance.collection('bookings').doc();
-      await bookingRef.set({
-        'booking_id': bookingRef.id,
-        'slot_id': selectedSlotId,
-        'user_id': user.uid,
-        'booking_date': FieldValue.serverTimestamp(),
-        'slot_date': Timestamp.fromDate(selectedDate),
-        'status': 'confirmed',
-        'created_at': FieldValue.serverTimestamp(),
-      });
-
-      if (context.mounted) {
         setState(() {
           selectedSlotId = null;
           _isBooking = false;
         });
+        return;
+      }
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: const Text('Slot booked successfully!'),
-            backgroundColor: const Color(0xFF10B981),
-            action: SnackBarAction(
-              label: 'View Bookings',
-              textColor: Colors.white,
-              onPressed: () {
-                // Navigate to bookings page
-                // Navigator.pushNamed(context, '/my-bookings');
-              },
+      // Navigate to BookingPage
+      if (context.mounted) {
+        final result = await Navigator.push<bool>(
+          context,
+          MaterialPageRoute(
+            builder: (context) => BookingPage(
+              userId: user.uid,
+              slotId: selectedSlotId!,
             ),
           ),
         );
+
+        // If booking was successful, clear the selection
+        if (result == true) {
+          setState(() {
+            selectedSlotId = null;
+          });
+        }
       }
     } catch (e) {
       if (context.mounted) {
-        setState(() {
-          _isBooking = false;
-        });
-
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text('Error booking slot: $e'),
+            content: Text('Error: $e'),
             backgroundColor: const Color(0xFFDC2626),
           ),
         );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isBooking = false;
+        });
       }
     }
   }

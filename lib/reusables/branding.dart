@@ -10,7 +10,7 @@ class AppBrand {
   /// flutter:
   ///   assets:
   ///     - assets/logo.png
-  static const String? assetLogo = 'assets/logo.png';
+  static const String? assetLogo = 'assets/appLogo.jpg';
 }
 
 /// ===== Brand Colors =====
