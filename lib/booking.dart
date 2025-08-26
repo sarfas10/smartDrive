@@ -1,5 +1,5 @@
+// booking_page that include payments + plan-based free booking logic
 
-// booking_page.dart
 import 'dart:async';
 import 'dart:convert';
 
@@ -56,6 +56,12 @@ class _BookingPageState extends State<BookingPage> {
   // Slot data (kept for later save)
   Map<String, dynamic>? _slotData;
 
+  // User plan/slots info
+  String? _activePlanId;
+  int _planSlots = 0;        // slots from plans/{planId}.slots
+  int _slotsUsed = 0;        // user_plans/{userId}.slots_used (default 0)
+  bool _isFreeByPlan = false; // computed: planSlots>0 && slotsUsed<planSlots
+
   // Free-radius visibility + hint bubble
   bool _isRadiusVisible = true;
   bool _showHintBubble = false;
@@ -83,6 +89,7 @@ class _BookingPageState extends State<BookingPage> {
   Future<void> _loadInitialData() async {
     setState(() => _isDataLoading = true);
     try {
+      // ---- Settings (office location, free radius, surcharge) ----
       final settingsDoc = await FirebaseFirestore.instance
           .collection('settings')
           .doc('app_settings')
@@ -100,6 +107,7 @@ class _BookingPageState extends State<BookingPage> {
         _refreshRadiusOverlay();
       }
 
+      // ---- Slot details (kept) ----
       final slotDoc = await FirebaseFirestore.instance
           .collection('slots')
           .doc(widget.slotId)
@@ -108,6 +116,53 @@ class _BookingPageState extends State<BookingPage> {
       if (slotDoc.exists) {
         _slotData = slotDoc.data()!;
       }
+
+      // ---- User plan → plan slots and slots_used ----
+      // user_plans/{userId} contains planId and optionally slots_used
+      final userPlanDoc = await FirebaseFirestore.instance
+          .collection('user_plans')
+          .doc(widget.userId)
+          .get();
+
+      if (userPlanDoc.exists) {
+        final up = userPlanDoc.data()!;
+        _activePlanId = (up['planId'] ?? '').toString().trim().isEmpty
+            ? null
+            : (up['planId'] as String);
+
+        // slots_used may be missing; treat as 0
+        final used = (up['slots_used'] ?? 0);
+        if (used is num) {
+          _slotsUsed = used.toInt();
+        } else {
+          _slotsUsed = 0;
+        }
+
+        // If we have a planId, load the plan to read its 'slots'
+        if (_activePlanId != null) {
+          final planDoc = await FirebaseFirestore.instance
+              .collection('plans')
+              .doc(_activePlanId)
+              .get();
+          if (planDoc.exists) {
+            final pd = planDoc.data()!;
+            final slots = (pd['slots'] ?? 0);
+            if (slots is num) {
+              _planSlots = slots.toInt();
+            } else {
+              _planSlots = 0;
+            }
+          }
+        }
+      } else {
+        // no user_plan doc → no plan
+        _activePlanId = null;
+        _planSlots = 0;
+        _slotsUsed = 0;
+      }
+
+      // Compute free-by-plan eligibility
+      _isFreeByPlan = (_planSlots != 0) && (_slotsUsed < _planSlots);
 
       setState(() => _isDataLoading = false);
     } catch (e) {
@@ -304,8 +359,13 @@ class _BookingPageState extends State<BookingPage> {
 
   double get _vehicleCost => _numToDouble(_slotData?['vehicle_cost']);
   double get _additionalCost => _numToDouble(_slotData?['additional_cost']);
-  double get _totalCost =>
+
+  // Base total cost before plan logic
+  double get _baseTotalCost =>
       double.parse((_vehicleCost + _additionalCost + _surcharge).toStringAsFixed(2));
+
+  // Final payable after plan benefit
+  double get _finalPayable => _isFreeByPlan ? 0.0 : _baseTotalCost;
 
   Future<void> _proceedToPay() async {
     if (_selectedLocation == null) {
@@ -322,14 +382,26 @@ class _BookingPageState extends State<BookingPage> {
         'boarding_point_longitude': _selectedLocation!.longitude,
         'distance_km': _distanceKm,
         'surcharge': _surcharge,
-        'total_cost': _totalCost,
+        'vehicle_cost': _vehicleCost,
+        'additional_cost': _additionalCost,
+        'total_cost': _finalPayable, // <-- reflect plan-based free
         'status': 'pending',
         'created_at': FieldValue.serverTimestamp(),
+
+        // Extra audit fields (useful later)
+        'plan_id': _activePlanId,
+        'plan_slots': _planSlots,
+        'plan_slots_used': _slotsUsed,
+        'free_by_plan': _isFreeByPlan,
       };
 
       await FirebaseFirestore.instance.collection('bookings').add(bookingData);
 
-      _snack('Booking created successfully!', color: Colors.green);
+      _snack(
+        _isFreeByPlan ? 'Booking created successfully (FREE under your plan)!'
+                      : 'Booking created successfully!',
+        color: Colors.green,
+      );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       _snack('Error creating booking: $e', color: Colors.red);
@@ -470,7 +542,7 @@ class _BookingPageState extends State<BookingPage> {
             additionalCost: _additionalCost,
             surcharge: _surcharge,
             distanceKm: _distanceKm,
-            totalCost: _totalCost,
+            totalCost: _finalPayable, // <-- show final payable (free if eligible)
             freeRadiusKm: _freeRadiusKm,
             isBooking: _isBooking,
             onProceed: _proceedToPay,
@@ -478,15 +550,15 @@ class _BookingPageState extends State<BookingPage> {
             isRadiusVisible: _isRadiusVisible,
             onToggleRadius: _toggleRadiusVisibility,
             showHintBubble: _showHintBubble,
+            isFreeByPlan: _isFreeByPlan,           // for UI badge/note
+            planSlots: _planSlots,
+            slotsUsed: _slotsUsed,
           ),
         ],
       ),
     );
   }
 }
-
-// ... (rest of _LoadingOverlay, _RoundedButtonsColumn, _RadiusToggleButton, 
-// _SpeechBubble, _TrianglePointer, and _SummarySheet remain as in my previous response)
 
 /// Translucent blocking overlay
 class _LoadingOverlay extends StatelessWidget {
@@ -690,6 +762,11 @@ class _SummarySheet extends StatelessWidget {
     required this.isRadiusVisible,
     required this.onToggleRadius,
     required this.showHintBubble,
+
+    // new plan-based props
+    required this.isFreeByPlan,
+    required this.planSlots,
+    required this.slotsUsed,
   });
 
   final Map<String, dynamic>? slotData;
@@ -705,6 +782,10 @@ class _SummarySheet extends StatelessWidget {
   final bool isRadiusVisible;
   final VoidCallback onToggleRadius;
   final bool showHintBubble;
+
+  final bool isFreeByPlan;
+  final int planSlots;
+  final int slotsUsed;
 
   @override
   Widget build(BuildContext context) {
@@ -764,6 +845,35 @@ class _SummarySheet extends StatelessWidget {
 
               const SizedBox(height: 16),
 
+              // === Plan Benefit Note (if free) ===
+              if (isFreeByPlan) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.green[50],
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.green[200]!),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.card_membership, size: 16, color: Colors.green[800]),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'Free under your plan: ${planSlots - slotsUsed} of $planSlots slots remaining after this booking.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: Colors.green[800],
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+
               // === Cost Breakdown ===
               Container(
                 padding: const EdgeInsets.all(16),
@@ -785,22 +895,27 @@ class _SummarySheet extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
 
-                    _costRow('Vehicle Cost', vehicleCost),
+                    _costRow('Vehicle Cost', vehicleCost, strike: isFreeByPlan),
                     const SizedBox(height: 8),
-                    _costRow('Additional Cost', additionalCost),
+                    _costRow('Additional Cost', additionalCost, strike: isFreeByPlan),
 
-                    if (surcharge > 0) ...[
-                      const SizedBox(height: 8),
-                      _costRow(
-                        'Distance Surcharge (${distanceKm.toStringAsFixed(2)} km)',
-                        surcharge,
-                        isHighlight: true,
-                      ),
+                    if (!isFreeByPlan) ...[
+                      if (surcharge > 0) ...[
+                        const SizedBox(height: 8),
+                        _costRow(
+                          'Distance Surcharge (${distanceKm.toStringAsFixed(2)} km)',
+                          surcharge,
+                          isHighlight: true,
+                        ),
+                      ] else ...[
+                        const SizedBox(height: 8),
+                        _noteRow(
+                          'Within free radius (${distanceKm.toStringAsFixed(2)} km, free up to ${freeRadiusKm.toStringAsFixed(1)} km)',
+                        ),
+                      ],
                     ] else ...[
                       const SizedBox(height: 8),
-                      _noteRow(
-                        'Within free radius (${distanceKm.toStringAsFixed(2)} km, free up to ${freeRadiusKm.toStringAsFixed(1)} km)',
-                      ),
+                      _noteRow('Covered under your plan — no charges'),
                     ],
 
                     const SizedBox(height: 12),
@@ -820,11 +935,13 @@ class _SummarySheet extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          '₹${totalCost.toStringAsFixed(2)}',
-                          style: const TextStyle(
+                          isFreeByPlan
+                              ? 'FREE'
+                              : '₹${totalCost.toStringAsFixed(2)}',
+                          style: TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
-                            color: Colors.green,
+                            color: isFreeByPlan ? Colors.green : Colors.green,
                           ),
                         ),
                       ],
@@ -858,9 +975,9 @@ class _SummarySheet extends StatelessWidget {
                             valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
                           ),
                         )
-                      : const Text(
-                          'Proceed to Pay',
-                          style: TextStyle(
+                      : Text(
+                          isFreeByPlan ? 'Confirm Booking' : 'Proceed to Pay',
+                          style: const TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
@@ -903,7 +1020,8 @@ class _SummarySheet extends StatelessWidget {
   }
 
   // ---- helpers ----
-  Widget _costRow(String label, double amount, {bool isHighlight = false}) {
+  Widget _costRow(String label, double amount, {bool isHighlight = false, bool strike = false}) {
+    final valueText = '₹${amount.toStringAsFixed(2)}';
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
@@ -918,11 +1036,14 @@ class _SummarySheet extends StatelessWidget {
           ),
         ),
         Text(
-          '₹${amount.toStringAsFixed(2)}',
+          valueText,
           style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w600,
             color: isHighlight ? Colors.orange[700] : Colors.black87,
+            decoration: strike ? TextDecoration.lineThrough : TextDecoration.none,
+            decorationColor: Colors.redAccent,
+            decorationThickness: 2,
           ),
         ),
       ],

@@ -44,6 +44,11 @@ class _SlotsBlockState extends State<SlotsBlock> {
         isAdmin = (role == 'admin');
         _roleLoaded = true;
       });
+
+      // Run purge once when an admin opens this screen
+      if (isAdmin) {
+        Future.microtask(_purgeExpiredSlots);
+      }
     } catch (_) {
       setState(() {
         isAdmin = false;
@@ -269,8 +274,8 @@ class _SlotsBlockState extends State<SlotsBlock> {
 
         // Sort by parsed start time
         docs.sort((a, b) {
-          final sa = _parseStartTime((a.data() as Map)['slot_time']?.toString() ?? '');
-          final sb = _parseStartTime((b.data() as Map)['slot_time']?.toString() ?? '');
+          final sa = _parseStartTime((a.data() as Map<String, dynamic>)['slot_time']?.toString() ?? '');
+          final sb = _parseStartTime((b.data() as Map<String, dynamic>)['slot_time']?.toString() ?? '');
           return sa.compareTo(sb);
         });
 
@@ -390,79 +395,87 @@ class _SlotsBlockState extends State<SlotsBlock> {
   }
 
   // ————————————————— Group section —————————————————
-  Widget _buildTimeSlotGroup(BuildContext context, String period, List<QueryDocumentSnapshot> slots) {
-    final sw = MediaQuery.of(context).size.width;
-    final emojiSize = _scale(sw, 14, 16, 18);
-    final titleSize = _scale(sw, 13, 14, 16);
-    final groupPad = _scale(sw, 12, 16, 20);
-    final chipGap = _scale(sw, 10, 12, 14);
+Widget _buildTimeSlotGroup(
+  BuildContext context,
+  String period,
+  List<QueryDocumentSnapshot> slots,
+) {
+  final sw = MediaQuery.of(context).size.width;
+  // final emojiSize = _scale(sw, 14, 16, 18); // (unused; remove if you don't need it)
+  final titleSize = _scale(sw, 13, 14, 16);
+  final groupPad = _scale(sw, 12, 16, 20);
+  final chipGap = _scale(sw, 10, 12, 14);
 
-    String emoji = '🌅';
-    String timeRange = '';
+  String emoji = '🌅';
+  String timeRange = '';
 
-    switch (period) {
-      case 'Morning':
-        emoji = '🌅';
-        timeRange = '(6:00 AM - 12:00 PM)';
-        break;
-      case 'Afternoon':
-        emoji = '☀️';
-        timeRange = '(12:00 PM - 5:00 PM)';
-        break;
-      case 'Evening':
-        emoji = '🌇';
-        timeRange = '(5:00 PM - 10:00 PM)';
-        break;
-    }
+  switch (period) {
+    case 'Morning':
+      emoji = '🌅';
+      timeRange = '(6:00 AM - 12:00 PM)';
+      break;
+    case 'Afternoon':
+      emoji = '☀️';
+      timeRange = '(12:00 PM - 5:00 PM)';
+      break;
+    case 'Evening':
+      emoji = '🌇';
+      timeRange = '(5:00 PM - 10:00 PM)';
+      break;
+    default:
+      // optional: handle unexpected keys
+      emoji = '🕒';
+      timeRange = '';
+  }
 
-    return Container(
-      padding: EdgeInsets.all(groupPad),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6)))),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$emoji $period $timeRange',
-            style: TextStyle(
-              fontSize: titleSize,
-              fontWeight: FontWeight.w600,
-              color: const Color(0xFF374151),
-            ),
+  return Container(
+    padding: EdgeInsets.all(groupPad),
+    decoration: const BoxDecoration(
+      border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6))),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          '$emoji $period $timeRange',
+          style: TextStyle(
+            fontSize: titleSize,
+            fontWeight: FontWeight.w600,
+            color: const Color(0xFF374151),
           ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final columns = _columnsForWidth(constraints.maxWidth);
-              final cardW = _cardWidth(constraints.maxWidth, columns, chipGap);
+        ),
+        const SizedBox(height: 12),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            final columns = _columnsForWidth(constraints.maxWidth);
+            final cardW = _cardWidth(constraints.maxWidth, columns, chipGap);
 
-              final slotCards = slots
-                  .map((s) => _buildSlotCard(context, s, cardW))
-                  .toList();
+            final slotCards = slots
+                .map((s) => _buildSlotCard(context, s, cardW))
+                .toList();
 
-              // NEW: single-column, center-aligned when width is too narrow for 2 columns
-              if (columns == 1) {
-                return Wrap(
-                  spacing: 0,
-                  runSpacing: chipGap,
-                  alignment: WrapAlignment.center,
-                  children: slotCards,
-                );
-              }
-
-              // Default: multi-column responsive grid
+            if (columns == 1) {
               return Wrap(
-                spacing: chipGap,
+                spacing: 0,
                 runSpacing: chipGap,
-                alignment: WrapAlignment.start,
+                alignment: WrapAlignment.center,
                 children: slotCards,
               );
-            },
-          ),
-        ],
-      ),
-    );
-  }
+            }
+
+            return Wrap(
+              spacing: chipGap,
+              runSpacing: chipGap,
+              alignment: WrapAlignment.start,
+              children: slotCards,
+            );
+          },
+        ),
+      ],
+    ),
+  );
+}
+
 
   // ————————————————— Slot card —————————————————
   Widget _buildSlotCard(BuildContext context, QueryDocumentSnapshot slot, double cardWidth) {
@@ -478,7 +491,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
         : int.tryParse('${data['seat']}') ?? 0;
     final timeString = data['slot_time']?.toString() ?? '';
 
-    // NEW: costs
+    // Costs
     final vehicleCost = _asNum(data['vehicle_cost']);
     final additionalCost = _asNum(data['additional_cost']);
 
@@ -563,7 +576,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
                   textAlign: TextAlign.center,
                 ),
 
-                // --- NEW: Costs display block ---
+                // Costs display
                 SizedBox(height: _scale(sw, 8, 10, 12)),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -640,7 +653,6 @@ class _SlotsBlockState extends State<SlotsBlock> {
                     ],
                   ),
                 ),
-                // --- END costs block ---
 
                 SizedBox(height: _scale(sw, 2, 4, 6)),
                 Text(
@@ -654,7 +666,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
               ],
             ),
 
-            // Only Delete button (kept)
+            // Delete button
             Positioned(
               top: 0,
               right: 0,
@@ -677,7 +689,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
     );
   }
 
-  // ————————————————— Edit Additional Cost (kept) —————————————————
+  // ————————————————— Edit Additional Cost —————————————————
   Future<void> _editAdditionalCost(String docId, num? current) async {
     if (!isAdmin) return;
     final ctrl = TextEditingController(text: current?.toString() ?? '');
@@ -750,7 +762,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
     }
   }
 
-  // ————————————————— Delete (kept) —————————————————
+  // ————————————————— Delete —————————————————
   Future<void> _deleteSlot(QueryDocumentSnapshot slot) async {
     final data = slot.data() as Map<String, dynamic>;
     final slotId = data['slot_id']?.toString() ?? slot.id;
@@ -793,12 +805,91 @@ class _SlotsBlockState extends State<SlotsBlock> {
     }
   }
 
+  // ————————————————— Purge expired slots (admin entry) —————————————————
+  Future<void> _purgeExpiredSlots() async {
+    try {
+      final now = DateTime.now(); // local device time
+      final todayLocalMidnight = DateTime(now.year, now.month, now.day);
+      final todayTs = Timestamp.fromDate(todayLocalMidnight);
+
+      final slotsCol = FirebaseFirestore.instance.collection('slots');
+
+      // 1) Delete all past-day slots
+      final pastSnap = await slotsCol.where('slot_day', isLessThan: todayTs).get();
+
+      Future<void> _deleteInBatches(List<QueryDocumentSnapshot> docs) async {
+        WriteBatch batch = FirebaseFirestore.instance.batch();
+        int op = 0;
+        for (final d in docs) {
+          batch.delete(d.reference);
+          op++;
+          if (op >= 400) {
+            await batch.commit();
+            batch = FirebaseFirestore.instance.batch();
+            op = 0;
+          }
+        }
+        if (op > 0) {
+          await batch.commit();
+        }
+      }
+
+      await _deleteInBatches(pastSnap.docs);
+
+      // 2) For today, delete slots whose start time is within last 5 minutes (or earlier)
+      final todaySnap = await slotsCol.where('slot_day', isEqualTo: todayTs).get();
+      final List<QueryDocumentSnapshot> toDeleteToday = [];
+
+      for (final doc in todaySnap.docs) {
+        final data = doc.data() as Map<String, dynamic>?;
+        if (data == null) continue;
+
+        final slotTimeStr = data['slot_time']?.toString() ?? '';
+        if (slotTimeStr.isEmpty) continue;
+
+        final startLocal = _parseStartTimeForDay(slotTimeStr, todayLocalMidnight);
+
+        // delete if now >= (start - 5 minutes)
+        if (now.isAfter(startLocal.subtract(const Duration(minutes: 5))) ||
+            now.isAtSameMomentAs(startLocal.subtract(const Duration(minutes: 5)))) {
+          toDeleteToday.add(doc);
+        }
+      }
+
+      await _deleteInBatches(toDeleteToday);
+
+      if (context.mounted && isAdmin) {
+       debugPrint('Expired slots purged');
+      }
+    } catch (e) {
+      if (context.mounted && isAdmin) {
+       debugPrint('Purge error: $e');
+      }
+    }
+  }
+
+  /// Parse start "hh:mm a" from "10:00 AM - 11:00 AM" and bind it to the given day (local).
+  DateTime _parseStartTimeForDay(String slotTime, DateTime dayLocalMidnight) {
+    try {
+      final start = slotTime.split(' - ').first.trim(); // "10:00 AM"
+      final t = DateFormat('hh:mm a').parseStrict(start); // time-only
+      return DateTime(
+        dayLocalMidnight.year,
+        dayLocalMidnight.month,
+        dayLocalMidnight.day,
+        t.hour,
+        t.minute,
+      );
+    } catch (_) {
+      return DateTime(1970); // clearly expired
+    }
+  }
+
   // ————————————————— Helpers —————————————————
   static DateTime _atMidnight(DateTime d) => DateTime(d.year, d.month, d.day);
 
   /// Breakpoints → columns (1–5)
   int _columnsForWidth(double width) {
-    // NEW: allow a single-column layout for very narrow screens
     if (width < 360) return 1;
     if (width >= 1200) return 5;
     if (width >= 900) return 4;
@@ -845,7 +936,6 @@ class _SlotsBlockState extends State<SlotsBlock> {
     }
   }
 
-  // NEW helpers
   num? _asNum(dynamic v) {
     if (v == null) return null;
     if (v is num) return v;
@@ -856,5 +946,5 @@ class _SlotsBlockState extends State<SlotsBlock> {
     final f = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
     if (v == null) return '—';
     return f.format(v);
-    }
+  }
 }

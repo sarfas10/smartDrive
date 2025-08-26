@@ -5,11 +5,7 @@ import 'package:flutter/material.dart';
 class AppBrand {
   static const String appName = 'SmartDrive';
 
-  /// Place your logo at: project-root/assets/logo.png
-  /// pubspec.yaml:
-  /// flutter:
-  ///   assets:
-  ///     - assets/logo.png
+ 
   static const String? assetLogo = 'assets/appLogo.jpg';
 }
 

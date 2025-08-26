@@ -23,9 +23,6 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
   static const Color kSummaryBgEnd = Color(0xFFF1F8E9);
   static const Color kOrange = Color(0xFFFF9800);
 
-  // Seats default per vehicle
-  static const int kDefaultSeats = 3;
-
   // ====== State ======
   DateTime currentMonth = _todayMidnight();
 
@@ -33,9 +30,6 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
   final Set<String> selectedTimeSlots = {};     // keys like "09:00 AM-10:00 AM"
   final Set<String> selectedInstructorIds = {}; // instructor userIds
   final Set<String> selectedVehicleIds = {};    // vehicle_ids
-
-  // Seats per vehicle (applies to each generated combination)
-  final Map<String, int> _seatsPerVehicle = {}; // vehicle_id -> seats
 
   // Additional charges (added to vehicle charge to get final slot_cost)
   double _additionalCharges = 0.0;
@@ -59,6 +53,20 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
 
   // union of fully-booked times across currently selected days (keys without spaces)
   Set<String> _disabledTimeSlots = {};
+
+  // ====== UI Lock to prevent concurrent selections ======
+  bool _uiLock = false;
+  bool get _isBusy => _loadingBooked || _uiLock;
+
+  Future<void> _runLocked(Future<void> Function() task) async {
+    if (_isBusy) return; // ignore re-entrant taps
+    setState(() => _uiLock = true);
+    try {
+      await task();
+    } finally {
+      if (mounted) setState(() => _uiLock = false);
+    }
+  }
 
   // ====== Static Time Slots ======
   final List<_TimeSlot> timeSlots = const [
@@ -114,7 +122,6 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
         final v = _Vehicle(id: id, carType: type, charge: charge);
         list.add(v);
         _vehicleById[id] = v;
-        _seatsPerVehicle.putIfAbsent(id, () => kDefaultSeats);
       }
 
       setState(() {
@@ -280,18 +287,21 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
 
   // ====== Actions ======
   void _prevMonth() {
+    if (_isBusy) return;
     setState(() {
       currentMonth = DateTime(currentMonth.year, currentMonth.month - 1, 1);
     });
   }
 
   void _nextMonth() {
+    if (_isBusy) return;
     setState(() {
       currentMonth = DateTime(currentMonth.year, currentMonth.month + 1, 1);
     });
   }
 
-  void _toggleDate(DateTime date) {
+  // Renamed: pure state change (no refresh, locked handled outside)
+  void _toggleDateInternal(DateTime date) {
     final d = _atMidnight(date);
     setState(() {
       final contains = selectedDates.any((x) => _isSameDate(x, d));
@@ -301,10 +311,118 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
         selectedDates.add(d);
       }
     });
-    _refreshBookedTimes();
   }
 
-  void _toggleTimeSlot(_TimeSlot slot) {
+  // Uses UI lock to avoid concurrent taps and runs refresh
+  void _onTapCalendarDate(DateTime date) {
+    final today = _todayMidnight();
+    if (date.isBefore(today)) return;
+
+    _runLocked(() async {
+      _toggleDateInternal(date);
+      await _refreshBookedTimes();
+    });
+  }
+
+  Future<void> _addSlots() async {
+    if (!hasAllSelections || _isBusy) return;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Confirm'),
+        content: Text('Create $totalCombinations slot document(s) in Firestore?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+          ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Yes, Create')),
+        ],
+      ),
+    );
+    if (confirm != true) return;
+
+    await _runLocked(() async {
+      try {
+        final batch = FirebaseFirestore.instance.batch();
+        int toWrite = 0;
+        int skipped = 0;
+
+        final sortedDates = selectedDates.toList()..sort((a, b) => a.compareTo(b));
+
+        for (final day in sortedDates) {
+          final dayAtMidnight = Timestamp.fromDate(_atMidnight(day));
+          final dk = _dayKey(day);
+
+          for (final timeKey in selectedTimeSlots) {
+            final fully = _fullyBookedByDay[dk] ?? const <String>{};
+            if (fully.contains(timeKey)) {
+              skipped++;
+              continue;
+            }
+
+            final slotTime = timeKey.replaceAll('-', ' - '); // "09:00 AM - 10:00 AM"
+
+            for (final vehicleId in selectedVehicleIds) {
+              final v = _vehicleById[vehicleId];
+              final vehicleCost = v?.charge ?? 0.0; // separate vehicle cost
+              final additionalCost = _additionalCharges; // separate additional cost
+
+              for (final instructorId in selectedInstructorIds) {
+                final docRef = FirebaseFirestore.instance.collection('slots').doc();
+                final data = {
+                  'slot_id'           : docRef.id,
+                  'slot_day'          : dayAtMidnight,
+                  'slot_time'         : slotTime,
+                  'vehicle_id'        : vehicleId,
+                  'vehicle_type'      : v?.carType ?? '',
+                  'instructor_user_id': instructorId,
+                  'instructor_name'   : _instructorNamesById[instructorId] ?? '',
+                  // no 'seat'
+                  'vehicle_cost'      : vehicleCost,
+                  'additional_cost'   : additionalCost,
+                  'slot_cost'         : vehicleCost + additionalCost, // backward compatibility
+                  'created_at'        : FieldValue.serverTimestamp(),
+                };
+                batch.set(docRef, data);
+                toWrite++;
+              }
+            }
+          }
+        }
+
+        if (toWrite == 0) {
+          final txt = (vehicles.isEmpty)
+              ? 'No vehicle available.'
+              : (instructors.isEmpty)
+                  ? 'No instructor available.'
+                  : (skipped > 0
+                      ? 'All selected (day × time) were already fully booked.'
+                      : 'Nothing to create.');
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(txt)));
+          return;
+        }
+
+        await batch.commit();
+
+        if (!mounted) return;
+        final msg = skipped > 0
+            ? 'Created $toWrite document(s). Skipped $skipped fully-booked (day × time) combo(s).'
+            : 'Created $toWrite slot document(s).';
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+        _clearAll();
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to create slots: $e')),
+        );
+      }
+    });
+  }
+
+  void _toggleTimeSlot(_TimeSlot slot) async {
+    if (_isBusy) return; // ignore while loading/locked
+
     final key = '${slot.start}-${slot.end}';
     if (_disabledTimeSlots.contains(key)) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -312,6 +430,7 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
       );
       return;
     }
+
     setState(() {
       if (selectedTimeSlots.contains(key)) {
         selectedTimeSlots.remove(key);
@@ -319,10 +438,15 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
         selectedTimeSlots.add(key);
       }
     });
+
+    // brief UI lock to avoid fast double taps on multiple tiles
+    setState(() => _uiLock = true);
+    await Future.delayed(const Duration(milliseconds: 250));
+    if (mounted) setState(() => _uiLock = false);
   }
 
   void _toggleInstructor(_Instructor ins) {
-    if (!ins.available) return;
+    if (!ins.available || _isBusy) return;
     setState(() {
       if (selectedInstructorIds.contains(ins.id)) {
         selectedInstructorIds.remove(ins.id);
@@ -333,17 +457,18 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
   }
 
   void _toggleVehicle(_Vehicle v) {
+    if (_isBusy) return;
     setState(() {
       if (selectedVehicleIds.contains(v.id)) {
         selectedVehicleIds.remove(v.id);
       } else {
         selectedVehicleIds.add(v.id);
-        _seatsPerVehicle.putIfAbsent(v.id, () => kDefaultSeats);
       }
     });
   }
 
   void _clearAll() {
+    if (_isBusy) return;
     setState(() {
       selectedDates.clear();
       selectedTimeSlots.clear();
@@ -357,105 +482,6 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
       _loadingBooked = false;
     });
   }
-
-  Future<void> _addSlots() async {
-  if (!hasAllSelections) return;
-
-  for (final vid in selectedVehicleIds) {
-    _seatsPerVehicle.putIfAbsent(vid, () => kDefaultSeats);
-  }
-
-  final confirm = await showDialog<bool>(
-    context: context,
-    builder: (ctx) => AlertDialog(
-      title: const Text('Confirm'),
-      content: Text('Create $totalCombinations slot document(s) in Firestore?'),
-      actions: [
-        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-        ElevatedButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Yes, Create')),
-      ],
-    ),
-  );
-  if (confirm != true) return;
-
-  try {
-    final batch = FirebaseFirestore.instance.batch();
-    int toWrite = 0;
-    int skipped = 0;
-
-    final sortedDates = selectedDates.toList()..sort((a, b) => a.compareTo(b));
-
-    for (final day in sortedDates) {
-      final dayAtMidnight = Timestamp.fromDate(_atMidnight(day));
-      final dk = _dayKey(day);
-
-      for (final timeKey in selectedTimeSlots) {
-        final fully = _fullyBookedByDay[dk] ?? const <String>{};
-        if (fully.contains(timeKey)) {
-          skipped++;
-          continue;
-        }
-
-        final slotTime = timeKey.replaceAll('-', ' - '); // "09:00 AM - 10:00 AM"
-
-        for (final vehicleId in selectedVehicleIds) {
-          final seat = _seatsPerVehicle[vehicleId] ?? kDefaultSeats;
-          final v = _vehicleById[vehicleId];
-          final vehicleCost = v?.charge ?? 0.0; // ✅ separate vehicle cost
-          final additionalCost = _additionalCharges; // ✅ separate additional cost
-
-          for (final instructorId in selectedInstructorIds) {
-            final docRef = FirebaseFirestore.instance.collection('slots').doc();
-            final data = {
-              'slot_id'           : docRef.id,
-              'slot_day'          : dayAtMidnight,
-              'slot_time'         : slotTime,
-              'vehicle_id'        : vehicleId,
-              'vehicle_type'      : v?.carType ?? '',
-              'instructor_user_id': instructorId,
-              'instructor_name'   : _instructorNamesById[instructorId] ?? '',
-              'seat'              : seat,
-              'vehicle_cost'      : vehicleCost,     // ✅ NEW: separate vehicle cost field
-              'additional_cost'   : additionalCost, // ✅ NEW: separate additional cost field
-              'slot_cost'         : vehicleCost + additionalCost, // ✅ KEEP: total cost for backward compatibility
-              'created_at'        : FieldValue.serverTimestamp(),
-            };
-            batch.set(docRef, data);
-            toWrite++;
-          }
-        }
-      }
-    }
-
-    if (toWrite == 0) {
-      final txt = (vehicles.isEmpty)
-          ? 'No vehicle available.'
-          : (instructors.isEmpty)
-              ? 'No instructor available.'
-              : (skipped > 0
-                  ? 'All selected (day × time) were already fully booked.'
-                  : 'Nothing to create.');
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(txt)));
-      return;
-    }
-
-    await batch.commit();
-
-    if (!mounted) return;
-    final msg = skipped > 0
-        ? 'Created $toWrite document(s). Skipped $skipped fully-booked (day × time) combo(s).'
-        : 'Created $toWrite slot document(s).';
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
-
-    _clearAll();
-  } catch (e) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Failed to create slots: $e')),
-    );
-  }
-}
 
   // ====== Build ======
   @override
@@ -471,98 +497,317 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
 
     return Scaffold(
       backgroundColor: Colors.white,
-      body: NestedScrollView(
-        headerSliverBuilder: (context, _) => [
-          SliverAppBar(
-            floating: true,
-            snap: true,
-            pinned: false,
-            backgroundColor: Colors.white,
-            elevation: 0,
-            scrolledUnderElevation: 0,
-            leading: IconButton(
-              icon: Icon(Icons.arrow_back_ios_new, color: const Color(0xFF333333), size: _clampd(context.sp(2.2), 18, 22)),
-              tooltip: 'Back',
-              onPressed: () {
-                if (Navigator.canPop(context)) Navigator.pop(context);
-              },
-            ),
-          ),
-        ],
-        body: SafeArea(
-          top: false,
-          child: SingleChildScrollView(
-            padding: pagePad,
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 800),
-                child: ClipRRect(
-                  borderRadius: BorderRadius.circular(boxRadius),
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      boxShadow: [
-                        BoxShadow(color: Colors.black26, blurRadius: boxShadowBlur, offset: const Offset(0, 12))
-                      ],
-                      border: Border.all(color: const Color(0xFFE3F2FD)),
-                    ),
-                    child: Padding(
-                      padding: boxPad,
-                      child: Column(
-                        children: [
-                          // Calendar
-                          _Section(
-                            icon: Icons.calendar_month_outlined,
-                            title: 'Select Dates',
-                            titleSize: _clampd(context.sp(2.4), 16, 22),
-                            iconSize: _clampd(context.sp(2.2), 18, 22),
-                            child: _CalendarCard(
-                              currentMonth: currentMonth,
-                              onPrev: _prevMonth,
-                              onNext: _nextMonth,
-                              selectedDates: selectedDates,
-                              onTapDate: _onTapCalendarDate,
-                            ),
+      body: Stack(
+        children: [
+          // Main content; taps blocked while busy
+          AbsorbPointer(
+            absorbing: _isBusy,
+            child: NestedScrollView(
+              headerSliverBuilder: (context, _) => [
+                SliverAppBar(
+                  floating: true,
+                  snap: true,
+                  pinned: false,
+                  backgroundColor: Colors.white,
+                  elevation: 0,
+                  scrolledUnderElevation: 0,
+                  leading: IconButton(
+                    icon: Icon(Icons.arrow_back_ios_new, color: const Color(0xFF333333), size: _clampd(context.sp(2.2), 18, 22)),
+                    tooltip: 'Back',
+                    onPressed: () {
+                      if (Navigator.canPop(context)) Navigator.pop(context);
+                    },
+                  ),
+                ),
+              ],
+              body: SafeArea(
+                top: false,
+                child: SingleChildScrollView(
+                  padding: pagePad,
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 800),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(boxRadius),
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            boxShadow: [
+                              BoxShadow(color: Colors.black26, blurRadius: boxShadowBlur, offset: const Offset(0, 12))
+                            ],
+                            border: Border.all(color: const Color(0xFFE3F2FD)),
                           ),
-                          SizedBox(height: _clampd(context.hp(2), 12, 22)),
-
-                          // Time Slots
-                          _Section(
-                            icon: Icons.access_time,
-                            title: 'Select Time Slots',
-                            titleSize: _clampd(context.sp(2.4), 16, 22),
-                            iconSize: _clampd(context.sp(2.2), 18, 22),
+                          child: Padding(
+                            padding: boxPad,
                             child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
                               children: [
-                                _CardBox(
-                                  child: _TimeSlotGrid(
-                                    slots: timeSlots,
-                                    selected: selectedTimeSlots,
-                                    disabled: _disabledTimeSlots,
-                                    onTap: _toggleTimeSlot,
+                                // Calendar
+                                _Section(
+                                  icon: Icons.calendar_month_outlined,
+                                  title: 'Select Dates',
+                                  titleSize: _clampd(context.sp(2.4), 16, 22),
+                                  iconSize: _clampd(context.sp(2.2), 18, 22),
+                                  child: _CalendarCard(
+                                    currentMonth: currentMonth,
+                                    onPrev: _prevMonth,
+                                    onNext: _nextMonth,
+                                    selectedDates: selectedDates,
+                                    onTapDate: _onTapCalendarDate,
+                                    locked: _isBusy, // NEW
                                   ),
                                 ),
-                                if (_loadingBooked) SizedBox(height: _clampd(context.hp(1), 6, 12)),
-                                if (_loadingBooked) const LinearProgressIndicator(minHeight: 2),
-                                SizedBox(height: _clampd(context.hp(1.5), 10, 16)),
-                                if (selectedTimeSlots.isNotEmpty)
+                                SizedBox(height: _clampd(context.hp(2), 12, 22)),
+
+                                // Time Slots
+                                _Section(
+                                  icon: Icons.access_time,
+                                  title: 'Select Time Slots',
+                                  titleSize: _clampd(context.sp(2.4), 16, 22),
+                                  iconSize: _clampd(context.sp(2.2), 18, 22),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      _CardBox(
+                                        child: _TimeSlotGrid(
+                                          slots: timeSlots,
+                                          selected: selectedTimeSlots,
+                                          disabled: _disabledTimeSlots,
+                                          onTap: _toggleTimeSlot,
+                                          locked: _isBusy, // NEW
+                                        ),
+                                      ),
+                                      if (_loadingBooked) SizedBox(height: _clampd(context.hp(1), 6, 12)),
+                                      if (_loadingBooked) const LinearProgressIndicator(minHeight: 2),
+                                      SizedBox(height: _clampd(context.hp(1.5), 10, 16)),
+                                      if (selectedTimeSlots.isNotEmpty)
+                                        _InfoBar(
+                                          color: const Color(0xFFE3F2FD),
+                                          icon: Icons.info_outline,
+                                          text: '${selectedTimeSlots.length} time slot${selectedTimeSlots.length > 1 ? 's' : ''} selected',
+                                          textColor: kPrimary,
+                                          padH: _clampd(context.wp(3), 12, 20),
+                                          padV: _clampd(context.hp(1), 8, 14),
+                                          iconSize: _clampd(context.sp(2), 16, 20),
+                                          fontSize: _clampd(context.sp(1.8), 12, 15),
+                                        ),
+                                      SizedBox(height: _clampd(context.hp(1), 8, 12)),
+                                      if (_disabledTimeSlots.isNotEmpty)
+                                        _InfoBar(
+                                          color: const Color(0xFFFFF3E0),
+                                          icon: Icons.block,
+                                          text: 'Some times are BOOKED on selected day(s) because all vehicles already exist.',
+                                          textColor: kOrange,
+                                          padH: _clampd(context.wp(3), 12, 20),
+                                          padV: _clampd(context.hp(1), 8, 14),
+                                          iconSize: _clampd(context.sp(2), 16, 20),
+                                          fontSize: _clampd(context.sp(1.8), 12, 15),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+
+                                SizedBox(height: _clampd(context.hp(2), 12, 22)),
+
+                                // Booking Summary
+                                if (hasAllSelections)
+                                  _BookingSummary(
+                                    selectedDates: selectedDates,
+                                    selectedTimeSlots: selectedTimeSlots,
+                                    selectedCarTypes:
+                                        selectedVehicleIds.map((id) => _vehicleById[id]?.carType ?? id).toSet(),
+                                    selectedInstructors:
+                                        selectedInstructorIds.map((id) => _instructorNamesById[id] ?? id).toSet(),
+                                    totalCombinations: totalCombinations,
+                                    pad: EdgeInsets.all(_clampd(context.wp(3), 12, 20)),
+                                    radius: _clampd(context.sp(1.2), 10, 14),
+                                    titleFs: _clampd(context.sp(2.2), 16, 20),
+                                    labelFs: _clampd(context.sp(1.8), 12, 15),
+                                    chipFs: _clampd(context.sp(1.6), 11, 13),
+                                  ),
+
+                                SizedBox(height: _clampd(context.hp(2), 12, 22)),
+
+                                // Vehicles
+                                _Section(
+                                  icon: Icons.directions_car_filled,
+                                  title: 'Select Vehicles',
+                                  titleSize: _clampd(context.sp(2.4), 16, 22),
+                                  iconSize: _clampd(context.sp(2.2), 18, 22),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      _CardBox(
+                                        child: _loadingVehicles
+                                            ? Padding(
+                                                padding: EdgeInsets.all(_clampd(context.wp(3), 12, 20)),
+                                                child: const Center(child: CircularProgressIndicator()),
+                                              )
+                                            : (vehicles.isEmpty
+                                                ? const _EmptyBanner(text: 'No vehicle available')
+                                                : _VehicleGrid(
+                                                    vehicles: vehicles,
+                                                    selected: selectedVehicleIds,
+                                                    onTap: _toggleVehicle,
+                                                  )),
+                                      ),
+                                      SizedBox(height: _clampd(context.hp(1.5), 10, 16)),
+                                      if (selectedVehicleIds.isNotEmpty)
+                                        _InfoBar(
+                                          color: const Color(0xFFE3F2FD),
+                                          icon: Icons.info_outline,
+                                          text: '${selectedVehicleIds.length} vehicle${selectedVehicleIds.length > 1 ? 's' : ''} selected',
+                                          textColor: kPrimary,
+                                          padH: _clampd(context.wp(3), 12, 20),
+                                          padV: _clampd(context.hp(1), 8, 14),
+                                          iconSize: _clampd(context.sp(2), 16, 20),
+                                          fontSize: _clampd(context.sp(1.8), 12, 15),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+
+                                SizedBox(height: _clampd(context.hp(2), 12, 22)),
+
+                                // Additional Charges Section
+                                _Section(
+                                  icon: Icons.add_circle_outline,
+                                  title: 'Additional Charges',
+                                  titleSize: _clampd(context.sp(2.4), 16, 22),
+                                  iconSize: _clampd(context.sp(2.2), 18, 22),
+                                  child: _CardBox(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          children: [
+                                            Icon(Icons.monetization_on, color: kPrimary, size: _clampd(context.sp(2), 16, 20)),
+                                            SizedBox(width: _clampd(context.wp(2), 8, 12)),
+                                            Text('Additional Charges per Slot',
+                                                style: TextStyle(fontWeight: FontWeight.w600, fontSize: _clampd(context.sp(1.9), 13, 16))),
+                                          ],
+                                        ),
+                                        SizedBox(height: _clampd(context.hp(1.2), 8, 14)),
+                                        TextField(
+                                          controller: _additionalChargesController,
+                                          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                          style: const TextStyle(color: Colors.black),
+                                          decoration: InputDecoration(
+                                            hintText: 'Enter additional charges (₹)',
+                                            prefixText: '₹ ',
+                                            prefixStyle: const TextStyle(color: Colors.black),
+                                            border: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(_clampd(context.sp(1.2), 8, 12)),
+                                              borderSide: const BorderSide(color: Color(0xFFE3F2FD)),
+                                            ),
+                                            focusedBorder: OutlineInputBorder(
+                                              borderRadius: BorderRadius.circular(_clampd(context.sp(1.2), 8, 12)),
+                                              borderSide: const BorderSide(color: kPrimary, width: 2),
+                                            ),
+                                            contentPadding: EdgeInsets.symmetric(
+                                              horizontal: _clampd(context.wp(3), 12, 18),
+                                              vertical: _clampd(context.hp(1.2), 10, 14),
+                                            ),
+                                          ),
+                                        ),
+                                        SizedBox(height: _clampd(context.hp(1), 8, 12)),
+                                        Text(
+                                          'This amount will be added to the base vehicle cost for each created slot.',
+                                          style: TextStyle(fontSize: _clampd(context.sp(1.6), 11, 13), color: Colors.black54),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+
+                                SizedBox(height: _clampd(context.hp(2), 12, 22)),
+
+                                // Instructors
+                                _Section(
+                                  icon: Icons.person_pin_circle_outlined,
+                                  title: 'Select Instructors',
+                                  titleSize: _clampd(context.sp(2.4), 16, 22),
+                                  iconSize: _clampd(context.sp(2.2), 18, 22),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                                    children: [
+                                      _CardBox(
+                                        child: _loadingInstructors
+                                            ? Padding(
+                                                padding: EdgeInsets.all(_clampd(context.wp(3), 12, 20)),
+                                                child: const Center(child: CircularProgressIndicator()),
+                                              )
+                                            : (instructors.isEmpty
+                                                ? const _EmptyBanner(text: 'No instructor available')
+                                                : _InstructorGrid(
+                                                    instructors: instructors,
+                                                    selected: selectedInstructorIds,
+                                                    onTap: _toggleInstructor,
+                                                  )),
+                                      ),
+                                      SizedBox(height: _clampd(context.hp(1.5), 10, 16)),
+                                      if (selectedInstructorIds.isNotEmpty)
+                                        _InfoBar(
+                                          color: const Color(0xFFE3F2FD),
+                                          icon: Icons.info_outline,
+                                          text: '${selectedInstructorIds.length} instructor${selectedInstructorIds.length > 1 ? 's' : ''} selected',
+                                          textColor: kPrimary,
+                                          padH: _clampd(context.wp(3), 12, 20),
+                                          padV: _clampd(context.hp(1), 8, 14),
+                                          iconSize: _clampd(context.sp(2), 16, 20),
+                                          fontSize: _clampd(context.sp(1.8), 12, 15),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+
+                                SizedBox(height: _clampd(context.hp(2), 12, 22)),
+
+                                // Actions
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: OutlinedButton(
+                                        onPressed: _clearAll,
+                                        style: OutlinedButton.styleFrom(
+                                          padding: EdgeInsets.symmetric(vertical: btnVPad),
+                                        ),
+                                        child: const Text('Clear All'),
+                                      ),
+                                    ),
+                                    SizedBox(width: _clampd(context.wp(3), 12, 16)),
+                                    Expanded(
+                                      flex: 2,
+                                      child: ElevatedButton(
+                                        onPressed: hasAllSelections && !_isBusy ? _addSlots : null,
+                                        style: ElevatedButton.styleFrom(
+                                          padding: EdgeInsets.symmetric(vertical: btnVPad),
+                                          backgroundColor: hasAllSelections && !_isBusy ? kPrimary : Colors.grey.shade300,
+                                          foregroundColor: Colors.white,
+                                        ),
+                                        child: const Text('Add Slots'),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+
+                                SizedBox(height: _clampd(context.hp(1), 8, 12)),
+                                if (noVehicles)
                                   _InfoBar(
-                                    color: const Color(0xFFE3F2FD),
+                                    color: const Color(0xFFFFF3E0),
                                     icon: Icons.info_outline,
-                                    text: '${selectedTimeSlots.length} time slot${selectedTimeSlots.length > 1 ? 's' : ''} selected',
-                                    textColor: kPrimary,
+                                    text: 'No vehicle available',
+                                    textColor: kOrange,
                                     padH: _clampd(context.wp(3), 12, 20),
                                     padV: _clampd(context.hp(1), 8, 14),
                                     iconSize: _clampd(context.sp(2), 16, 20),
                                     fontSize: _clampd(context.sp(1.8), 12, 15),
                                   ),
-                                SizedBox(height: _clampd(context.hp(1), 8, 12)),
-                                if (_disabledTimeSlots.isNotEmpty)
+                                if (noInstructors) SizedBox(height: _clampd(context.hp(1), 8, 12)),
+                                if (noInstructors)
                                   _InfoBar(
                                     color: const Color(0xFFFFF3E0),
-                                    icon: Icons.block,
-                                    text: 'Some times are BOOKED on selected day(s) because all vehicles already exist.',
+                                    icon: Icons.info_outline,
+                                    text: 'No instructor available',
                                     textColor: kOrange,
                                     padH: _clampd(context.wp(3), 12, 20),
                                     padV: _clampd(context.hp(1), 8, 14),
@@ -572,291 +817,7 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
                               ],
                             ),
                           ),
-
-                          SizedBox(height: _clampd(context.hp(2), 12, 22)),
-
-                          // Booking Summary
-                          if (hasAllSelections)
-                            _BookingSummary(
-                              selectedDates: selectedDates,
-                              selectedTimeSlots: selectedTimeSlots,
-                              selectedCarTypes:
-                                  selectedVehicleIds.map((id) => _vehicleById[id]?.carType ?? id).toSet(),
-                              selectedInstructors:
-                                  selectedInstructorIds.map((id) => _instructorNamesById[id] ?? id).toSet(),
-                              totalCombinations: totalCombinations,
-                              pad: EdgeInsets.all(_clampd(context.wp(3), 12, 20)),
-                              radius: _clampd(context.sp(1.2), 10, 14),
-                              titleFs: _clampd(context.sp(2.2), 16, 20),
-                              labelFs: _clampd(context.sp(1.8), 12, 15),
-                              chipFs: _clampd(context.sp(1.6), 11, 13),
-                            ),
-
-                          SizedBox(height: _clampd(context.hp(2), 12, 22)),
-
-                          // Vehicles + Seats per Vehicle
-                          _Section(
-                            icon: Icons.directions_car_filled,
-                            title: 'Select Vehicles',
-                            titleSize: _clampd(context.sp(2.4), 16, 22),
-                            iconSize: _clampd(context.sp(2.2), 18, 22),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _CardBox(
-                                  child: _loadingVehicles
-                                      ? Padding(
-                                          padding: EdgeInsets.all(_clampd(context.wp(3), 12, 20)),
-                                          child: const Center(child: CircularProgressIndicator()),
-                                        )
-                                      : (vehicles.isEmpty
-                                          ? const _EmptyBanner(text: 'No vehicle available')
-                                          : _VehicleGrid(
-                                              vehicles: vehicles,
-                                              selected: selectedVehicleIds,
-                                              onTap: _toggleVehicle,
-                                            )),
-                                ),
-                                SizedBox(height: _clampd(context.hp(1.5), 10, 16)),
-                                if (selectedVehicleIds.isNotEmpty)
-                                  _InfoBar(
-                                    color: const Color(0xFFE3F2FD),
-                                    icon: Icons.info_outline,
-                                    text: '${selectedVehicleIds.length} vehicle${selectedVehicleIds.length > 1 ? 's' : ''} selected',
-                                    textColor: kPrimary,
-                                    padH: _clampd(context.wp(3), 12, 20),
-                                    padV: _clampd(context.hp(1), 8, 14),
-                                    iconSize: _clampd(context.sp(2), 16, 20),
-                                    fontSize: _clampd(context.sp(1.8), 12, 15),
-                                  ),
-                                SizedBox(height: _clampd(context.hp(1.5), 10, 16)),
-
-                                if (vehicles.isNotEmpty)
-                                  _CardBox(
-                                    child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
-                                      children: [
-                                        Row(
-                                          children: [
-                                            Icon(Icons.airline_seat_recline_normal, color: kPrimary, size: _clampd(context.sp(2.2), 18, 22)),
-                                            SizedBox(width: _clampd(context.wp(2), 8, 12)),
-                                            Text('Seats per Vehicle',
-                                                style: TextStyle(
-                                                  fontWeight: FontWeight.w600,
-                                                  fontSize: _clampd(context.sp(1.9), 13, 16),
-                                                )),
-                                          ],
-                                        ),
-                                        SizedBox(height: _clampd(context.hp(1.2), 8, 14)),
-                                        ...vehicles.map((v) {
-                                          final selected = selectedVehicleIds.contains(v.id);
-                                          final value = _seatsPerVehicle[v.id] ?? kDefaultSeats;
-                                          final fg = selected ? Colors.black : Colors.black.withOpacity(0.45);
-                                          final iconSize = _clampd(context.sp(2.2), 18, 22);
-                                          return Padding(
-                                            padding: EdgeInsets.symmetric(vertical: _clampd(context.hp(0.9), 6, 10)),
-                                            child: Row(
-                                              children: [
-                                                Expanded(
-                                                  child: Text(
-                                                    v.carType,
-                                                    maxLines: 1,
-                                                    overflow: TextOverflow.ellipsis,
-                                                    style: TextStyle(
-                                                      fontWeight: FontWeight.w600,
-                                                      color: fg,
-                                                      fontSize: _clampd(context.sp(1.9), 13, 16),
-                                                    ),
-                                                  ),
-                                                ),
-                                                IconButton(
-                                                  onPressed: selected && value > 1
-                                                      ? () => setState(() => _seatsPerVehicle[v.id] = value - 1)
-                                                      : null,
-                                                  icon: Icon(Icons.remove_circle_outline, size: iconSize),
-                                                ),
-                                                Text(
-                                                  '$value',
-                                                  style: TextStyle(
-                                                    fontSize: _clampd(context.sp(2), 14, 18),
-                                                    fontWeight: FontWeight.w700,
-                                                    color: fg,
-                                                  ),
-                                                ),
-                                                IconButton(
-                                                  onPressed: selected && value < 50
-                                                      ? () => setState(() => _seatsPerVehicle[v.id] = value + 1)
-                                                      : null,
-                                                  icon: Icon(Icons.add_circle_outline, size: iconSize),
-                                                ),
-                                              ],
-                                            ),
-                                          );
-                                        }),
-                                        SizedBox(height: _clampd(context.hp(0.8), 6, 10)),
-                                        Text(
-                                          'Only selected vehicles will be created. Seat values apply per (Date × Time × Vehicle × Instructor).',
-                                          style: TextStyle(
-                                            fontSize: _clampd(context.sp(1.6), 11, 13),
-                                            color: Colors.black54,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-
-                          SizedBox(height: _clampd(context.hp(2), 12, 22)),
-
-                          // Additional Charges Section
-                          _Section(
-                            icon: Icons.add_circle_outline,
-                            title: 'Additional Charges',
-                            titleSize: _clampd(context.sp(2.4), 16, 22),
-                            iconSize: _clampd(context.sp(2.2), 18, 22),
-                            child: _CardBox(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Row(
-                                    children: [
-                                      Icon(Icons.monetization_on, color: kPrimary, size: _clampd(context.sp(2), 16, 20)),
-                                      SizedBox(width: _clampd(context.wp(2), 8, 12)),
-                                      Text('Additional Charges per Slot',
-                                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: _clampd(context.sp(1.9), 13, 16))),
-                                    ],
-                                  ),
-                                  SizedBox(height: _clampd(context.hp(1.2), 8, 14)),
-                                  TextField(
-                                    controller: _additionalChargesController,
-                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                    style: const TextStyle(color: Colors.black),
-                                    decoration: InputDecoration(
-                                      hintText: 'Enter additional charges (₹)',
-                                      prefixText: '₹ ',
-                                      prefixStyle: const TextStyle(color: Colors.black),
-                                      border: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(_clampd(context.sp(1.2), 8, 12)),
-                                        borderSide: const BorderSide(color: Color(0xFFE3F2FD)),
-                                      ),
-                                      focusedBorder: OutlineInputBorder(
-                                        borderRadius: BorderRadius.circular(_clampd(context.sp(1.2), 8, 12)),
-                                        borderSide: const BorderSide(color: kPrimary, width: 2),
-                                      ),
-                                      contentPadding: EdgeInsets.symmetric(
-                                        horizontal: _clampd(context.wp(3), 12, 18),
-                                        vertical: _clampd(context.hp(1.2), 10, 14),
-                                      ),
-                                    ),
-                                  ),
-                                  SizedBox(height: _clampd(context.hp(1), 8, 12)),
-                                  Text(
-                                    'This amount will be added to the base vehicle cost for each created slot.',
-                                    style: TextStyle(fontSize: _clampd(context.sp(1.6), 11, 13), color: Colors.black54),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-
-                          SizedBox(height: _clampd(context.hp(2), 12, 22)),
-
-                          // Instructors
-                          _Section(
-                            icon: Icons.person_pin_circle_outlined,
-                            title: 'Select Instructors',
-                            titleSize: _clampd(context.sp(2.4), 16, 22),
-                            iconSize: _clampd(context.sp(2.2), 18, 22),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.stretch,
-                              children: [
-                                _CardBox(
-                                  child: _loadingInstructors
-                                      ? Padding(
-                                          padding: EdgeInsets.all(_clampd(context.wp(3), 12, 20)),
-                                          child: const Center(child: CircularProgressIndicator()),
-                                        )
-                                      : (instructors.isEmpty
-                                          ? const _EmptyBanner(text: 'No instructor available')
-                                          : _InstructorGrid(
-                                              instructors: instructors,
-                                              selected: selectedInstructorIds,
-                                              onTap: _toggleInstructor,
-                                            )),
-                                ),
-                                SizedBox(height: _clampd(context.hp(1.5), 10, 16)),
-                                if (selectedInstructorIds.isNotEmpty)
-                                  _InfoBar(
-                                    color: const Color(0xFFE3F2FD),
-                                    icon: Icons.info_outline,
-                                    text: '${selectedInstructorIds.length} instructor${selectedInstructorIds.length > 1 ? 's' : ''} selected',
-                                    textColor: kPrimary,
-                                    padH: _clampd(context.wp(3), 12, 20),
-                                    padV: _clampd(context.hp(1), 8, 14),
-                                    iconSize: _clampd(context.sp(2), 16, 20),
-                                    fontSize: _clampd(context.sp(1.8), 12, 15),
-                                  ),
-                              ],
-                            ),
-                          ),
-
-                          SizedBox(height: _clampd(context.hp(2), 12, 22)),
-
-                          // Actions
-                          Row(
-                            children: [
-                              Expanded(
-                                child: OutlinedButton(
-                                  onPressed: _clearAll,
-                                  style: OutlinedButton.styleFrom(
-                                    padding: EdgeInsets.symmetric(vertical: btnVPad),
-                                  ),
-                                  child: const Text('Clear All'),
-                                ),
-                              ),
-                              SizedBox(width: _clampd(context.wp(3), 12, 16)),
-                              Expanded(
-                                flex: 2,
-                                child: ElevatedButton(
-                                  onPressed: hasAllSelections ? _addSlots : null,
-                                  style: ElevatedButton.styleFrom(
-                                    padding: EdgeInsets.symmetric(vertical: btnVPad),
-                                    backgroundColor: hasAllSelections ? kPrimary : Colors.grey.shade300,
-                                    foregroundColor: Colors.white,
-                                  ),
-                                  child: const Text('Add Slots'),
-                                ),
-                              ),
-                            ],
-                          ),
-
-                          SizedBox(height: _clampd(context.hp(1), 8, 12)),
-                          if (noVehicles)
-                            _InfoBar(
-                              color: const Color(0xFFFFF3E0),
-                              icon: Icons.info_outline,
-                              text: 'No vehicle available',
-                              textColor: kOrange,
-                              padH: _clampd(context.wp(3), 12, 20),
-                              padV: _clampd(context.hp(1), 8, 14),
-                              iconSize: _clampd(context.sp(2), 16, 20),
-                              fontSize: _clampd(context.sp(1.8), 12, 15),
-                            ),
-                          if (noInstructors) SizedBox(height: _clampd(context.hp(1), 8, 12)),
-                          if (noInstructors)
-                            _InfoBar(
-                              color: const Color(0xFFFFF3E0),
-                              icon: Icons.info_outline,
-                              text: 'No instructor available',
-                              textColor: kOrange,
-                              padH: _clampd(context.wp(3), 12, 20),
-                              padV: _clampd(context.hp(1), 8, 14),
-                              iconSize: _clampd(context.sp(2), 16, 20),
-                              fontSize: _clampd(context.sp(1.8), 12, 15),
-                            ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -864,15 +825,20 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
               ),
             ),
           ),
-        ),
+
+          // Busy overlay with circular loader
+          if (_isBusy)
+            Positioned.fill(
+              child: Container(
+                color: Colors.white.withOpacity(0.35),
+                child: const Center(
+                  child: SizedBox(width: 44, height: 44, child: CircularProgressIndicator()),
+                ),
+              ),
+            ),
+        ],
       ),
     );
-  }
-
-  void _onTapCalendarDate(DateTime date) {
-    final today = _todayMidnight();
-    if (date.isBefore(today)) return;
-    _toggleDate(date);
   }
 }
 
@@ -945,6 +911,7 @@ class _CalendarCard extends StatelessWidget {
   final VoidCallback onNext;
   final Set<DateTime> selectedDates;
   final void Function(DateTime) onTapDate;
+  final bool locked; // NEW
 
   const _CalendarCard({
     required this.currentMonth,
@@ -952,6 +919,7 @@ class _CalendarCard extends StatelessWidget {
     required this.onNext,
     required this.selectedDates,
     required this.onTapDate,
+    required this.locked, // NEW
   });
 
   @override
@@ -970,7 +938,7 @@ class _CalendarCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              _IconBtn(icon: Icons.chevron_left, onTap: onPrev, size: navIcon),
+              _IconBtn(icon: Icons.chevron_left, onTap: locked ? (){} : onPrev, size: navIcon),
               Expanded(
                 child: Center(
                   child: Text(
@@ -979,103 +947,107 @@ class _CalendarCard extends StatelessWidget {
                   ),
                 ),
               ),
-              _IconBtn(icon: Icons.chevron_right, onTap: onNext, size: navIcon),
+              _IconBtn(icon: Icons.chevron_right, onTap: locked ? (){} : onNext, size: navIcon),
             ],
           ),
           SizedBox(height: _AddSlotsPageState()._clampd(context.hp(1.2), 8, 14)),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _WeekdayLabel('Sun', fs: weekFs),
-              _WeekdayLabel('Mon', fs: weekFs),
-              _WeekdayLabel('Tue', fs: weekFs),
-              _WeekdayLabel('Wed', fs: weekFs),
-              _WeekdayLabel('Thu', fs: weekFs),
-              _WeekdayLabel('Fri', fs: weekFs),
-              _WeekdayLabel('Sat', fs: weekFs),
+            children: const [
+              _WeekdayLabel('Sun', fs: 0), // fs overridden below via DefaultTextStyle
+              _WeekdayLabel('Mon', fs: 0),
+              _WeekdayLabel('Tue', fs: 0),
+              _WeekdayLabel('Wed', fs: 0),
+              _WeekdayLabel('Thu', fs: 0),
+              _WeekdayLabel('Fri', fs: 0),
+              _WeekdayLabel('Sat', fs: 0),
             ],
           ),
           SizedBox(height: _AddSlotsPageState()._clampd(context.hp(1), 6, 12)),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final cellSize = (constraints.maxWidth - 6 * gap) / 7;
+          DefaultTextStyle.merge(
+            style: TextStyle(fontSize: weekFs),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final cellSize = (constraints.maxWidth - 6 * gap) / 7;
 
-              return Wrap(
-                spacing: gap,
-                runSpacing: gap,
-                children: days.map((d) {
-                  final isCurrentMonth = d.month == currentMonth.month;
-                  final today = _AddSlotsPageState._todayMidnight();
-                  final isPast = d.isBefore(today);
-                  final isToday = _isSameDate(d, today);
-                  final isSelected = selectedDates.any((x) => _isSameDate(x, d));
+                return Wrap(
+                  spacing: gap,
+                  runSpacing: gap,
+                  children: days.map((d) {
+                    final isCurrentMonth = d.month == currentMonth.month;
+                    final today = _AddSlotsPageState._todayMidnight();
+                    final isPast = d.isBefore(today);
+                    final isToday = _isSameDate(d, today);
+                    final isSelected = selectedDates.any((x) => _isSameDate(x, d));
 
-                  Color? bg;
-                  Color fg = Colors.black87;
-                  BoxBorder? border;
-                  final opacity = isCurrentMonth ? 1.0 : 0.3;
-                  MouseCursor cursor = SystemMouseCursors.click;
+                    Color? bg;
+                    Color fg = Colors.black87;
+                    BoxBorder? border;
+                    final opacity = isCurrentMonth ? 1.0 : 0.3;
+                    MouseCursor cursor = SystemMouseCursors.click;
 
-                  if (isPast && isCurrentMonth) {
-                    fg = Colors.black38;
-                    cursor = SystemMouseCursors.forbidden;
-                  }
-                  if (isToday) {
-                    border = Border.all(color: _AddSlotsPageState.kTodayBorder, width: 2);
-                    fg = Colors.black87;
-                  }
-                  if (isSelected) {
-                    bg = _AddSlotsPageState.kPrimary;
-                    fg = Colors.white;
-                    border = Border.all(color: _AddSlotsPageState.kPrimary, width: 2);
-                  }
+                    if (isPast && isCurrentMonth) {
+                      fg = Colors.black38;
+                      cursor = SystemMouseCursors.forbidden;
+                    }
+                    if (isToday) {
+                      border = Border.all(color: _AddSlotsPageState.kTodayBorder, width: 2);
+                      fg = Colors.black87;
+                    }
+                    if (isSelected) {
+                      bg = _AddSlotsPageState.kPrimary;
+                      fg = Colors.white;
+                      border = Border.all(color: _AddSlotsPageState.kPrimary, width: 2);
+                    }
 
-                  return MouseRegion(
-                    cursor: cursor,
-                    child: GestureDetector(
-                      onTap: () {
-                        if (!isCurrentMonth) return;
-                        if (isPast) return;
-                        onTapDate(d);
-                      },
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 150),
-                        width: cellSize,
-                        height: cellSize,
-                        decoration: BoxDecoration(
-                          color: bg,
-                          borderRadius: BorderRadius.circular(cellRadius),
-                          border: border,
-                        ),
-                        alignment: Alignment.center,
-                        child: Opacity(
-                          opacity: opacity,
-                          child: Stack(
-                            children: [
-                              Center(
-                                child: Text(
-                                  d.day.toString(),
-                                  style: TextStyle(
-                                    fontWeight: (isToday || isSelected) ? FontWeight.w600 : FontWeight.w400,
-                                    color: fg,
+                    return MouseRegion(
+                      cursor: locked ? SystemMouseCursors.forbidden : cursor,
+                      child: GestureDetector(
+                        onTap: () {
+                          if (locked) return;
+                          if (!isCurrentMonth) return;
+                          if (isPast) return;
+                          onTapDate(d);
+                        },
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 150),
+                          width: cellSize,
+                          height: cellSize,
+                          decoration: BoxDecoration(
+                            color: bg,
+                            borderRadius: BorderRadius.circular(cellRadius),
+                            border: border,
+                          ),
+                          alignment: Alignment.center,
+                          child: Opacity(
+                            opacity: opacity,
+                            child: Stack(
+                              children: [
+                                Center(
+                                  child: Text(
+                                    d.day.toString(),
+                                    style: TextStyle(
+                                      fontWeight: (isToday || isSelected) ? FontWeight.w600 : FontWeight.w400,
+                                      color: fg,
+                                    ),
                                   ),
                                 ),
-                              ),
-                              if (isSelected)
-                                const Positioned(
-                                  top: 2,
-                                  right: 4,
-                                  child: Icon(Icons.check, size: 14, color: Colors.white),
-                                ),
-                            ],
+                                if (isSelected)
+                                  const Positioned(
+                                    top: 2,
+                                    right: 4,
+                                    child: Icon(Icons.check, size: 14, color: Colors.white),
+                                  ),
+                              ],
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  );
-                }).toList(),
-              );
-            },
+                    );
+                  }).toList(),
+                );
+              },
+            ),
           ),
         ],
       ),
@@ -1124,7 +1096,8 @@ class _WeekdayLabel extends StatelessWidget {
     return Expanded(
       child: Center(
         child: Text(text,
-            style: TextStyle(fontSize: fs, fontWeight: FontWeight.w600, color: const Color(0xFF666666))),
+            style: TextStyle(fontSize: fs == 0 ? _AddSlotsPageState()._clampd(context.sp(1.8), 12, 14) : fs,
+                fontWeight: FontWeight.w600, color: const Color(0xFF666666))),
       ),
     );
   }
@@ -1135,12 +1108,14 @@ class _TimeSlotGrid extends StatelessWidget {
   final Set<String> selected;
   final Set<String> disabled; // keys without spaces
   final void Function(_TimeSlot) onTap;
+  final bool locked; // NEW
 
   const _TimeSlotGrid({
     required this.slots,
     required this.selected,
     required this.disabled,
     required this.onTap,
+    required this.locked, // NEW
   });
 
   @override
@@ -1200,7 +1175,7 @@ class _TimeSlotGrid extends StatelessWidget {
           }
 
           return GestureDetector(
-            onTap: isBooked ? null : () => onTap(s),
+            onTap: (isBooked || locked) ? null : () => onTap(s),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 150),
               decoration: BoxDecoration(
@@ -1692,8 +1667,6 @@ class _ChipWrap extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-   
-
     final padH = _AddSlotsPageState()._clampd(context.wp(2.2), 10, 14);
     final padV = _AddSlotsPageState()._clampd(context.hp(0.5), 4, 6);
     final radius = _AddSlotsPageState()._clampd(context.sp(1.1), 10, 14);
@@ -1701,7 +1674,10 @@ class _ChipWrap extends StatelessWidget {
     final chips = values.map((v) {
       return Container(
         padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
-        margin: EdgeInsets.only(right: _AddSlotsPageState()._clampd(context.wp(1.6), 8, 12), bottom: _AddSlotsPageState()._clampd(context.hp(0.7), 6, 10)),
+        margin: EdgeInsets.only(
+          right: _AddSlotsPageState()._clampd(context.wp(1.6), 8, 12),
+          bottom: _AddSlotsPageState()._clampd(context.hp(0.7), 6, 10),
+        ),
         decoration: BoxDecoration(
           color: _AddSlotsPageState.kChipGreenBg,
           border: Border.all(color: _AddSlotsPageState.kChipGreen),
@@ -1729,8 +1705,6 @@ class _Vehicle {
   final double charge;   // per session
   const _Vehicle({required this.id, required this.carType, required this.charge});
 }
-
-
 
 class _Instructor {
   final String id;        // Firestore user doc id
@@ -1760,7 +1734,6 @@ class _NoScrollbarBehavior extends ScrollBehavior {
     return child;
   }
 }
-
 
 // ====== Constants ======
 const List<String> _monthNames = [

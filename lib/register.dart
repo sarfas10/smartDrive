@@ -1,8 +1,14 @@
+// lib/register_screen.dart
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'dart:ui';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+import 'reusables/branding.dart'; // AppBrand, AppBrandingRow
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -18,8 +24,8 @@ class _RegisterScreenState extends State<RegisterScreen>
 
   // Card/content animations
   late final AnimationController _cardController;
-  late final Animation<double> _cardAnimation;
-  late final Animation<Offset> _slideAnimation;
+  late final Animation<double> _cardScale;
+  late final Animation<Offset> _cardSlide;
 
   bool isStudent = true;
   bool obscurePassword = true;
@@ -28,6 +34,8 @@ class _RegisterScreenState extends State<RegisterScreen>
   bool _isLoading = false;
 
   final _formKey = GlobalKey<FormState>();
+
+  // Controllers
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _phoneController = TextEditingController();
@@ -35,6 +43,15 @@ class _RegisterScreenState extends State<RegisterScreen>
   final _confirmPasswordController = TextEditingController();
   final _licenseController = TextEditingController();
   final _experienceController = TextEditingController();
+
+  // Focus nodes
+  final _nameNode = FocusNode();
+  final _emailNode = FocusNode();
+  final _phoneNode = FocusNode();
+  final _licenseNode = FocusNode();
+  final _expNode = FocusNode();
+  final _passNode = FocusNode();
+  final _confirmNode = FocusNode();
 
   @override
   void initState() {
@@ -46,22 +63,21 @@ class _RegisterScreenState extends State<RegisterScreen>
     )..repeat();
 
     _cardController = AnimationController(
-      duration: const Duration(milliseconds: 700),
+      duration: const Duration(milliseconds: 650),
       vsync: this,
     );
 
-    _cardAnimation = CurvedAnimation(
+    _cardScale = CurvedAnimation(
       parent: _cardController,
       curve: Curves.easeOutBack,
     );
 
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, 0.18),
+    _cardSlide = Tween<Offset>(
+      begin: const Offset(0, 0.16),
       end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _cardController,
-      curve: Curves.easeOutCubic,
-    ));
+    ).animate(
+      CurvedAnimation(parent: _cardController, curve: Curves.easeOutCubic),
+    );
 
     _cardController.forward();
   }
@@ -70,6 +86,7 @@ class _RegisterScreenState extends State<RegisterScreen>
   void dispose() {
     _bgController.dispose();
     _cardController.dispose();
+
     _nameController.dispose();
     _emailController.dispose();
     _phoneController.dispose();
@@ -77,15 +94,28 @@ class _RegisterScreenState extends State<RegisterScreen>
     _confirmPasswordController.dispose();
     _licenseController.dispose();
     _experienceController.dispose();
+
+    _nameNode.dispose();
+    _emailNode.dispose();
+    _phoneNode.dispose();
+    _licenseNode.dispose();
+    _expNode.dispose();
+    _passNode.dispose();
+    _confirmNode.dispose();
+
     super.dispose();
   }
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Actions
+  // ────────────────────────────────────────────────────────────────────────────
 
   Future<void> _handleRegister() async {
     FocusScope.of(context).unfocus();
 
     if (!_formKey.currentState!.validate()) return;
     if (!agreeToTerms) {
-      _showToast('Please agree to the Terms of Service and Privacy Policy.');
+      _toast('Please agree to the Terms of Service and Privacy Policy.');
       return;
     }
 
@@ -93,56 +123,79 @@ class _RegisterScreenState extends State<RegisterScreen>
 
     try {
       await _registerWithFirebase();
+
+      if (!mounted) return;
       setState(() => _isLoading = false);
 
-      _showToast(
-        'Your ${isStudent ? 'student' : 'instructor'} account has been created. Welcome to SmartDrive!',
+      _toast(
+        'Your ${isStudent ? 'student' : 'instructor'} account has been created. Welcome to ${AppBrand.appName}!',
         success: true,
       );
 
-      await Future.delayed(const Duration(milliseconds: 1200));
+      await Future.delayed(const Duration(milliseconds: 900));
       if (mounted) Navigator.of(context).pop();
     } on FirebaseAuthException catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
-      _showToast(_friendlyAuthError(e));
+      _toast(_friendlyAuthError(e));
     } catch (e) {
+      if (!mounted) return;
       setState(() => _isLoading = false);
-      _showToast('Registration failed. ${e.toString()}');
+      _toast('Registration failed. ${e.toString()}');
     }
   }
 
   Future<void> _registerWithFirebase() async {
-    final email = _emailController.text.trim();
-    final password = _passwordController.text.trim();
-    final displayName = _nameController.text.trim();
-    final phone = _phoneController.text.trim();
-    final role = isStudent ? 'student' : 'instructor';
-    final status = isStudent ? 'pending' : 'pending';
+  final email = _emailController.text.trim().toLowerCase();
+  final password = _passwordController.text.trim();
+  final displayName = _nameController.text.trim();
+  final phone = _phoneController.text.trim();
+  final role = isStudent ? 'student' : 'instructor';
 
-    final cred = await FirebaseAuth.instance
-        .createUserWithEmailAndPassword(email: email, password: password);
+  // 1) Create auth user
+  final cred = await FirebaseAuth.instance
+      .createUserWithEmailAndPassword(email: email, password: password);
 
-    await cred.user?.updateDisplayName(displayName);
+  await cred.user?.updateDisplayName(displayName);
 
-    final uid = cred.user!.uid;
-    final data = {
-      'uid': uid,
-      'email': email,
-      'name': displayName,
-      'phone': phone,
-      'role': role,
-      'status': status,
+  final uid = cred.user!.uid;
+
+  // 2) Create/merge user profile document
+  final data = <String, dynamic>{
+    'uid': uid,
+    'email': email,
+    'name': displayName,
+    'phone': phone,
+    'role': role,
+    'status': 'pending',
+    'createdAt': FieldValue.serverTimestamp(),
+    if (!isStudent) 'licenseNo': _licenseController.text.trim(),
+    if (!isStudent)
+      'yearsExp': int.tryParse(_experienceController.text.trim()) ?? 0,
+  };
+
+  await FirebaseFirestore.instance
+      .collection('users')
+      .doc(uid)
+      .set(data, SetOptions(merge: true));
+
+  // 3) If student, also create a user_plans record
+  //    Using doc(uid) prevents duplicates; includes createdAt for auditing.
+  if (isStudent) {
+    final planDoc = <String, dynamic>{
+      'userId': uid,
+      'planId': 'pay-per-use',
+      'active': true,
       'createdAt': FieldValue.serverTimestamp(),
-      if (!isStudent) 'licenseNo': _licenseController.text.trim(),
-      if (!isStudent)
-        'yearsExp': int.tryParse(_experienceController.text.trim()) ?? 0,
     };
 
     await FirebaseFirestore.instance
-        .collection('users')
+        .collection('user_plans')
         .doc(uid)
-        .set(data, SetOptions(merge: true));
+        .set(planDoc, SetOptions(merge: true));
   }
+}
+
 
   String _friendlyAuthError(FirebaseAuthException e) {
     switch (e.code) {
@@ -160,6 +213,10 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   void _navigateBack() => Navigator.pop(context);
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // UI
+  // ────────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -182,52 +239,70 @@ class _RegisterScreenState extends State<RegisterScreen>
                 gradient: RadialGradient(
                   center: Alignment.center,
                   radius: 1.2,
-                  colors: [
-                    Colors.transparent,
-                    Colors.black.withOpacity(0.05),
-                  ],
+                  colors: [Colors.transparent, Colors.black.withOpacity(0.06)],
                   stops: const [0.7, 1.0],
                 ),
               ),
             ),
           ),
 
-          // Single window: back button (top-left) + centered form
+          // Layout with back button, branding outside, and form card
           SafeArea(
-            child: Stack(
-              children: [
-                // Back button pinned top-left
-                Positioned(
-                  top: 8,
-                  left: 8,
-                  child: IconButton(
-                    onPressed: _navigateBack,
-                    padding: const EdgeInsets.all(4),
-                    constraints:
-                        const BoxConstraints(minWidth: 36, minHeight: 36),
-                    iconSize: 18,
-                    icon: const Icon(
-                      Icons.arrow_back_ios_rounded,
-                      color: Colors.white,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Stack(
+                children: [
+                  // Back button
+                  Positioned(
+                    top: 8,
+                    left: 0,
+                    child: IconButton(
+                      onPressed: _navigateBack,
+                      padding: const EdgeInsets.all(6),
+                      constraints:
+                          const BoxConstraints(minWidth: 36, minHeight: 36),
+                      iconSize: 18,
+                      icon: const Icon(
+                        Icons.arrow_back_ios_rounded,
+                        color: Colors.white,
+                      ),
+                      tooltip: 'Back',
                     ),
                   ),
-                ),
 
-                // Centered registration form
-                Align(
-                  alignment: Alignment.center,
-                  child: SlideTransition(
-                    position: _slideAnimation,
-                    child: ScaleTransition(
-                      scale: _cardAnimation,
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 420),
-                        child: _buildRegisterCardCompact(),
+                  // Branding (outside)
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        SizedBox(height: 8),
+                        AppBrandingRow(
+                          logoSize: 42,
+                          nameSize: 22,
+                          spacing: 10,
+                          textColor: Colors.white,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // Card
+                  Align(
+                    alignment: Alignment.center,
+                    child: SlideTransition(
+                      position: _cardSlide,
+                      child: ScaleTransition(
+                        scale: _cardScale,
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 480),
+                          child: _GlassCard(child: _buildRegisterCard()),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         ],
@@ -235,271 +310,330 @@ class _RegisterScreenState extends State<RegisterScreen>
     );
   }
 
-  // Compact card so it fits without scrolling on most phones
-  Widget _buildRegisterCardCompact() {
-    const fieldGap = SizedBox(height: 10);
-    const sectionGap = SizedBox(height: 12);
+  Widget _buildRegisterCard() {
+    const fieldGap = SizedBox(height: 12);
+    const sectionGap = SizedBox(height: 14);
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.10),
-            blurRadius: 16,
-            offset: const Offset(0, 8),
-          )
-        ],
-      ),
-      child: Form(
-        key: _formKey,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _buildUserTypeToggleCompact(),
-            sectionGap,
-
-            _buildTextFieldCompact(
-              controller: _nameController,
-              label: 'Full Name',
-              icon: Icons.person_outline_rounded,
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) {
-                  return 'Please enter Full Name';
-                }
-                if (v.trim().length < 2) return 'Name looks too short';
-                return null;
-              },
-            ),
-            fieldGap,
-            _buildTextFieldCompact(
-              controller: _emailController,
-              label: 'Email Address',
-              icon: Icons.email_outlined,
-              keyboardType: TextInputType.emailAddress,
-              validator: (v) {
-                if (v == null || v.trim().isEmpty) {
-                  return 'Please enter Email Address';
-                }
-                final email = v.trim();
-                final ok =
-                    RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(email);
-                return ok ? null : 'Please enter a valid email address';
-              },
-            ),
-            fieldGap,
-            _buildTextFieldCompact(
-              controller: _phoneController,
-              label: 'Phone Number',
-              icon: Icons.phone_outlined,
-              keyboardType: TextInputType.phone,
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Please enter Phone Number' : null,
-            ),
-            sectionGap,
-
-            if (!isStudent)
-              _buildTextFieldCompact(
-                controller: _licenseController,
-                label: 'Instructor License Number',
-                icon: Icons.card_membership_outlined,
-                validator: (v) {
-                  if (!isStudent && (v == null || v.trim().isEmpty)) {
-                    return 'License Number is required for Instructors';
-                  }
-                  return null;
-                },
+    return Form(
+      key: _formKey,
+      autovalidateMode: AutovalidateMode.disabled,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Subtitle
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 200),
+            child: Text(
+              key: ValueKey(isStudent),
+              isStudent
+                  ? 'Create your student account'
+                  : 'Apply as an instructor',
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Colors.white.withOpacity(0.9),
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
               ),
-            if (!isStudent) fieldGap,
-            if (!isStudent)
-              _buildTextFieldCompact(
-                controller: _experienceController,
-                label: 'Years of Experience',
-                icon: Icons.work_outline_rounded,
-                keyboardType: TextInputType.number,
-                validator: (v) {
-                  if (!isStudent) {
-                    final n = int.tryParse(v?.trim() ?? '');
-                    if (n == null || n < 0) return 'Enter a valid number';
-                  }
-                  return null;
-                },
-              ),
-            if (!isStudent) sectionGap,
+            ),
+          ),
+          const SizedBox(height: 18),
 
-            _buildPasswordFieldCompact(
-              controller: _passwordController,
-              label: 'Password',
-              obscureText: obscurePassword,
-              onToggle: () =>
-                  setState(() => obscurePassword = !obscurePassword),
+          _buildUserTypeToggle(),
+          sectionGap,
+
+          // Full name
+          _buildTextField(
+            controller: _nameController,
+            focusNode: _nameNode,
+            nextNode: _emailNode,
+            label: 'Full Name',
+            icon: Icons.person_outline_rounded,
+            textInputAction: TextInputAction.next,
+            validator: (v) {
+              final t = v?.trim() ?? '';
+              if (t.isEmpty) return 'Please enter Full Name';
+              if (t.length < 2) return 'Name looks too short';
+              return null;
+            },
+            autofillHints: const [AutofillHints.name],
+          ),
+          fieldGap,
+
+          // Email
+          _buildTextField(
+            controller: _emailController,
+            focusNode: _emailNode,
+            nextNode: _phoneNode,
+            label: 'Email Address',
+            icon: Icons.email_outlined,
+            keyboardType: TextInputType.emailAddress,
+            textInputAction: TextInputAction.next,
+            validator: (v) {
+              final email = v?.trim() ?? '';
+              if (email.isEmpty) return 'Please enter Email Address';
+              final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+                  .hasMatch(email.toLowerCase());
+              return ok ? null : 'Please enter a valid email address';
+            },
+            autofillHints: const [AutofillHints.email],
+          ),
+          fieldGap,
+
+          // Phone
+          _buildTextField(
+            controller: _phoneController,
+            focusNode: _phoneNode,
+            nextNode: isStudent ? _passNode : _licenseNode,
+            label: 'Phone Number',
+            icon: Icons.phone_outlined,
+            keyboardType: TextInputType.phone,
+            textInputAction: TextInputAction.next,
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s]'))
+            ],
+            validator: (v) {
+              final t = v?.trim() ?? '';
+              if (t.isEmpty) return 'Please enter Phone Number';
+              if (t.replaceAll(RegExp(r'\D'), '').length < 7) {
+                return 'Enter a valid phone number';
+              }
+              return null;
+            },
+            autofillHints: const [AutofillHints.telephoneNumber],
+          ),
+          sectionGap,
+
+          // Instructor-only fields
+          if (!isStudent)
+            _buildTextField(
+              controller: _licenseController,
+              focusNode: _licenseNode,
+              nextNode: _expNode,
+              label: 'Instructor License Number',
+              icon: Icons.card_membership_outlined,
+              textInputAction: TextInputAction.next,
               validator: (v) {
-                if (v == null || v.isEmpty) return 'Please enter Password';
-                if (v.length < 8) {
-                  return 'Password must be at least 8 characters';
+                final t = v?.trim() ?? '';
+                if (t.isEmpty) {
+                  return 'License Number is required for Instructors';
                 }
                 return null;
               },
             ),
-            fieldGap,
-            _buildPasswordFieldCompact(
-              controller: _confirmPasswordController,
-              label: 'Confirm Password',
-              obscureText: obscureConfirmPassword,
-              onToggle: () => setState(
-                  () => obscureConfirmPassword = !obscureConfirmPassword),
+          if (!isStudent) fieldGap,
+
+          if (!isStudent)
+            _buildTextField(
+              controller: _experienceController,
+              focusNode: _expNode,
+              nextNode: _passNode,
+              label: 'Years of Experience',
+              icon: Icons.work_outline_rounded,
+              keyboardType: TextInputType.number,
+              textInputAction: TextInputAction.next,
+              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               validator: (v) {
-                if (v == null || v.isEmpty) {
-                  return 'Please confirm your password';
-                }
-                if (v != _passwordController.text) {
-                  return 'Passwords do not match';
-                }
+                final n = int.tryParse(v?.trim() ?? '');
+                if (n == null || n < 0) return 'Enter a valid number';
                 return null;
               },
             ),
-            sectionGap,
+          if (!isStudent) sectionGap,
 
-            _buildTermsAndConditionsCompact(),
-            const SizedBox(height: 12),
-            _buildRegisterButtonCompact(),
+          // Password
+          _buildPasswordField(
+            controller: _passwordController,
+            focusNode: _passNode,
+            nextNode: _confirmNode,
+            label: 'Password',
+            obscureText: obscurePassword,
+            onToggle: () => setState(() => obscurePassword = !obscurePassword),
+            textInputAction: TextInputAction.next,
+            validator: (v) {
+              if (v == null || v.isEmpty) return 'Please enter Password';
+              if (v.length < 8) return 'Password must be at least 8 characters';
+              return null;
+            },
+            autofillHints: const [AutofillHints.newPassword],
+          ),
+          fieldGap,
 
-            // Inline "Already have an account?"
-            TextButton(
-              onPressed: _navigateBack,
-              child: RichText(
-                text: TextSpan(
-                  style: TextStyle(
-                      color: Colors.white.withOpacity(0.85), fontSize: 12),
-                  children: const [
-                    TextSpan(text: "Already have an account? "),
-                    TextSpan(
-                      text: 'Sign In',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
+          // Confirm Password
+          _buildPasswordField(
+            controller: _confirmPasswordController,
+            focusNode: _confirmNode,
+            label: 'Confirm Password',
+            obscureText: obscureConfirmPassword,
+            onToggle: () =>
+                setState(() => obscureConfirmPassword = !obscureConfirmPassword),
+            textInputAction: TextInputAction.done,
+            validator: (v) {
+              if (v == null || v.isEmpty) {
+                return 'Please confirm your password';
+              }
+              if (v != _passwordController.text) {
+                return 'Passwords do not match';
+              }
+              return null;
+            },
+            onFieldSubmitted: (_) => _handleRegister(),
+            autofillHints: const [AutofillHints.newPassword],
+          ),
+          sectionGap,
+
+          _buildTermsAndConditions(),
+          const SizedBox(height: 14),
+          _buildRegisterButton(),
+
+          // Inline "Already have an account?"
+          TextButton(
+            onPressed: _navigateBack,
+            child: RichText(
+              text: TextSpan(
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 12.5,
                 ),
+                children: const [
+                  TextSpan(text: "Already have an account? "),
+                  TextSpan(
+                    text: 'Sign In',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
 
-  Widget _buildUserTypeToggleCompact() {
+  // ── UI atoms (cleaned)
+  Widget _buildUserTypeToggle() {
     return Container(
-      padding: const EdgeInsets.all(3),
+      padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
         color: Colors.white.withOpacity(0.08),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
+        border: Border.all(color: Colors.white.withOpacity(0.15), width: 1),
       ),
       child: Row(
         children: [
-          Expanded(
-            child: GestureDetector(
-              onTap: () {
+          _togglePill(
+            active: isStudent,
+            icon: Icons.school_rounded,
+            label: 'Student',
+            onTap: () {
+              if (!isStudent) {
                 setState(() => isStudent = true);
-                _cardController..reset()..forward();
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: isStudent
-                      ? Colors.white.withOpacity(0.18)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    Icon(Icons.school_rounded, color: Colors.white, size: 18),
-                    SizedBox(width: 6),
-                    Text('Student',
-                        style: TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-            ),
+                _cardController
+                  ..reset()
+                  ..forward();
+              }
+            },
           ),
-          Expanded(
-            child: GestureDetector(
-              onTap: () {
+          const SizedBox(width: 6),
+          _togglePill(
+            active: !isStudent,
+            icon: Icons.person_outline_rounded,
+            label: 'Instructor',
+            onTap: () {
+              if (isStudent) {
                 setState(() => isStudent = false);
-                _cardController..reset()..forward();
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                decoration: BoxDecoration(
-                  color: !isStudent
-                      ? Colors.white.withOpacity(0.18)
-                      : Colors.transparent,
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: const [
-                    Icon(Icons.person_outline_rounded,
-                        color: Colors.white, size: 18),
-                    SizedBox(width: 6),
-                    Text('Instructor',
-                        style: TextStyle(
-                            color: Colors.white, fontWeight: FontWeight.w600)),
-                  ],
-                ),
-              ),
-            ),
+                _cardController
+                  ..reset()
+                  ..forward();
+              }
+            },
           ),
         ],
       ),
     );
   }
 
-  Widget _buildTextFieldCompact({
+  Expanded _togglePill({
+    required bool active,
+    required IconData icon,
+    required String label,
+    required VoidCallback onTap,
+  }) {
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          curve: Curves.easeOut,
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: active ? Colors.white.withOpacity(0.18) : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            boxShadow: active
+                ? [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.12),
+                      blurRadius: 12,
+                      offset: const Offset(0, 6),
+                    )
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(icon, color: Colors.white, size: 18),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTextField({
     required TextEditingController controller,
     required String label,
     required IconData icon,
+    FocusNode? focusNode,
+    FocusNode? nextNode,
     TextInputType keyboardType = TextInputType.text,
+    TextInputAction textInputAction = TextInputAction.next,
+    List<TextInputFormatter>? inputFormatters,
     String? Function(String?)? validator,
+    List<String>? autofillHints,
   }) {
-    return Container(
-      height: 44,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
-      ),
+    return _FieldShell(
       child: TextFormField(
         controller: controller,
+        focusNode: focusNode,
         keyboardType: keyboardType,
-        style: const TextStyle(color: Colors.white, fontSize: 13),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle:
-              TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13),
-          prefixIcon:
-              Icon(icon, color: Colors.white.withOpacity(0.7), size: 18),
-          border: InputBorder.none,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-        ),
+        textInputAction: textInputAction,
+        onFieldSubmitted: (_) {
+          if (nextNode != null) FocusScope.of(context).requestFocus(nextNode);
+        },
+        autofillHints: autofillHints,
+        style: const TextStyle(color: Colors.white, fontSize: 13.5),
+        inputFormatters: inputFormatters,
+        decoration: _decoration(label, icon),
         validator: validator ??
             (value) {
-              if (value == null || value.isEmpty) return 'Please enter $label';
+              if (value == null || value.isEmpty) {
+                return 'Please enter $label';
+              }
               if (label == 'Email Address' &&
                   !RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
-                      .hasMatch(value.trim())) {
+                      .hasMatch(value.trim().toLowerCase())) {
                 return 'Please enter a valid email address';
               }
               return null;
@@ -508,42 +642,46 @@ class _RegisterScreenState extends State<RegisterScreen>
     );
   }
 
-  Widget _buildPasswordFieldCompact({
+  Widget _buildPasswordField({
     required TextEditingController controller,
     required String label,
     required bool obscureText,
     required VoidCallback onToggle,
+    FocusNode? focusNode,
+    FocusNode? nextNode,
+    TextInputAction textInputAction = TextInputAction.next,
     String? Function(String?)? validator,
+    void Function(String)? onFieldSubmitted,
+    List<String>? autofillHints,
   }) {
-    return Container(
-      height: 44,
-      decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withOpacity(0.2), width: 1),
-      ),
+    return _FieldShell(
       child: TextFormField(
         controller: controller,
+        focusNode: focusNode,
         obscureText: obscureText,
-        style: const TextStyle(color: Colors.white, fontSize: 13),
-        decoration: InputDecoration(
-          labelText: label,
-          labelStyle:
-              TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13),
-          prefixIcon: Icon(Icons.lock_outline,
-              color: Colors.white.withOpacity(0.7), size: 18),
+        textInputAction: textInputAction,
+        onFieldSubmitted: (s) {
+          if (onFieldSubmitted != null) {
+            onFieldSubmitted(s);
+            return;
+          }
+          if (nextNode != null) {
+            FocusScope.of(context).requestFocus(nextNode);
+          }
+        },
+        autofillHints: autofillHints,
+        style: const TextStyle(color: Colors.white, fontSize: 13.5),
+        decoration: _decoration(label, Icons.lock_outline).copyWith(
           suffixIcon: IconButton(
             padding: EdgeInsets.zero,
             icon: Icon(
               obscureText ? Icons.visibility_off : Icons.visibility,
               size: 18,
-              color: Colors.white.withOpacity(0.7),
+              color: Colors.white.withOpacity(0.75),
             ),
             onPressed: onToggle,
+            tooltip: obscureText ? 'Show password' : 'Hide password',
           ),
-          border: InputBorder.none,
-          contentPadding:
-              const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
         ),
         validator: validator ??
             (value) {
@@ -559,7 +697,19 @@ class _RegisterScreenState extends State<RegisterScreen>
     );
   }
 
-  Widget _buildTermsAndConditionsCompact() {
+  InputDecoration _decoration(String label, IconData icon) {
+    return InputDecoration(
+      labelText: label,
+      labelStyle:
+          TextStyle(color: Colors.white.withOpacity(0.8), fontSize: 13.5),
+      prefixIcon: Icon(icon, color: Colors.white.withOpacity(0.8), size: 18),
+      border: InputBorder.none,
+      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      errorStyle: const TextStyle(fontSize: 11.5, height: 1.2),
+    );
+  }
+
+  Widget _buildTermsAndConditions() {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -568,29 +718,34 @@ class _RegisterScreenState extends State<RegisterScreen>
           width: 18,
           child: Checkbox(
             value: agreeToTerms,
-            onChanged: (value) => setState(() => agreeToTerms = value ?? false),
+            onChanged: _isLoading
+                ? null
+                : (value) => setState(() => agreeToTerms = value ?? false),
             fillColor:
-                MaterialStateProperty.all(Colors.white.withOpacity(0.85)),
-            checkColor: const Color(0xFF6366F1),
+                MaterialStateProperty.all(Colors.white.withOpacity(0.95)),
+            checkColor: const Color(0xFF4C63D2),
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
         ),
         const SizedBox(width: 8),
         Expanded(
           child: GestureDetector(
-            onTap: () => setState(() => agreeToTerms = !agreeToTerms),
+            onTap: _isLoading
+                ? null
+                : () => setState(() => agreeToTerms = !agreeToTerms),
             child: RichText(
               text: TextSpan(
                 style: TextStyle(
-                    color: Colors.white.withOpacity(0.85), fontSize: 12),
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 12.5,
+                ),
                 children: const [
                   TextSpan(text: 'I agree to the '),
                   TextSpan(
                     text: 'Terms of Service',
                     style: TextStyle(
                       color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                   TextSpan(text: ' and '),
@@ -598,8 +753,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                     text: 'Privacy Policy',
                     style: TextStyle(
                       color: Colors.white,
-                      fontWeight: FontWeight.bold,
-                      
+                      fontWeight: FontWeight.w700,
                     ),
                   ),
                 ],
@@ -611,41 +765,52 @@ class _RegisterScreenState extends State<RegisterScreen>
     );
   }
 
-  Widget _buildRegisterButtonCompact() {
+  Widget _buildRegisterButton() {
+    final canSubmit = !_isLoading && agreeToTerms;
+
     return SizedBox(
       height: 48,
-      
       child: ElevatedButton(
-        onPressed: _isLoading ? null : _handleRegister,
+        onPressed: canSubmit ? _handleRegister : null,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white.withOpacity(0.92),
-          foregroundColor: const Color(0xFF6366F1),
-          elevation: 7,
+          backgroundColor: canSubmit
+              ? Colors.white.withOpacity(0.98)
+              : Colors.white.withOpacity(0.55),
+          foregroundColor: const Color(0xFF0F172A),
+          elevation: canSubmit ? 10 : 0,
           shadowColor: Colors.black.withOpacity(0.28),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         ),
-        child: _isLoading
-            ? const SizedBox(
-                height: 18,
-                width: 18,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            : Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: const [
-                  Text('Create Account',
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          child: _isLoading
+              ? const SizedBox(
+                  key: ValueKey('spinner'),
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Row(
+                  key: const ValueKey('label'),
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: const [
+                    Text(
+                      'Create Account',
                       style:
-                          TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
-                  SizedBox(width: 6),
-                  Icon(Icons.person_add_rounded, size: 18),
-                ],
-              ),
+                          TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+                    ),
+                    SizedBox(width: 6),
+                    Icon(Icons.person_add_rounded, size: 18),
+                  ],
+                ),
+        ),
       ),
     );
   }
 
   // Toast-like snack
-  void _showToast(String msg, {bool success = false}) {
+  void _toast(String msg, {bool success = false}) {
     final bg = Colors.white;
     final txtColor = Colors.black87;
     final iconColor = success ? Colors.green : Colors.pink;
@@ -664,9 +829,9 @@ class _RegisterScreenState extends State<RegisterScreen>
             borderRadius: BorderRadius.circular(40),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(0.1),
-                blurRadius: 6,
-                offset: const Offset(0, 3),
+                color: Colors.black.withOpacity(0.12),
+                blurRadius: 10,
+                offset: const Offset(0, 6),
               ),
             ],
           ),
@@ -689,12 +854,12 @@ class _RegisterScreenState extends State<RegisterScreen>
               Flexible(
                 child: Text(
                   msg,
-                  maxLines: 1,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     color: txtColor,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w600,
                   ),
                 ),
               ),
@@ -706,7 +871,65 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 }
 
-/// ===== Animated multi-blob gradient painter (shared) =====
+// ─────────────────────────────────────────────────────────────────────────────
+// Frosted glass card wrapper (cleaner visual than raw container)
+// ─────────────────────────────────────────────────────────────────────────────
+class _GlassCard extends StatelessWidget {
+  const _GlassCard({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(22),
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
+        child: Container(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 14),
+          decoration: BoxDecoration(
+            color: Colors.white.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: Colors.white.withOpacity(0.18), width: 1),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withOpacity(0.18),
+                blurRadius: 22,
+                offset: const Offset(0, 12),
+              ),
+            ],
+          ),
+          child: child,
+        ),
+      ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Field shell to keep height flexible for errors while preserving look
+// ─────────────────────────────────────────────────────────────────────────────
+class _FieldShell extends StatelessWidget {
+  const _FieldShell({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      // No fixed height: lets error text breathe
+      decoration: BoxDecoration(
+        color: Colors.white.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withOpacity(0.20), width: 1),
+      ),
+      padding: const EdgeInsets.only(left: 0, right: 0), // input has padding
+      child: child,
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Animated multi-blob gradient painter
+// ─────────────────────────────────────────────────────────────────────────────
 class _BlobGradientPainter extends CustomPainter {
   final Animation<double> animation;
 

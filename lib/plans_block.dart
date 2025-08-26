@@ -11,30 +11,47 @@ class PlansBlock extends StatefulWidget {
   State<PlansBlock> createState() => _PlansBlockState();
 }
 
-/// Lightweight Plan model
+/// Plan model
 class Plan {
-  final String id; // we use name as id by default; can be a slug
+  final String id; // slug of name
   final String name;
-  final int price; // monthly price OR per-lesson price for flexible plans
+
+  /// For slot-based plans: total plan price.
+  /// For Pay-Per-Use: always 0; UI shows "Pay as you go".
+  final int price;
+
+  /// Slot-based charging
   final int slots;
-  final int lessons;
+
+  /// Study materials & tests (ignored if include-all is true)
+  final int studyMaterials;
+  final int tests;
+  final bool includeAllStudyMaterials;
+  final bool includeAllTests;
+
+  /// Alternate plan type
+  final bool isPayPerUse;
+
+  /// Optional transport
   final bool extraKmSurcharge;
   final int surcharge;
   final bool freePickupRadius;
   final int freeRadius;
+
   final bool active;
   final Timestamp? createdAt;
   final Timestamp? updatedAt;
 
-  bool get isFlexible => slots == 0 && lessons == 0;
-  String get priceSuffix => isFlexible ? ' per lesson' : ' per month';
-
-  Plan({
+  const Plan({
     required this.id,
     required this.name,
     required this.price,
     required this.slots,
-    required this.lessons,
+    required this.studyMaterials,
+    required this.tests,
+    required this.includeAllStudyMaterials,
+    required this.includeAllTests,
+    required this.isPayPerUse,
     required this.extraKmSurcharge,
     required this.surcharge,
     required this.freePickupRadius,
@@ -46,16 +63,28 @@ class Plan {
 
   factory Plan.fromDoc(DocumentSnapshot doc) {
     final d = (doc.data() as Map<String, dynamic>? ?? {});
+    final legacyFlexible = (d['isFlexible'] == true) ||
+        ((d['slots'] ?? 0) == 0 && (d['lessons'] != null));
+    final isPPU = (d['isPayPerUse'] ?? false) as bool || legacyFlexible;
+
     return Plan(
       id: doc.id,
       name: (d['name'] ?? doc.id).toString(),
-      price: (d['price'] ?? 0) as int,
+      price: isPPU ? 0 : (d['price'] ?? 0) as int, // PPU force 0
       slots: (d['slots'] ?? 0) as int,
-      lessons: (d['lessons'] ?? 0) as int,
+
+      studyMaterials: (d['studyMaterials'] ?? 0) as int,
+      tests: (d['tests'] ?? 0) as int,
+      includeAllStudyMaterials: (d['includeAllStudyMaterials'] ?? false) as bool,
+      includeAllTests: (d['includeAllTests'] ?? false) as bool,
+
+      isPayPerUse: isPPU,
+
       extraKmSurcharge: (d['extraKmSurcharge'] ?? false) as bool,
       surcharge: (d['surcharge'] ?? 0) as int,
       freePickupRadius: (d['freePickupRadius'] ?? false) as bool,
       freeRadius: (d['freeRadius'] ?? 0) as int,
+
       active: (d['active'] ?? true) as bool,
       createdAt: d['created_at'] as Timestamp?,
       updatedAt: d['updated_at'] as Timestamp?,
@@ -66,13 +95,19 @@ class Plan {
     final now = FieldValue.serverTimestamp();
     return {
       'name': name,
-      'price': price,
-      'slots': slots,
-      'lessons': lessons,
+      'price': isPayPerUse ? 0 : price, // persist 0 for PPU
+      'slots': isPayPerUse ? 0 : slots,
+      'studyMaterials': isPayPerUse ? 0 : (includeAllStudyMaterials ? 0 : studyMaterials),
+      'tests': isPayPerUse ? 0 : (includeAllTests ? 0 : tests),
+      'includeAllStudyMaterials': isPayPerUse ? false : includeAllStudyMaterials,
+      'includeAllTests': isPayPerUse ? false : includeAllTests,
+      'isPayPerUse': isPayPerUse,
+
       'extraKmSurcharge': extraKmSurcharge,
       'surcharge': extraKmSurcharge ? surcharge : 0,
       'freePickupRadius': freePickupRadius,
       'freeRadius': freePickupRadius ? freeRadius : 0,
+
       'active': active,
       if (forCreate) 'created_at': now,
       'updated_at': now,
@@ -85,6 +120,21 @@ class _PlansBlockState extends State<PlansBlock> {
 
   void _snack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+  Future<void> _runWithSpinner(Future<void> Function() task) async {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(
+        child: SizedBox(width: 56, height: 56, child: CircularProgressIndicator()),
+      ),
+    );
+    try {
+      await task();
+    } finally {
+      if (mounted) Navigator.of(context, rootNavigator: true).pop(); // close spinner
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -109,12 +159,10 @@ class _PlansBlockState extends State<PlansBlock> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           SizedBox(
-                            width: isTablet ? 360 : 380,
+                            width: isTablet ? 360 : 420,
                             child: Column(
                               children: [
-                                _QuickCard(child: _buildQuickActions()),
-                                const SizedBox(height: 16),
-                                _QuickCard(child: _buildCreateCustomPlan()),
+                                _QuickCard(child: _buildCreatePlanCard()),
                               ],
                             ),
                           ),
@@ -153,7 +201,7 @@ class _PlansBlockState extends State<PlansBlock> {
               borderRadius: BorderRadius.circular(999),
             ),
             child: const Text(
-              'Create & Manage Subscription Plans',
+              'Create & Manage Slot-Based / Pay-Per-Use',
               style: TextStyle(
                 color: AppColors.primary,
                 fontSize: 12,
@@ -169,9 +217,7 @@ class _PlansBlockState extends State<PlansBlock> {
   Widget _buildPhoneLayout() {
     return ListView(
       children: [
-        _QuickCard(child: _buildQuickActions()),
-        const SizedBox(height: 12),
-        _QuickCard(child: _buildCreateCustomPlan()),
+        _QuickCard(child: _buildCreatePlanCard()),
         const SizedBox(height: 12),
         _QuickCard(
           child: SizedBox(
@@ -183,92 +229,81 @@ class _PlansBlockState extends State<PlansBlock> {
     );
   }
 
-  // ---------- Quick Actions ----------
-  Widget _buildQuickActions() {
+  // ---------- Create Plan / Pay-Per-Use ----------
+  Widget _buildCreatePlanCard() {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _SectionTitle(icon: Icons.flash_on, title: 'Quick Actions'),
+        const _SectionTitle(icon: Icons.design_services, title: 'Create Plan'),
         const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton.icon(
-            onPressed: () => _openPlanForm(
-              context,
-              initial: Plan(
-                id: 'Pay-Per-Use',
-                name: 'Pay-Per-Use',
-                price: 500,
-                slots: 0,
-                lessons: 0,
-                extraKmSurcharge: true,
-                surcharge: 15,
-                freePickupRadius: true,
-                freeRadius: 5,
-                active: true,
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: () => _openSlotsPlanForm(
+                  context,
+                  initial: Plan(
+                    id: '',
+                    name: '',
+                    price: 0,
+                    slots: 12,
+                    studyMaterials: 0,
+                    tests: 0,
+                    includeAllStudyMaterials: false,
+                    includeAllTests: false,
+                    isPayPerUse: false,
+                    extraKmSurcharge: false,
+                    surcharge: 0,
+                    freePickupRadius: false,
+                    freeRadius: 0,
+                    active: true,
+                  ),
+                  isCreate: true,
+                ),
+                icon: const Icon(Icons.add_circle_outline, size: 18),
+                label: const Text('Create Plan'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: AppColors.primary,
+                  side: const BorderSide(color: AppColors.primary, width: 1.2),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
               ),
-              isCreate: true,
-              forceFlexible: true,
             ),
-            icon: const Icon(Icons.add_circle_outline, size: 18),
-            label: const Text('Create Pay-Per-Use Plan'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            const SizedBox(width: 10),
+            Expanded(
+              child: ElevatedButton.icon(
+                onPressed: () => _openPayPerUseForm(
+                  context,
+                  initial: Plan(
+                    id: 'pay-per-use',
+                    name: 'Pay-Per-Use',
+                    price: 0, // forced 0; UI shows "Pay as you go"
+                    slots: 0,
+                    studyMaterials: 0,
+                    tests: 0,
+                    includeAllStudyMaterials: false,
+                    includeAllTests: false,
+                    isPayPerUse: true,
+                    extraKmSurcharge: true,
+                    surcharge: 15,
+                    freePickupRadius: true,
+                    freeRadius: 5,
+                    active: true,
+                  ),
+                  isCreate: true,
+                ),
+                icon: const Icon(Icons.flash_on, size: 18),
+                label: const Text('Pay-Per-Use'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        _InfoTile(
-          title: 'Pay-Per-Use Details',
-          lines: const [
-            'No monthly commitment',
-            'Pay only for lessons taken',
-            'Perfect for occasional learners',
           ],
-        ),
-      ],
-    );
-  }
-
-  // ---------- Create Custom ----------
-  Widget _buildCreateCustomPlan() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SectionTitle(icon: Icons.design_services, title: 'Create Custom Plan'),
-        const SizedBox(height: 12),
-        SizedBox(
-          width: double.infinity,
-          child: OutlinedButton.icon(
-            onPressed: () => _openPlanForm(
-              context,
-              initial: Plan(
-                id: '',
-                name: '',
-                price: 0,
-                slots: 12,
-                lessons: 12,
-                extraKmSurcharge: false,
-                surcharge: 0,
-                freePickupRadius: false,
-                freeRadius: 0,
-                active: true,
-              ),
-              isCreate: true,
-              forceFlexible: false,
-            ),
-            icon: const Icon(Icons.tune, size: 18),
-            label: const Text('Create Custom Plan'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: AppColors.primary,
-              side: const BorderSide(color: AppColors.primary, width: 1.2),
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-            ),
-          ),
         ),
       ],
     );
@@ -294,14 +329,18 @@ class _PlansBlockState extends State<PlansBlock> {
 
         if (plans.isEmpty) {
           return _EmptyState(onPrimaryAction: () {
-            _openPlanForm(
+            _openSlotsPlanForm(
               context,
               initial: Plan(
                 id: '',
                 name: '',
                 price: 0,
                 slots: 12,
-                lessons: 12,
+                studyMaterials: 0,
+                tests: 0,
+                includeAllStudyMaterials: false,
+                includeAllTests: false,
+                isPayPerUse: false,
                 extraKmSurcharge: false,
                 surcharge: 0,
                 freePickupRadius: false,
@@ -309,7 +348,6 @@ class _PlansBlockState extends State<PlansBlock> {
                 active: true,
               ),
               isCreate: true,
-              forceFlexible: false,
             );
           });
         }
@@ -317,7 +355,6 @@ class _PlansBlockState extends State<PlansBlock> {
         return LayoutBuilder(
           builder: (context, c) {
             final w = c.maxWidth;
-            // Responsive columns: 1 (<=520), 2 (<=900), 3 (<=1280), 4 (>)
             int cols = 1;
             if (w > 520) cols = 2;
             if (w > 900) cols = 3;
@@ -326,7 +363,7 @@ class _PlansBlockState extends State<PlansBlock> {
             return GridView.builder(
               gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                 crossAxisCount: cols,
-                mainAxisExtent: 180,
+                mainAxisExtent: 220,
                 crossAxisSpacing: 14,
                 mainAxisSpacing: 14,
               ),
@@ -334,10 +371,12 @@ class _PlansBlockState extends State<PlansBlock> {
               itemBuilder: (_, i) => _PlanCard(
                 plan: plans[i],
                 currency: _currency,
-                onEdit: (p) => _openPlanForm(context, initial: p, isCreate: false),
-                onToggleActive: (p) => _toggleActive(p),
-                onDuplicate: (p) => _duplicatePlan(p),
-                onDelete: (p) => _deletePlan(p),
+                onEdit: (p) => p.isPayPerUse
+                    ? _openPayPerUseForm(context, initial: p, isCreate: false)
+                    : _openSlotsPlanForm(context, initial: p, isCreate: false),
+                onToggleActive: (p) => _runWithSpinner(() => _toggleActive(p)),
+                onDuplicate: (p) => _runWithSpinner(() => _duplicatePlan(p)),
+                onDelete: (p) => _runWithSpinner(() => _deletePlan(p)),
               ),
             );
           },
@@ -348,37 +387,33 @@ class _PlansBlockState extends State<PlansBlock> {
 
   // ---------- CRUD helpers ----------
   Future<void> _toggleActive(Plan p) async {
-    try {
-      await FirebaseFirestore.instance.collection('plans').doc(p.id).update({
-        'active': !p.active,
-        'updated_at': FieldValue.serverTimestamp(),
-      });
-      _snack('Plan ${!p.active ? "activated" : "deactivated"}');
-    } catch (e) {
-      _snack('Failed to update status: $e');
-    }
+    await FirebaseFirestore.instance.collection('plans').doc(p.id).update({
+      'active': !p.active,
+      'updated_at': FieldValue.serverTimestamp(),
+    });
+    _snack('Plan ${!p.active ? "activated" : "deactivated"}');
   }
 
   Future<void> _duplicatePlan(Plan p) async {
-    try {
-      final newId = _safeId('${p.name} Copy');
-      final newPlan = Plan(
-        id: newId,
-        name: '${p.name} Copy',
-        price: p.price,
-        slots: p.slots,
-        lessons: p.lessons,
-        extraKmSurcharge: p.extraKmSurcharge,
-        surcharge: p.surcharge,
-        freePickupRadius: p.freePickupRadius,
-        freeRadius: p.freeRadius,
-        active: p.active,
-      );
-      await FirebaseFirestore.instance.collection('plans').doc(newId).set(newPlan.toMap(forCreate: true));
-      _snack('Duplicated "${p.name}"');
-    } catch (e) {
-      _snack('Failed to duplicate: $e');
-    }
+    final newId = _safeId('${p.name} Copy');
+    final newPlan = Plan(
+      id: newId,
+      name: '${p.name} Copy',
+      price: p.isPayPerUse ? 0 : p.price,
+      slots: p.slots,
+      studyMaterials: p.studyMaterials,
+      tests: p.tests,
+      includeAllStudyMaterials: p.includeAllStudyMaterials,
+      includeAllTests: p.includeAllTests,
+      isPayPerUse: p.isPayPerUse,
+      extraKmSurcharge: p.extraKmSurcharge,
+      surcharge: p.surcharge,
+      freePickupRadius: p.freePickupRadius,
+      freeRadius: p.freeRadius,
+      active: p.active,
+    );
+    await FirebaseFirestore.instance.collection('plans').doc(newId).set(newPlan.toMap(forCreate: true));
+    _snack('Duplicated "${p.name}"');
   }
 
   Future<void> _deletePlan(Plan p) async {
@@ -399,27 +434,309 @@ class _PlansBlockState extends State<PlansBlock> {
     );
     if (confirmed != true) return;
 
-    try {
-      await FirebaseFirestore.instance.collection('plans').doc(p.id).delete();
-      _snack('Deleted "${p.name}"');
-    } catch (e) {
-      _snack('Error deleting: $e');
-    }
+    await FirebaseFirestore.instance.collection('plans').doc(p.id).delete();
+    _snack('Deleted "${p.name}"');
   }
 
-  // ---------- Form (Create / Edit) ----------
-  Future<void> _openPlanForm(
+  // ---------- Forms ----------
+  Future<void> _openSlotsPlanForm(
     BuildContext context, {
     required Plan initial,
     required bool isCreate,
-    bool forceFlexible = false,
   }) async {
     final formKey = GlobalKey<FormState>();
 
     final nameCtrl = TextEditingController(text: initial.name);
     final priceCtrl = TextEditingController(text: initial.price == 0 ? '' : initial.price.toString());
     final slotsCtrl = TextEditingController(text: initial.slots.toString());
-    final lessonsCtrl = TextEditingController(text: initial.lessons.toString());
+    final studyCtrl = TextEditingController(text: initial.studyMaterials.toString());
+    final testsCtrl = TextEditingController(text: initial.tests.toString());
+    final surchargeCtrl = TextEditingController(text: initial.surcharge.toString());
+    final radiusCtrl = TextEditingController(text: initial.freeRadius.toString());
+
+    bool extraKm = initial.extraKmSurcharge;
+    bool freePickup = initial.freePickupRadius;
+    bool active = initial.active;
+    bool allStudy = initial.includeAllStudyMaterials;
+    bool allTests = initial.includeAllTests;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => Dialog(
+        insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 520),
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: StatefulBuilder(
+              builder: (context, setState) => SingleChildScrollView(
+                child: Form(
+                  key: formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(isCreate ? 'Create Slot-Based Plan' : 'Edit Slot-Based Plan',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                      const SizedBox(height: 16),
+
+                      _LabeledField(
+                        label: 'Plan Name',
+                        child: TextFormField(
+                          controller: nameCtrl,
+                          decoration: const InputDecoration(hintText: 'e.g., Starter, Pro'),
+                          validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter a plan name' : null,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      _LabeledField(
+                        label: 'Plan Price (₹)',
+                        child: TextFormField(
+                          controller: priceCtrl,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          decoration: const InputDecoration(hintText: 'e.g., 1999'),
+                          validator: (v) {
+                            if (v == null || v.trim().isEmpty) return 'Enter a price';
+                            final n = int.tryParse(v);
+                            if (n == null || n < 0) return 'Enter a valid number';
+                            return null;
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      _LabeledField(
+                        label: 'Number of Slots',
+                        child: TextFormField(
+                          controller: slotsCtrl,
+                          keyboardType: TextInputType.number,
+                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                          decoration: const InputDecoration(hintText: 'e.g., 12'),
+                          validator: (v) {
+                            final n = int.tryParse(v ?? '');
+                            if (n == null || n < 0) return 'Enter a valid number';
+                            return null;
+                          },
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      const Divider(height: 24),
+                      const Text('Study Materials & Tests', style: TextStyle(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+
+                      CheckboxListTile(
+                        value: allStudy,
+                        onChanged: (vv) => setState(() => allStudy = vv ?? false),
+                        title: const Text('Include All Study Materials'),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                      ),
+                      if (!allStudy)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _LabeledField(
+                            label: 'Number of Study Materials',
+                            child: TextFormField(
+                              controller: studyCtrl,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                              decoration: const InputDecoration(hintText: 'e.g., 10'),
+                              validator: (v) {
+                                final n = int.tryParse(v ?? '');
+                                if (n == null || n < 0) return 'Enter a valid number';
+                                return null;
+                              },
+                            ),
+                          ),
+                        ),
+
+                      CheckboxListTile(
+                        value: allTests,
+                        onChanged: (vv) => setState(() => allTests = vv ?? false),
+                        title: const Text('Include All Tests'),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                      ),
+                      if (!allTests)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _LabeledField(
+                            label: 'Number of Tests',
+                            child: TextFormField(
+                              controller: testsCtrl,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                              decoration: const InputDecoration(hintText: 'e.g., 4'),
+                              validator: (v) {
+                                final n = int.tryParse(v ?? '');
+                                if (n == null || n < 0) return 'Enter a valid number';
+                                return null;
+                              },
+                            ),
+                          ),
+                        ),
+
+                      const Divider(height: 24),
+                      const Text('Optional Transport Rules', style: TextStyle(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+
+                      CheckboxListTile(
+                        value: extraKm,
+                        onChanged: (vv) => setState(() => extraKm = vv ?? false),
+                        title: const Text('Extra KM Surcharge'),
+                        subtitle: const Text('Charge extra for kilometers beyond limit'),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                      ),
+                      if (extraKm)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _LabeledField(
+                            label: 'Surcharge per KM (₹)',
+                            child: TextFormField(
+                              controller: surchargeCtrl,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                              decoration: const InputDecoration(hintText: 'e.g., 15'),
+                              validator: (v) {
+                                final n = int.tryParse(v ?? '');
+                                if (n == null || n < 0) return 'Enter a valid number';
+                                return null;
+                              },
+                            ),
+                          ),
+                        ),
+
+                      CheckboxListTile(
+                        value: freePickup,
+                        onChanged: (vv) => setState(() => freePickup = vv ?? false),
+                        title: const Text('Free Pickup Radius'),
+                        subtitle: const Text('Offer free pickup within specified radius'),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                      ),
+                      if (freePickup)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _LabeledField(
+                            label: 'Free Radius (KM)',
+                            child: TextFormField(
+                              controller: radiusCtrl,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                              decoration: const InputDecoration(hintText: 'e.g., 5'),
+                              validator: (v) {
+                                final n = int.tryParse(v ?? '');
+                                if (n == null || n < 0) return 'Enter a valid number';
+                                return null;
+                              },
+                            ),
+                          ),
+                        ),
+
+                      const SizedBox(height: 8),
+                      SwitchListTile.adaptive(
+                        value: active,
+                        onChanged: (vv) => setState(() => active = vv),
+                        title: const Text('Plan is Active'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                          const Spacer(),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: Colors.white,
+                            ),
+                            onPressed: () async {
+                              if (!formKey.currentState!.validate()) return;
+
+                              final name = nameCtrl.text.trim();
+                              final id = _safeId(name);
+                              final price = int.parse(priceCtrl.text.trim());
+                              final slots = int.parse(slotsCtrl.text.trim());
+                              final studyMaterials = allStudy ? 0 : int.parse(studyCtrl.text.trim().isEmpty ? '0' : studyCtrl.text.trim());
+                              final tests = allTests ? 0 : int.parse(testsCtrl.text.trim().isEmpty ? '0' : testsCtrl.text.trim());
+                              final surcharge = extraKm ? int.parse(surchargeCtrl.text.trim().isEmpty ? '0' : surchargeCtrl.text.trim()) : 0;
+                              final freeRadius = freePickup ? int.parse(radiusCtrl.text.trim().isEmpty ? '0' : radiusCtrl.text.trim()) : 0;
+
+                              final data = Plan(
+                                id: id,
+                                name: name,
+                                price: price,
+                                slots: slots,
+                                studyMaterials: studyMaterials,
+                                tests: tests,
+                                includeAllStudyMaterials: allStudy,
+                                includeAllTests: allTests,
+                                isPayPerUse: false,
+                                extraKmSurcharge: extraKm,
+                                surcharge: surcharge,
+                                freePickupRadius: freePickup,
+                                freeRadius: freeRadius,
+                                active: active,
+                              );
+
+                              await _runWithSpinner(() async {
+                                if (isCreate) {
+                                  await FirebaseFirestore.instance.collection('plans').doc(id).set(data.toMap(forCreate: true));
+                                  _snack('Plan “$name” created');
+                                } else {
+                                  if (id != initial.id) {
+                                    final batch = FirebaseFirestore.instance.batch();
+                                    final newRef = FirebaseFirestore.instance.collection('plans').doc(id);
+                                    final oldRef = FirebaseFirestore.instance.collection('plans').doc(initial.id);
+                                    batch.set(newRef, data.toMap(forCreate: true));
+                                    batch.delete(oldRef);
+                                    await batch.commit();
+                                  } else {
+                                    await FirebaseFirestore.instance.collection('plans').doc(id).update(data.toMap());
+                                  }
+                                  _snack('Plan “$name” updated');
+                                }
+                              });
+
+                              if (mounted) Navigator.pop(context);
+                            },
+                            child: Text(isCreate ? 'Create Plan' : 'Save Changes'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+
+    nameCtrl.dispose();
+    priceCtrl.dispose();
+    slotsCtrl.dispose();
+    studyCtrl.dispose();
+    testsCtrl.dispose();
+    surchargeCtrl.dispose();
+    radiusCtrl.dispose();
+  }
+
+  Future<void> _openPayPerUseForm(
+    BuildContext context, {
+    required Plan initial,
+    required bool isCreate,
+  }) async {
+    final formKey = GlobalKey<FormState>();
+
+    final nameCtrl = TextEditingController(text: initial.name);
     final surchargeCtrl = TextEditingController(text: initial.surcharge.toString());
     final radiusCtrl = TextEditingController(text: initial.freeRadius.toString());
 
@@ -441,166 +758,86 @@ class _PlansBlockState extends State<PlansBlock> {
                 child: Form(
                   key: formKey,
                   child: Column(
-                    mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(
-                        isCreate
-                            ? (forceFlexible ? 'Create Pay-Per-Use Plan' : 'Create Custom Plan')
-                            : 'Edit Plan',
-                        style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
-                      ),
+                      Text(isCreate ? 'Create Pay-Per-Use' : 'Edit Pay-Per-Use',
+                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
                       const SizedBox(height: 16),
 
-                      // Name
                       _LabeledField(
                         label: 'Plan Name',
                         child: TextFormField(
                           controller: nameCtrl,
-                          decoration: const InputDecoration(hintText: 'e.g., Starter, Pro, Pay-Per-Use'),
+                          decoration: const InputDecoration(hintText: 'e.g., Pay-Per-Use'),
                           validator: (v) => (v == null || v.trim().isEmpty) ? 'Enter a plan name' : null,
                         ),
                       ),
                       const SizedBox(height: 12),
 
-                      // Price
-                      _LabeledField(
-                        label: forceFlexible ? 'Price per Lesson (₹)' : 'Monthly Price (₹)',
-                        child: TextFormField(
-                          controller: priceCtrl,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                          decoration: const InputDecoration(hintText: 'e.g., 799'),
-                          validator: (v) {
-                            if (v == null || v.trim().isEmpty) return 'Enter a price';
-                            final n = int.tryParse(v);
-                            if (n == null || n < 0) return 'Enter a valid number';
-                            return null;
-                          },
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-
-                      // Slots & Lessons (hidden for flexible if you want)
-                      Opacity(
-                        opacity: forceFlexible ? 0.6 : 1.0,
-                        child: IgnorePointer(
-                          ignoring: forceFlexible,
-                          child: Row(
-                            children: [
-                              Expanded(
-                                child: _LabeledField(
-                                  label: 'Number of Slots',
-                                  child: TextFormField(
-                                    controller: slotsCtrl,
-                                    keyboardType: TextInputType.number,
-                                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                    decoration: const InputDecoration(hintText: 'e.g., 12'),
-                                    validator: (v) {
-                                      final n = int.tryParse(v ?? '');
-                                      if (n == null || n < 0) return 'Enter a valid number';
-                                      return null;
-                                    },
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: _LabeledField(
-                                  label: 'Number of Lessons',
-                                  child: TextFormField(
-                                    controller: lessonsCtrl,
-                                    keyboardType: TextInputType.number,
-                                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                    decoration: const InputDecoration(hintText: 'e.g., 12'),
-                                    validator: (v) {
-                                      final n = int.tryParse(v ?? '');
-                                      if (n == null || n < 0) return 'Enter a valid number';
-                                      return null;
-                                    },
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
+                      // No price field for PPU; price is always 0 and UI shows "Pay as you go"
 
                       const Divider(height: 24),
-                      const Text('Additional Features', style: TextStyle(fontWeight: FontWeight.w600)),
+                      const Text('Optional Transport Rules', style: TextStyle(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
 
                       CheckboxListTile(
                         value: extraKm,
-                        onChanged: (v) => setState(() => extraKm = v ?? false),
+                        onChanged: (vv) => setState(() => extraKm = vv ?? false),
                         title: const Text('Extra KM Surcharge'),
                         subtitle: const Text('Charge extra for kilometers beyond limit'),
                         contentPadding: EdgeInsets.zero,
                         controlAffinity: ListTileControlAffinity.leading,
                       ),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        child: extraKm
-                            ? Padding(
-                                key: const ValueKey('surcharge'),
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: _LabeledField(
-                                  label: 'Surcharge per KM (₹)',
-                                  child: TextFormField(
-                                    controller: surchargeCtrl,
-                                    keyboardType: TextInputType.number,
-                                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                    decoration: const InputDecoration(hintText: 'e.g., 15'),
-                                    validator: (v) {
-                                      final n = int.tryParse(v ?? '');
-                                      if (!extraKm) return null;
-                                      if (n == null || n < 0) return 'Enter a valid number';
-                                      return null;
-                                    },
-                                  ),
-                                ),
-                              )
-                            : const SizedBox.shrink(),
-                      ),
+                      if (extraKm)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _LabeledField(
+                            label: 'Surcharge per KM (₹)',
+                            child: TextFormField(
+                              controller: surchargeCtrl,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                              decoration: const InputDecoration(hintText: 'e.g., 15'),
+                              validator: (v) {
+                                final n = int.tryParse(v ?? '');
+                                if (n == null || n < 0) return 'Enter a valid number';
+                                return null;
+                              },
+                            ),
+                          ),
+                        ),
 
                       CheckboxListTile(
                         value: freePickup,
-                        onChanged: (v) => setState(() => freePickup = v ?? false),
+                        onChanged: (vv) => setState(() => freePickup = vv ?? false),
                         title: const Text('Free Pickup Radius'),
                         subtitle: const Text('Offer free pickup within specified radius'),
                         contentPadding: EdgeInsets.zero,
                         controlAffinity: ListTileControlAffinity.leading,
                       ),
-                      AnimatedSwitcher(
-                        duration: const Duration(milliseconds: 200),
-                        child: freePickup
-                            ? Padding(
-                                key: const ValueKey('radius'),
-                                padding: const EdgeInsets.only(bottom: 8),
-                                child: _LabeledField(
-                                  label: 'Free Radius (KM)',
-                                  child: TextFormField(
-                                    controller: radiusCtrl,
-                                    keyboardType: TextInputType.number,
-                                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                    decoration: const InputDecoration(hintText: 'e.g., 5'),
-                                    validator: (v) {
-                                      final n = int.tryParse(v ?? '');
-                                      if (!freePickup) return null;
-                                      if (n == null || n < 0) return 'Enter a valid number';
-                                      return null;
-                                    },
-                                  ),
-                                ),
-                              )
-                            : const SizedBox.shrink(),
-                      ),
+                      if (freePickup)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: _LabeledField(
+                            label: 'Free Radius (KM)',
+                            child: TextFormField(
+                              controller: radiusCtrl,
+                              keyboardType: TextInputType.number,
+                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                              decoration: const InputDecoration(hintText: 'e.g., 5'),
+                              validator: (v) {
+                                final n = int.tryParse(v ?? '');
+                                if (n == null || n < 0) return 'Enter a valid number';
+                                return null;
+                              },
+                            ),
+                          ),
+                        ),
 
                       const SizedBox(height: 8),
                       SwitchListTile.adaptive(
                         value: active,
-                        onChanged: (v) => setState(() => active = v),
+                        onChanged: (vv) => setState(() => active = vv),
                         title: const Text('Plan is Active'),
                         contentPadding: EdgeInsets.zero,
                       ),
@@ -608,10 +845,7 @@ class _PlansBlockState extends State<PlansBlock> {
                       const SizedBox(height: 16),
                       Row(
                         children: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(context),
-                            child: const Text('Cancel'),
-                          ),
+                          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
                           const Spacer(),
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
@@ -623,18 +857,19 @@ class _PlansBlockState extends State<PlansBlock> {
 
                               final name = nameCtrl.text.trim();
                               final id = _safeId(name);
-                              final price = int.parse(priceCtrl.text.trim());
-                              final slots = forceFlexible ? 0 : int.parse(slotsCtrl.text.trim());
-                              final lessons = forceFlexible ? 0 : int.parse(lessonsCtrl.text.trim());
-                              final surcharge = extraKm ? int.parse(surchargeCtrl.text.trim()) : 0;
-                              final freeRadius = freePickup ? int.parse(radiusCtrl.text.trim()) : 0;
+                              final surcharge = extraKm ? int.parse(surchargeCtrl.text.trim().isEmpty ? '0' : surchargeCtrl.text.trim()) : 0;
+                              final freeRadius = freePickup ? int.parse(radiusCtrl.text.trim().isEmpty ? '0' : radiusCtrl.text.trim()) : 0;
 
                               final data = Plan(
                                 id: id,
                                 name: name,
-                                price: price,
-                                slots: slots,
-                                lessons: lessons,
+                                price: 0, // Pay as you go
+                                slots: 0,
+                                studyMaterials: 0,
+                                tests: 0,
+                                includeAllStudyMaterials: false,
+                                includeAllTests: false,
+                                isPayPerUse: true,
                                 extraKmSurcharge: extraKm,
                                 surcharge: surcharge,
                                 freePickupRadius: freePickup,
@@ -642,12 +877,11 @@ class _PlansBlockState extends State<PlansBlock> {
                                 active: active,
                               );
 
-                              try {
+                              await _runWithSpinner(() async {
                                 if (isCreate) {
                                   await FirebaseFirestore.instance.collection('plans').doc(id).set(data.toMap(forCreate: true));
-                                  _snack('Plan “$name” created');
+                                  _snack('Pay-Per-Use “$name” created');
                                 } else {
-                                  // Update & handle rename (id change)
                                   if (id != initial.id) {
                                     final batch = FirebaseFirestore.instance.batch();
                                     final newRef = FirebaseFirestore.instance.collection('plans').doc(id);
@@ -658,14 +892,13 @@ class _PlansBlockState extends State<PlansBlock> {
                                   } else {
                                     await FirebaseFirestore.instance.collection('plans').doc(id).update(data.toMap());
                                   }
-                                  _snack('Plan “$name” updated');
+                                  _snack('Pay-Per-Use “$name” updated');
                                 }
-                                if (mounted) Navigator.pop(context);
-                              } catch (e) {
-                                _snack('Error saving plan: $e');
-                              }
+                              });
+
+                              if (mounted) Navigator.pop(context);
                             },
-                            child: Text(isCreate ? 'Create Plan' : 'Save Changes'),
+                            child: Text(isCreate ? 'Create' : 'Save Changes'),
                           ),
                         ],
                       ),
@@ -680,9 +913,6 @@ class _PlansBlockState extends State<PlansBlock> {
     );
 
     nameCtrl.dispose();
-    priceCtrl.dispose();
-    slotsCtrl.dispose();
-    lessonsCtrl.dispose();
     surchargeCtrl.dispose();
     radiusCtrl.dispose();
   }
@@ -736,37 +966,6 @@ class _SectionTitle extends StatelessWidget {
   }
 }
 
-class _InfoTile extends StatelessWidget {
-  final String title;
-  final List<String> lines;
-  const _InfoTile({required this.title, required this.lines});
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF0F9FF),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE0F2FE)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF0C4A6E))),
-          const SizedBox(height: 6),
-          ...lines.map(
-            (t) => Padding(
-              padding: const EdgeInsets.only(top: 2),
-              child: Text('• $t', style: const TextStyle(fontSize: 12, color: Color(0xFF0369A1))),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _PlanCard extends StatelessWidget {
   final Plan plan;
   final NumberFormat currency;
@@ -786,19 +985,18 @@ class _PlanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final badge = plan.isFlexible
-        ? const _Badge(text: 'FLEXIBLE')
-        : (plan.active ? const _Badge(text: 'ACTIVE', color: Color(0xFF10B981)) : const _Badge(text: 'INACTIVE', color: Color(0xFFF59E0B)));
+    final badge = plan.isPayPerUse
+        ? const _Badge(text: 'PAY-PER-USE', color: Color(0xFF6366F1))
+        : (plan.active
+            ? const _Badge(text: 'ACTIVE', color: Color(0xFF10B981))
+            : const _Badge(text: 'INACTIVE', color: Color(0xFFF59E0B)));
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: plan.isFlexible ? AppColors.primary.withOpacity(0.25) : const Color(0x11000000),
-          width: plan.isFlexible ? 2 : 1,
-        ),
+        border: Border.all(color: const Color(0x11000000)),
         boxShadow: const [BoxShadow(color: Color(0x07000000), blurRadius: 10, offset: Offset(0, 4))],
       ),
       child: Column(
@@ -812,7 +1010,11 @@ class _PlanCard extends StatelessWidget {
                   plan.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF111827)),
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w700,
+                    color: Color(0xFF111827),
+                  ),
                 ),
               ),
               badge,
@@ -820,9 +1022,6 @@ class _PlanCard extends StatelessWidget {
               PopupMenuButton<String>(
                 onSelected: (v) {
                   switch (v) {
-                    case 'edit':
-                      onEdit(plan);
-                      break;
                     case 'toggle':
                       onToggleActive(plan);
                       break;
@@ -835,7 +1034,6 @@ class _PlanCard extends StatelessWidget {
                   }
                 },
                 itemBuilder: (_) => [
-                  const PopupMenuItem(value: 'edit', child: _MenuRow(icon: Icons.edit, text: 'Edit')),
                   PopupMenuItem(
                     value: 'toggle',
                     child: _MenuRow(
@@ -854,7 +1052,7 @@ class _PlanCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '${currency.format(plan.price)}${plan.priceSuffix}',
+            plan.isPayPerUse ? 'Pay as you go' : currency.format(plan.price),
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.primary),
           ),
           const SizedBox(height: 8),
@@ -862,13 +1060,36 @@ class _PlanCard extends StatelessWidget {
             spacing: 14,
             runSpacing: 8,
             children: [
-              if (!plan.isFlexible) ...[
+              if (!plan.isPayPerUse) ...[
                 _Feature(icon: Icons.event_available, label: '${plan.slots} slots'),
-                _Feature(icon: Icons.school, label: '${plan.lessons} lessons'),
-              ] else
-                const _Feature(icon: Icons.flash_on, label: 'Pay per lesson'),
+                plan.includeAllStudyMaterials
+                    ? const _Feature(icon: Icons.menu_book, label: 'All study materials')
+                    : _Feature(icon: Icons.menu_book, label: '${plan.studyMaterials} study materials'),
+                plan.includeAllTests
+                    ? const _Feature(icon: Icons.fact_check, label: 'All tests')
+                    : _Feature(icon: Icons.fact_check, label: '${plan.tests} tests'),
+              ] else ...[
+                const _Feature(icon: Icons.flash_on, label: 'Pay per session'),
+              ],
               if (plan.extraKmSurcharge) _Feature(icon: Icons.local_gas_station, label: '₹${plan.surcharge}/km extra'),
               if (plan.freePickupRadius) _Feature(icon: Icons.location_on, label: '${plan.freeRadius} km pickup'),
+            ],
+          ),
+          const Spacer(),
+          // Inline action icons
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              IconButton(
+                tooltip: 'Edit',
+                icon: const Icon(Icons.edit, color: AppColors.primary),
+                onPressed: () => onEdit(plan),
+              ),
+              IconButton(
+                tooltip: 'Delete',
+                icon: const Icon(Icons.delete, color: Colors.red),
+                onPressed: () => onDelete(plan),
+              ),
             ],
           ),
         ],
@@ -876,6 +1097,7 @@ class _PlanCard extends StatelessWidget {
     );
   }
 }
+
 
 class _Badge extends StatelessWidget {
   final String text;
@@ -963,7 +1185,7 @@ class _EmptyState extends StatelessWidget {
             const Text('No plans yet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF374151))),
             const SizedBox(height: 4),
             const Text(
-              'Create your first plan to get started. You can add a monthly plan or a pay-per-use plan.',
+              'Create your first plan: Slot-based (priced once) or Pay-Per-Use (Pay as you go).',
               textAlign: TextAlign.center,
               style: TextStyle(color: Color(0xFF6B7280)),
             ),

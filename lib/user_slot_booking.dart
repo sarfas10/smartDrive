@@ -1,10 +1,9 @@
-// user_slot_booking.dart
+// View available slots for a selected date and allow user to book a slot.
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:smart_drive/booking.dart';
-
 
 class UserSlotBooking extends StatefulWidget {
   const UserSlotBooking({super.key});
@@ -18,11 +17,19 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
   String? selectedSlotId;
   bool _isBooking = false;
 
+  // Horizontal date scroller (infinite-forward feel)
+  final ScrollController _dateScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _dateScroll.dispose();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     final media = MediaQuery.of(context);
     final sw = media.size.width;
-    final sh = media.size.height;
     final ts = media.textScaleFactor.clamp(0.9, 1.2);
 
     return Scaffold(
@@ -85,97 +92,155 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     );
   }
 
-  // ————————————————— UI: Date selector —————————————————
+  // ————————————————— UI: Date selector (sequential + horizontal scroll with snapping) —————————————————
   Widget _buildDateSelector(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final sw = media.size.width;
-    final ts = media.textScaleFactor.clamp(0.9, 1.2);
+    return LayoutBuilder(builder: (context, constraints) {
+      final media = MediaQuery.of(context);
+      final sw = media.size.width;
+      final ts = media.textScaleFactor.clamp(0.9, 1.2);
 
-    final barPaddingH = _scale(sw, 16, 20, 28);
-    final barPaddingV = _scale(sw, 10, 12, 14);
-    final barHeight = _scale(sw, 64, 70, 82);
+      // Container paddings/heights
+      final barPaddingH = _scale(sw, 16, 20, 28);
+      final barPaddingV = _scale(sw, 10, 12, 14);
+      final barHeight = _scale(sw, 64, 70, 82);
 
-    final pillPadH = _scale(sw, 8, 10, 12);
-    final pillPadV = _scale(sw, 4, 6, 8);
-    final pillGap = _scale(sw, 4, 6, 8);
+      // Visual sizing for cards (we size nicely but dates are pure +1 day sequence)
+      final gap = _scale(sw, 6, 8, 10);
+      final minCard = _scale(sw, 60, 68, 76);
+      final desired = _scale(sw, 72, 80, 92);
 
-    final dowSize = _scale(sw, 9, 10, 11) * ts;
-    final daySize = _scale(sw, 14, 16, 18) * ts;
-    final monSize = _scale(sw, 9, 10, 11) * ts;
+      final contentWidth = constraints.maxWidth - barPaddingH * 2;
+      final rawCount =
+          ((contentWidth + gap) / (desired + gap)).floor().clamp(5, 14);
+      final totalGaps = gap * (rawCount - 1);
+      final cardWidth =
+          ((contentWidth - totalGaps) / rawCount).clamp(minCard, 160.0);
 
-    return Container(
-      padding: EdgeInsets.symmetric(horizontal: barPaddingH, vertical: barPaddingV),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
-      ),
-      child: SizedBox(
-        height: barHeight,
-        child: ListView.builder(
-          scrollDirection: Axis.horizontal,
-          itemCount: 7,
-          itemBuilder: (context, index) {
-            final date = _atMidnight(DateTime.now().add(Duration(days: index)));
-            final isSelected = DateUtils.isSameDay(date, selectedDate);
+      // Typography
+      final pillPadH = _scale(sw, 8, 10, 12);
+      final pillPadV = _scale(sw, 4, 6, 8);
+      final dowSize = _scale(sw, 9, 10, 11) * ts;
+      final daySize = _scale(sw, 14, 16, 18) * ts;
+      final monSize = _scale(sw, 9, 10, 11) * ts;
 
-            return GestureDetector(
-              onTap: () {
-                setState(() {
-                  selectedDate = date;
-                  selectedSlotId = null; // reset selection
-                });
-              },
-              child: Container(
-                margin: EdgeInsets.only(right: index == 6 ? 0 : pillGap),
-                padding: EdgeInsets.symmetric(horizontal: pillPadH, vertical: pillPadV),
-                constraints: BoxConstraints(
-                  minWidth: _scale(sw, 45, 50, 55),
-                  maxWidth: _scale(sw, 65, 70, 75),
+      DateTime dateForIndex(int index) {
+        // First = today (midnight), then strictly +index days
+        final todayMid = _atMidnight(DateTime.now());
+        return _atMidnight(todayMid.add(Duration(days: index)));
+      }
+
+      void _scrollToIndex(int index) {
+        final itemExtent = cardWidth + gap;
+        final target = index * itemExtent;
+        _dateScroll.animateTo(
+          target,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutCubic,
+        );
+      }
+
+      Widget buildCard(int index) {
+        final date = dateForIndex(index);
+        final isSelected = DateUtils.isSameDay(date, selectedDate);
+
+        return SizedBox(
+          width: cardWidth,
+          child: GestureDetector(
+            onTap: () {
+              setState(() {
+                selectedDate = date;
+                selectedSlotId = null;
+              });
+              // Center-ish the tapped item
+              _scrollToIndex(index);
+            },
+            child: Container(
+              margin: EdgeInsets.only(right: gap),
+              padding:
+                  EdgeInsets.symmetric(horizontal: pillPadH, vertical: pillPadV),
+              decoration: BoxDecoration(
+                color:
+                    isSelected ? const Color(0xFF10B981) : const Color(0xFFF8F9FA),
+                border: Border.all(
+                  color: isSelected
+                      ? const Color(0xFF10B981)
+                      : const Color(0xFFE5E7EB),
                 ),
-                decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF10B981) : const Color(0xFFF8F9FA),
-                  border: Border.all(
-                    color: isSelected ? const Color(0xFF10B981) : const Color(0xFFE5E7EB),
-                  ),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      DateFormat('EEE').format(date).toUpperCase(),
-                      style: TextStyle(
-                        fontSize: dowSize,
-                        fontWeight: FontWeight.w500,
-                        color: isSelected ? Colors.white : Colors.black.withOpacity(0.7),
-                      ),
-                    ),
-                    SizedBox(height: _scale(sw, 1, 1, 2)),
-                    Text(
-                      DateFormat('d').format(date),
-                      style: TextStyle(
-                        fontSize: daySize,
-                        fontWeight: FontWeight.w600,
-                        color: isSelected ? Colors.white : Colors.black,
-                      ),
-                    ),
-                    SizedBox(height: _scale(sw, 1, 1, 2)),
-                    Text(
-                      DateFormat('MMM').format(date).toUpperCase(),
-                      style: TextStyle(
-                        fontSize: monSize,
-                        color: isSelected ? Colors.white : Colors.black.withOpacity(0.7),
-                      ),
-                    ),
-                  ],
-                ),
+                borderRadius: BorderRadius.circular(8),
               ),
-            );
-          },
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    DateFormat('EEE').format(date).toUpperCase(),
+                    style: TextStyle(
+                      fontSize: dowSize,
+                      fontWeight: FontWeight.w500,
+                      color: isSelected
+                          ? Colors.white
+                          : Colors.black.withOpacity(0.7),
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    DateFormat('d').format(date),
+                    style: TextStyle(
+                      fontSize: daySize,
+                      fontWeight: FontWeight.w600,
+                      color: isSelected ? Colors.white : Colors.black,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    DateFormat('MMM').format(date).toUpperCase(),
+                    style: TextStyle(
+                      fontSize: monSize,
+                      color: isSelected
+                          ? Colors.white
+                          : Colors.black.withOpacity(0.7),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }
+
+      return Container(
+        padding:
+            EdgeInsets.symmetric(horizontal: barPaddingH, vertical: barPaddingV),
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
         ),
-      ),
-    );
+        child: SizedBox(
+          height: barHeight,
+          child: NotificationListener<ScrollEndNotification>(
+            onNotification: (_) {
+              // Snap to nearest item so pills don’t stop half-visible.
+              final itemExtent = cardWidth + gap;
+              if (itemExtent <= 0) return false;
+              final targetIndex = (_dateScroll.offset / itemExtent).round();
+              final targetOffset = targetIndex * itemExtent;
+              _dateScroll.animateTo(
+                targetOffset,
+                duration: const Duration(milliseconds: 150),
+                curve: Curves.easeOut,
+              );
+              return true;
+            },
+            child: ListView.builder(
+              controller: _dateScroll,
+              scrollDirection: Axis.horizontal,
+              itemBuilder: (_, index) => buildCard(index),
+              // Very large upper bound → effectively infinite forward scroll
+              itemCount: 1000000,
+            ),
+          ),
+        ),
+      );
+    });
   }
 
   // ————————————————— Firestore stream + list —————————————————
@@ -195,15 +260,17 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final docs = List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? const []);
-        
+        final docs =
+            List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? const []);
+
         return FutureBuilder<List<QueryDocumentSnapshot>>(
           future: _filterAvailableSlots(docs),
           builder: (context, availableSnapshot) {
-            if (availableSnapshot.connectionState == ConnectionState.waiting) {
+            if (availableSnapshot.connectionState ==
+                ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
-            
+
             final availableDocs = availableSnapshot.data ?? [];
             if (availableDocs.isEmpty) {
               return _buildEmptyState(context);
@@ -211,8 +278,10 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
 
             // Sort by parsed start time
             availableDocs.sort((a, b) {
-              final sa = _parseStartTime((a.data() as Map)['slot_time']?.toString() ?? '');
-              final sb = _parseStartTime((b.data() as Map)['slot_time']?.toString() ?? '');
+              final sa = _parseStartTime(
+                  (a.data() as Map)['slot_time']?.toString() ?? '');
+              final sb = _parseStartTime(
+                  (b.data() as Map)['slot_time']?.toString() ?? '');
               return sa.compareTo(sb);
             });
 
@@ -248,11 +317,14 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                         topLeft: Radius.circular(8),
                         topRight: Radius.circular(8),
                       ),
-                      border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
+                      border:
+                          Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
                     ),
                     child: Row(
                       children: [
-                        Text('🎯', style: TextStyle(fontSize: _scale(sw, 14, 16, 18))),
+                        Text('🎯',
+                            style: TextStyle(
+                                fontSize: _scale(sw, 14, 16, 18))),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
@@ -271,7 +343,8 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                   Expanded(
                     child: ListView(
                       children: grouped.entries
-                          .map((e) => _buildTimeSlotGroup(context, e.key, e.value))
+                          .map((e) =>
+                              _buildTimeSlotGroup(context, e.key, e.value))
                           .toList(),
                     ),
                   ),
@@ -284,27 +357,27 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     );
   }
 
-  // Helper function to filter available slots
-  Future<List<QueryDocumentSnapshot>> _filterAvailableSlots(List<QueryDocumentSnapshot> docs) async {
+  // Helper: filter available slots (not already booked/confirmed)
+  Future<List<QueryDocumentSnapshot>> _filterAvailableSlots(
+      List<QueryDocumentSnapshot> docs) async {
     final availableDocs = <QueryDocumentSnapshot>[];
-    
+
     for (final doc in docs) {
       final data = doc.data() as Map<String, dynamic>;
       final slotId = data['slot_id']?.toString() ?? doc.id;
-      
-      // Check if this slot is already booked
+
       final bookingQuery = await FirebaseFirestore.instance
           .collection('bookings')
           .where('slot_id', isEqualTo: slotId)
           .where('status', whereIn: ['confirmed', 'booked'])
           .limit(1)
           .get();
-      
+
       if (bookingQuery.docs.isEmpty) {
         availableDocs.add(doc);
       }
     }
-    
+
     return availableDocs;
   }
 
@@ -316,15 +389,19 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('📅', style: TextStyle(fontSize: _scale(sw, 56, 64, 72), color: Colors.grey)),
+            Text('📅',
+                style: TextStyle(
+                    fontSize: _scale(sw, 56, 64, 72), color: Colors.grey)),
             const SizedBox(height: 16),
             Text(
               'No slots available for ${DateFormat('EEEE, MMM d').format(selectedDate)}',
-              style: TextStyle(fontSize: _scale(sw, 16, 18, 20), color: Colors.grey),
+              style: TextStyle(
+                  fontSize: _scale(sw, 16, 18, 20), color: Colors.grey),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
-            const Text('Try selecting a different date', style: TextStyle(color: Colors.grey)),
+            const Text('Try selecting a different date',
+                style: TextStyle(color: Colors.grey)),
           ],
         ),
       ),
@@ -332,7 +409,8 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
   }
 
   // ————————————————— Grouping —————————————————
-  Map<String, List<QueryDocumentSnapshot>> _groupSlotsByTimePeriod(List<QueryDocumentSnapshot> slots) {
+  Map<String, List<QueryDocumentSnapshot>> _groupSlotsByTimePeriod(
+      List<QueryDocumentSnapshot> slots) {
     final Map<String, List<QueryDocumentSnapshot>> grouped = {
       'Morning': [],
       'Afternoon': [],
@@ -342,7 +420,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     for (final slot in slots) {
       final data = slot.data() as Map<String, dynamic>;
       final start = _parseStartTime(data['slot_time']?.toString() ?? '');
-      final h = start.hour; // 0–23
+      final h = start.hour;
 
       if (h >= 6 && h < 12) {
         grouped['Morning']!.add(slot);
@@ -358,9 +436,9 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
   }
 
   // ————————————————— Group section —————————————————
-  Widget _buildTimeSlotGroup(BuildContext context, String period, List<QueryDocumentSnapshot> slots) {
+  Widget _buildTimeSlotGroup(BuildContext context, String period,
+      List<QueryDocumentSnapshot> slots) {
     final sw = MediaQuery.of(context).size.width;
-    final emojiSize = _scale(sw, 14, 16, 18);
     final titleSize = _scale(sw, 13, 14, 16);
     final groupPad = _scale(sw, 12, 16, 20);
     final chipGap = _scale(sw, 10, 12, 14);
@@ -407,7 +485,15 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
               return Wrap(
                 spacing: chipGap,
                 runSpacing: chipGap,
-                children: slots.map((s) => _buildSlotCard(context, s, cardW)).toList(),
+                alignment: (columns == 1)
+                    ? WrapAlignment.center
+                    : WrapAlignment.start, // center when single column
+                children: slots
+                    .map((s) => SizedBox(
+                          width: cardW,
+                          child: _buildSlotCard(context, s, cardW),
+                        ))
+                    .toList(),
               );
             },
           ),
@@ -416,23 +502,27 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     );
   }
 
-  // ————————————————— Slot card —————————————————
-  Widget _buildSlotCard(BuildContext context, QueryDocumentSnapshot slot, double cardWidth) {
+  // ————————————————— Slot card (handles "Expired") —————————————————
+  Widget _buildSlotCard(
+      BuildContext context, QueryDocumentSnapshot slot, double cardWidth) {
     final sw = MediaQuery.of(context).size.width;
     final ts = MediaQuery.of(context).textScaleFactor.clamp(0.9, 1.2);
     final data = slot.data() as Map<String, dynamic>;
     final slotId = data['slot_id']?.toString() ?? slot.id;
     final vehicleType = data['vehicle_type']?.toString() ?? 'Unknown';
-    final instructorName = data['instructor_name']?.toString() ?? 'Unknown Instructor';
-    final seats = (data['seat'] is num)
-        ? (data['seat'] as num).toInt()
-        : int.tryParse('${data['seat']}') ?? 0;
+    final instructorName =
+        data['instructor_name']?.toString() ?? 'Unknown Instructor';
+    
     final timeString = data['slot_time']?.toString() ?? '';
 
     // Get slot_cost from the database
     final slotCost = _asNum(data['slot_cost']);
 
+    // Expiry logic relative to the selected date
+    final isExpired = _isSlotExpiredForSelectedDate(timeString);
+
     final isSelected = selectedSlotId == slotId;
+    final effectiveSelected = isExpired ? false : isSelected;
 
     final padAll = _scale(sw, 10, 12, 14);
     final badgePadH = _scale(sw, 6, 8, 10);
@@ -440,139 +530,193 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
 
     final timeSize = _scale(sw, 12, 13, 14) * ts;
     final vehSize = _scale(sw, 9, 10, 11) * ts;
-    final seatsSize = _scale(sw, 10, 11, 12) * ts;
+    
     final instSize = _scale(sw, 9, 10, 11) * ts;
     final availSize = _scale(sw, 9, 10, 11) * ts;
     final costSize = _scale(sw, 14, 16, 18) * ts;
 
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          selectedSlotId = isSelected ? null : slotId;
-        });
-      },
-      child: Container(
-        width: cardWidth,
-        padding: EdgeInsets.all(padAll),
-        decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF10B981) : Colors.white,
-          border: Border.all(
-            color: isSelected ? const Color(0xFF10B981) : const Color(0xFFE5E7EB),
-            width: 2,
-          ),
-          borderRadius: BorderRadius.circular(8),
-          boxShadow: isSelected
-              ? [
-                  BoxShadow(
-                    color: const Color(0xFF10B981).withOpacity(0.3),
-                    blurRadius: 8,
-                    offset: const Offset(0, 2),
-                  ),
-                ]
-              : null,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              _formatTimeRange(timeString),
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                fontSize: timeSize,
-                fontWeight: FontWeight.w600,
-                color: isSelected ? Colors.white : Colors.black,
-              ),
-            ),
-            SizedBox(height: _scale(sw, 4, 6, 8)),
-            Container(
-              padding: EdgeInsets.symmetric(horizontal: badgePadH, vertical: badgePadV),
-              decoration: BoxDecoration(
-                color: isSelected ? Colors.white.withOpacity(0.2) : const Color(0xFFEFF6FF),
-                borderRadius: BorderRadius.circular(4),
-              ),
-              child: Text(
-                vehicleType,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontSize: vehSize,
-                  fontWeight: FontWeight.w500,
-                  color: isSelected ? Colors.white : const Color(0xFF1D4ED8),
-                ),
-              ),
-            ),
-            SizedBox(height: _scale(sw, 4, 6, 8)),
-            Text(
-              '$seats seats',
-              style: TextStyle(
-                fontSize: seatsSize,
-                color: isSelected ? Colors.white.withOpacity(0.9) : Colors.black.withOpacity(0.8),
-              ),
-            ),
-            SizedBox(height: _scale(sw, 4, 6, 8)),
-            Text(
-              instructorName.length > 22 ? '${instructorName.substring(0, 22)}…' : instructorName,
-              style: TextStyle(
-                fontSize: instSize,
-                color: isSelected ? Colors.white.withOpacity(0.9) : const Color(0xFF6B7280),
-              ),
-              textAlign: TextAlign.center,
-            ),
+    final borderColor = isExpired
+        ? const Color(0xFFd1d5db) // gray-300
+        : (effectiveSelected
+            ? const Color(0xFF10B981)
+            : const Color(0xFFE5E7EB));
 
-            // Cost display
-            SizedBox(height: _scale(sw, 8, 10, 12)),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-              decoration: BoxDecoration(
-                color: isSelected ? Colors.white.withOpacity(0.15) : const Color(0xFFF0FDF4),
-                border: Border.all(
-                  color: isSelected ? Colors.white.withOpacity(0.3) : const Color(0xFF10B981).withOpacity(0.2),
+    final bgColor = isExpired
+        ? const Color(0xFFF9FAFB) // gray-50
+        : (effectiveSelected ? const Color(0xFF10B981) : Colors.white);
+
+    final shadow = isExpired
+        ? null
+        : (effectiveSelected
+            ? [
+                BoxShadow(
+                  color: const Color(0xFF10B981).withOpacity(0.3),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
                 ),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(
-                    Icons.currency_rupee,
-                    size: costSize - 2,
-                    color: isSelected ? Colors.white : const Color(0xFF10B981),
+              ]
+            : null);
+
+    return AbsorbPointer(
+      absorbing: isExpired, // disables taps if expired
+      child: Opacity(
+        opacity: isExpired ? 0.55 : 1.0,
+        child: GestureDetector(
+          onTap: () {
+            if (isExpired) return;
+            setState(() {
+              selectedSlotId = effectiveSelected ? null : slotId;
+            });
+          },
+          child: Container(
+            width: cardWidth,
+            padding: EdgeInsets.all(padAll),
+            decoration: BoxDecoration(
+              color: bgColor,
+              border: Border.all(color: borderColor, width: 2),
+              borderRadius: BorderRadius.circular(8),
+              boxShadow: shadow,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _formatTimeRange(timeString),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: timeSize,
+                    fontWeight: FontWeight.w600,
+                    color: isExpired
+                        ? const Color(0xFF6B7280)
+                        : (effectiveSelected ? Colors.white : Colors.black),
                   ),
-                  Text(
-                    _formatCostNumber(slotCost),
+                ),
+                SizedBox(height: _scale(sw, 4, 6, 8)),
+                Container(
+                  padding: EdgeInsets.symmetric(
+                      horizontal: badgePadH, vertical: badgePadV),
+                  decoration: BoxDecoration(
+                    color: isExpired
+                        ? const Color(0xFFF3F4F6) // muted badge
+                        : (effectiveSelected
+                            ? Colors.white.withOpacity(0.2)
+                            : const Color(0xFFEFF6FF)),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    vehicleType,
+                    overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: costSize,
-                      fontWeight: FontWeight.w700,
-                      color: isSelected ? Colors.white : const Color(0xFF10B981),
+                      fontSize: vehSize,
+                      fontWeight: FontWeight.w500,
+                      color: isExpired
+                          ? const Color(0xFF6B7280)
+                          : (effectiveSelected
+                              ? Colors.white
+                              : const Color(0xFF1D4ED8)),
                     ),
                   ),
-                ],
-              ),
-            ),
+                ),
+                
+                
+                SizedBox(height: _scale(sw, 4, 6, 8)),
+                Text(
+                  instructorName.length > 22
+                      ? '${instructorName.substring(0, 22)}…'
+                      : instructorName,
+                  style: TextStyle(
+                    fontSize: instSize,
+                    color: isExpired
+                        ? const Color(0xFF9CA3AF)
+                        : (effectiveSelected
+                            ? Colors.white.withOpacity(0.9)
+                            : const Color(0xFF6B7280)),
+                  ),
+                  textAlign: TextAlign.center,
+                ),
 
-            SizedBox(height: _scale(sw, 4, 6, 8)),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
+                // Cost display
+                SizedBox(height: _scale(sw, 8, 10, 12)),
                 Container(
-                  width: 8,
-                  height: 8,
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isSelected ? Colors.white : const Color(0xFF10B981),
-                    shape: BoxShape.circle,
+                    color: isExpired
+                        ? const Color(0xFFF3F4F6)
+                        : (effectiveSelected
+                            ? Colors.white.withOpacity(0.15)
+                            : const Color(0xFFF0FDF4)),
+                    border: Border.all(
+                      color: isExpired
+                          ? const Color(0xFFE5E7EB)
+                          : (effectiveSelected
+                              ? Colors.white.withOpacity(0.3)
+                              : const Color(0xFF10B981).withOpacity(0.2)),
+                    ),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.currency_rupee,
+                        size: costSize - 2,
+                        color: isExpired
+                            ? const Color(0xFF6B7280)
+                            : (effectiveSelected
+                                ? Colors.white
+                                : const Color(0xFF10B981)),
+                      ),
+                      Text(
+                        _formatCostNumber(slotCost),
+                        style: TextStyle(
+                          fontSize: costSize,
+                          fontWeight: FontWeight.w700,
+                          color: isExpired
+                              ? const Color(0xFF6B7280)
+                              : (effectiveSelected
+                                  ? Colors.white
+                                  : const Color(0xFF10B981)),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                const SizedBox(width: 6),
-                Text(
-                  'Available',
-                  style: TextStyle(
-                    fontSize: availSize,
-                    color: isSelected ? Colors.white.withOpacity(0.95) : const Color(0xFF10B981),
-                    fontWeight: FontWeight.w600,
-                  ),
+
+                SizedBox(height: _scale(sw, 4, 6, 8)),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: BoxDecoration(
+                        color: isExpired
+                            ? const Color(0xFF9CA3AF)
+                            : (effectiveSelected
+                                ? Colors.white
+                                : const Color(0xFF10B981)),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isExpired ? 'Expired' : 'Available',
+                      style: TextStyle(
+                        fontSize: availSize,
+                        color: isExpired
+                            ? const Color(0xFF6B7280)
+                            : (effectiveSelected
+                                ? Colors.white.withOpacity(0.95)
+                                : const Color(0xFF10B981)),
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
+          ),
         ),
       ),
     );
@@ -643,12 +787,13 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   if (_isBooking) ...[
-                    SizedBox(
+                    const SizedBox(
                       width: 16,
                       height: 16,
                       child: CircularProgressIndicator(
                         strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(Colors.white),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -702,7 +847,8 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(
-              content: Text('This slot has already been booked by someone else'),
+              content:
+                  Text('This slot has already been booked by someone else'),
               backgroundColor: Color(0xFFDC2626),
             ),
           );
@@ -754,12 +900,13 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
   // ————————————————— Helpers —————————————————
   static DateTime _atMidnight(DateTime d) => DateTime(d.year, d.month, d.day);
 
-  /// Breakpoints → columns (2–5)
+  /// Breakpoints → columns (1–5). Single column centers via WrapAlignment.center
   int _columnsForWidth(double width) {
-    if (width >= 1200) return 5;
-    if (width >= 900) return 4;
-    if (width >= 600) return 3;
-    return 2;
+    if (width < 420) return 1;
+    if (width < 600) return 2;
+    if (width < 900) return 3;
+    if (width < 1200) return 4;
+    return 5;
   }
 
   /// Compute card width from available width, columns, and spacing
@@ -767,7 +914,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     final totalGaps = gap * (columns - 1);
     final usable = (maxWidth - totalGaps).clamp(200.0, maxWidth);
     final base = usable / columns;
-    return base.clamp(160.0, 320.0);
+    return base.clamp(200.0, 360.0);
   }
 
   /// Simple scaler that grows values with width
@@ -782,8 +929,22 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     try {
       final start = slotTime.split(' - ').first.trim();
       final t = DateFormat('hh:mm a').parseStrict(start);
-      final now = DateTime.now();
-      return DateTime(now.year, now.month, now.day, t.hour, t.minute);
+      final d = selectedDate; // use selected date for grouping consistency
+      return DateTime(d.year, d.month, d.day, t.hour, t.minute);
+    } catch (_) {
+      return DateTime(1970);
+    }
+  }
+
+  /// Parse end time from "09:00 AM - 10:00 AM". Falls back to epoch if invalid.
+  DateTime _parseEndTime(String slotTime) {
+    try {
+      final parts = slotTime.split(' - ');
+      if (parts.length != 2) return DateTime(1970);
+      final end = parts[1].trim();
+      final t = DateFormat('hh:mm a').parseStrict(end);
+      final d = selectedDate;
+      return DateTime(d.year, d.month, d.day, t.hour, t.minute);
     } catch (_) {
       return DateTime(1970);
     }
@@ -810,5 +971,24 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
   String _formatCostNumber(num? v) {
     if (v == null) return '0';
     return v.toInt().toString();
+  }
+
+  /// Determine if a slot is expired relative to the currently selectedDate.
+  /// Rules:
+  /// - selectedDate < today => expired
+  /// - selectedDate > today => not expired
+  /// - selectedDate == today => expired if endTime <= now
+  bool _isSlotExpiredForSelectedDate(String slotTime) {
+    final today = _atMidnight(DateTime.now());
+    final sel = _atMidnight(selectedDate);
+
+    if (sel.isBefore(today)) return true;
+    if (sel.isAfter(today)) return false;
+
+    // same day: compare end time to now
+    final now = DateTime.now();
+    final end = _parseEndTime(slotTime);
+    if (end.year == 1970) return false; // on parse failure, do not mark expired
+    return end.isBefore(now) || end.isAtSameMomentAs(now);
   }
 }
