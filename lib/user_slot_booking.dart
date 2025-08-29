@@ -263,21 +263,21 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
         final docs =
             List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? const []);
 
-        return FutureBuilder<List<QueryDocumentSnapshot>>(
-          future: _filterAvailableSlots(docs),
-          builder: (context, availableSnapshot) {
-            if (availableSnapshot.connectionState ==
-                ConnectionState.waiting) {
+        // Build a booked map for all the slots visible on the selected date
+        return FutureBuilder<Map<String, bool>>(
+          future: _fetchBookedMap(docs),
+          builder: (context, bookedSnap) {
+            if (bookedSnap.connectionState == ConnectionState.waiting) {
               return const Center(child: CircularProgressIndicator());
             }
 
-            final availableDocs = availableSnapshot.data ?? [];
-            if (availableDocs.isEmpty) {
+            final bookedMap = bookedSnap.data ?? <String, bool>{};
+            if (docs.isEmpty) {
               return _buildEmptyState(context);
             }
 
             // Sort by parsed start time
-            availableDocs.sort((a, b) {
+            docs.sort((a, b) {
               final sa = _parseStartTime(
                   (a.data() as Map)['slot_time']?.toString() ?? '');
               final sb = _parseStartTime(
@@ -286,7 +286,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
             });
 
             // Group by period
-            final grouped = _groupSlotsByTimePeriod(availableDocs);
+            final grouped = _groupSlotsByTimePeriod(docs);
 
             final media = MediaQuery.of(context);
             final sw = media.size.width;
@@ -344,7 +344,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                     child: ListView(
                       children: grouped.entries
                           .map((e) =>
-                              _buildTimeSlotGroup(context, e.key, e.value))
+                              _buildTimeSlotGroup(context, e.key, e.value, bookedMap))
                           .toList(),
                     ),
                   ),
@@ -357,28 +357,23 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     );
   }
 
-  // Helper: filter available slots (not already booked/confirmed)
-  Future<List<QueryDocumentSnapshot>> _filterAvailableSlots(
-      List<QueryDocumentSnapshot> docs) async {
-    final availableDocs = <QueryDocumentSnapshot>[];
-
+  /// Returns a map of slotId -> isBooked (status == "booked")
+  Future<Map<String, bool>> _fetchBookedMap(List<QueryDocumentSnapshot> docs) async {
+    final Map<String, bool> booked = {};
     for (final doc in docs) {
       final data = doc.data() as Map<String, dynamic>;
-      final slotId = data['slot_id']?.toString() ?? doc.id;
+      final slotId = (data['slot_id'] ?? doc.id).toString();
 
-      final bookingQuery = await FirebaseFirestore.instance
+      final q = await FirebaseFirestore.instance
           .collection('bookings')
           .where('slot_id', isEqualTo: slotId)
-          .where('status', whereIn: ['confirmed', 'booked'])
+          .where('status', isEqualTo: 'booked') // only "booked"
           .limit(1)
           .get();
 
-      if (bookingQuery.docs.isEmpty) {
-        availableDocs.add(doc);
-      }
+      booked[slotId] = q.docs.isNotEmpty;
     }
-
-    return availableDocs;
+    return booked;
   }
 
   Widget _buildEmptyState(BuildContext context) {
@@ -436,8 +431,12 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
   }
 
   // ————————————————— Group section —————————————————
-  Widget _buildTimeSlotGroup(BuildContext context, String period,
-      List<QueryDocumentSnapshot> slots) {
+  Widget _buildTimeSlotGroup(
+      BuildContext context,
+      String period,
+      List<QueryDocumentSnapshot> slots,
+      Map<String, bool> bookedMap,
+      ) {
     final sw = MediaQuery.of(context).size.width;
     final titleSize = _scale(sw, 13, 14, 16);
     final groupPad = _scale(sw, 12, 16, 20);
@@ -488,12 +487,15 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                 alignment: (columns == 1)
                     ? WrapAlignment.center
                     : WrapAlignment.start, // center when single column
-                children: slots
-                    .map((s) => SizedBox(
-                          width: cardW,
-                          child: _buildSlotCard(context, s, cardW),
-                        ))
-                    .toList(),
+                children: slots.map((s) {
+                  final data = s.data() as Map<String, dynamic>;
+                  final slotId = (data['slot_id'] ?? s.id).toString();
+                  final isBooked = bookedMap[slotId] ?? false;
+                  return SizedBox(
+                    width: cardW,
+                    child: _buildSlotCard(context, s, cardW, isBooked),
+                  );
+                }).toList(),
               );
             },
           ),
@@ -502,9 +504,13 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     );
   }
 
-  // ————————————————— Slot card (handles "Expired") —————————————————
+  // ————————————————— Slot card (handles "Expired" + "Booked") —————————————————
   Widget _buildSlotCard(
-      BuildContext context, QueryDocumentSnapshot slot, double cardWidth) {
+      BuildContext context,
+      QueryDocumentSnapshot slot,
+      double cardWidth,
+      bool isBooked, // NEW
+      ) {
     final sw = MediaQuery.of(context).size.width;
     final ts = MediaQuery.of(context).textScaleFactor.clamp(0.9, 1.2);
     final data = slot.data() as Map<String, dynamic>;
@@ -512,7 +518,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     final vehicleType = data['vehicle_type']?.toString() ?? 'Unknown';
     final instructorName =
         data['instructor_name']?.toString() ?? 'Unknown Instructor';
-    
+
     final timeString = data['slot_time']?.toString() ?? '';
 
     // Get slot_cost from the database
@@ -521,8 +527,9 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     // Expiry logic relative to the selected date
     final isExpired = _isSlotExpiredForSelectedDate(timeString);
 
-    final isSelected = selectedSlotId == slotId;
-    final effectiveSelected = isExpired ? false : isSelected;
+    // If booked or expired → disabled; else allow selection
+    final disabled = isExpired || isBooked;
+    final isSelected = !disabled && selectedSlotId == slotId;
 
     final padAll = _scale(sw, 10, 12, 14);
     final badgePadH = _scale(sw, 6, 8, 10);
@@ -530,24 +537,24 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
 
     final timeSize = _scale(sw, 12, 13, 14) * ts;
     final vehSize = _scale(sw, 9, 10, 11) * ts;
-    
+
     final instSize = _scale(sw, 9, 10, 11) * ts;
     final availSize = _scale(sw, 9, 10, 11) * ts;
     final costSize = _scale(sw, 14, 16, 18) * ts;
 
-    final borderColor = isExpired
-        ? const Color(0xFFd1d5db) // gray-300
-        : (effectiveSelected
+    final borderColor = disabled
+        ? const Color(0xFFD1D5DB) // gray-300
+        : (isSelected
             ? const Color(0xFF10B981)
             : const Color(0xFFE5E7EB));
 
-    final bgColor = isExpired
+    final bgColor = disabled
         ? const Color(0xFFF9FAFB) // gray-50
-        : (effectiveSelected ? const Color(0xFF10B981) : Colors.white);
+        : (isSelected ? const Color(0xFF10B981) : Colors.white);
 
-    final shadow = isExpired
+    final shadow = disabled
         ? null
-        : (effectiveSelected
+        : (isSelected
             ? [
                 BoxShadow(
                   color: const Color(0xFF10B981).withOpacity(0.3),
@@ -558,14 +565,14 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
             : null);
 
     return AbsorbPointer(
-      absorbing: isExpired, // disables taps if expired
+      absorbing: disabled, // disables taps if expired/booked
       child: Opacity(
-        opacity: isExpired ? 0.55 : 1.0,
+        opacity: disabled ? 0.55 : 1.0,
         child: GestureDetector(
           onTap: () {
-            if (isExpired) return;
+            if (disabled) return;
             setState(() {
-              selectedSlotId = effectiveSelected ? null : slotId;
+              selectedSlotId = isSelected ? null : slotId;
             });
           },
           child: Container(
@@ -586,9 +593,9 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                   style: TextStyle(
                     fontSize: timeSize,
                     fontWeight: FontWeight.w600,
-                    color: isExpired
+                    color: disabled
                         ? const Color(0xFF6B7280)
-                        : (effectiveSelected ? Colors.white : Colors.black),
+                        : (isSelected ? Colors.white : Colors.black),
                   ),
                 ),
                 SizedBox(height: _scale(sw, 4, 6, 8)),
@@ -596,9 +603,9 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                   padding: EdgeInsets.symmetric(
                       horizontal: badgePadH, vertical: badgePadV),
                   decoration: BoxDecoration(
-                    color: isExpired
+                    color: disabled
                         ? const Color(0xFFF3F4F6) // muted badge
-                        : (effectiveSelected
+                        : (isSelected
                             ? Colors.white.withOpacity(0.2)
                             : const Color(0xFFEFF6FF)),
                     borderRadius: BorderRadius.circular(4),
@@ -609,16 +616,14 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                     style: TextStyle(
                       fontSize: vehSize,
                       fontWeight: FontWeight.w500,
-                      color: isExpired
+                      color: disabled
                           ? const Color(0xFF6B7280)
-                          : (effectiveSelected
+                          : (isSelected
                               ? Colors.white
                               : const Color(0xFF1D4ED8)),
                     ),
                   ),
                 ),
-                
-                
                 SizedBox(height: _scale(sw, 4, 6, 8)),
                 Text(
                   instructorName.length > 22
@@ -626,9 +631,9 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                       : instructorName,
                   style: TextStyle(
                     fontSize: instSize,
-                    color: isExpired
+                    color: disabled
                         ? const Color(0xFF9CA3AF)
-                        : (effectiveSelected
+                        : (isSelected
                             ? Colors.white.withOpacity(0.9)
                             : const Color(0xFF6B7280)),
                   ),
@@ -641,15 +646,15 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isExpired
+                    color: disabled
                         ? const Color(0xFFF3F4F6)
-                        : (effectiveSelected
+                        : (isSelected
                             ? Colors.white.withOpacity(0.15)
                             : const Color(0xFFF0FDF4)),
                     border: Border.all(
-                      color: isExpired
+                      color: disabled
                           ? const Color(0xFFE5E7EB)
-                          : (effectiveSelected
+                          : (isSelected
                               ? Colors.white.withOpacity(0.3)
                               : const Color(0xFF10B981).withOpacity(0.2)),
                     ),
@@ -661,9 +666,9 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                       Icon(
                         Icons.currency_rupee,
                         size: costSize - 2,
-                        color: isExpired
+                        color: disabled
                             ? const Color(0xFF6B7280)
-                            : (effectiveSelected
+                            : (isSelected
                                 ? Colors.white
                                 : const Color(0xFF10B981)),
                       ),
@@ -672,9 +677,9 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                         style: TextStyle(
                           fontSize: costSize,
                           fontWeight: FontWeight.w700,
-                          color: isExpired
+                          color: disabled
                               ? const Color(0xFF6B7280)
-                              : (effectiveSelected
+                              : (isSelected
                                   ? Colors.white
                                   : const Color(0xFF10B981)),
                         ),
@@ -691,9 +696,9 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                       width: 8,
                       height: 8,
                       decoration: BoxDecoration(
-                        color: isExpired
+                        color: disabled
                             ? const Color(0xFF9CA3AF)
-                            : (effectiveSelected
+                            : (isSelected
                                 ? Colors.white
                                 : const Color(0xFF10B981)),
                         shape: BoxShape.circle,
@@ -701,12 +706,12 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                     ),
                     const SizedBox(width: 6),
                     Text(
-                      isExpired ? 'Expired' : 'Available',
+                      isBooked ? 'Booked' : (isExpired ? 'Expired' : 'Available'),
                       style: TextStyle(
                         fontSize: availSize,
-                        color: isExpired
+                        color: disabled
                             ? const Color(0xFF6B7280)
-                            : (effectiveSelected
+                            : (isSelected
                                 ? Colors.white.withOpacity(0.95)
                                 : const Color(0xFF10B981)),
                         fontWeight: FontWeight.w600,

@@ -5,9 +5,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
 import 'package:smart_drive/onboarding_forms.dart';
+import 'package:smart_drive/user_materials_page.dart';
 import 'package:smart_drive/user_settings.dart';
 import 'package:smart_drive/user_slot_booking.dart';
-
 
 class _GrainPainter extends CustomPainter {
   final double opacity;
@@ -76,6 +76,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
             userStatus = userData['status'] ?? 'pending';
             isLoading = false;
           });
+          // After user data, silently ensure plan rollover if needed
+          await _ensurePlanRollOver(user.uid);
         } else {
           setState(() => isLoading = false);
         }
@@ -85,6 +87,72 @@ class _StudentDashboardState extends State<StudentDashboard> {
     } catch (e) {
       debugPrint('Error fetching user data: $e');
       setState(() => isLoading = false);
+    }
+  }
+
+  /// If user's current plan is exhausted (slots_used == slots) and it's not pay-per-use,
+  /// automatically switch to a pay-per-use plan.
+  Future<void> _ensurePlanRollOver(String uid) async {
+    try {
+      final upRef = _firestore.collection('user_plans').doc(uid);
+      final upSnap = await upRef.get();
+      if (!upSnap.exists) {
+        debugPrint('[PlanRollOver] No user_plans doc for $uid');
+        return;
+      }
+
+      final up = upSnap.data() ?? {};
+      final String? planId = (up['planId'] as String?)?.trim();
+      final int slotsUsed = (up['slots_used'] is num) ? (up['slots_used'] as num).toInt() : 0;
+
+      if (planId == null || planId.isEmpty) {
+        debugPrint('[PlanRollOver] No planId set for $uid');
+        return;
+      }
+
+      final planRef = _firestore.collection('plans').doc(planId);
+      final planSnap = await planRef.get();
+      if (!planSnap.exists) {
+        debugPrint('[PlanRollOver] Plan $planId not found for $uid');
+        return;
+      }
+
+      final plan = planSnap.data() ?? {};
+      final bool isPayPerUse = (plan['isPayPerUse'] == true);
+      final int slots = (plan['slots'] is num) ? (plan['slots'] as num).toInt() : 0;
+
+      // Check exhaustion condition
+      if (!isPayPerUse && slots != 0 && slotsUsed >= slots) {
+        debugPrint('[PlanRollOver] User $uid exhausted plan $planId ($slotsUsed/$slots). Rolling over to pay-per-use...');
+
+        // Find a pay-per-use plan (prefer active=true if you store that)
+        final ppuQuery = await _firestore
+            .collection('plans')
+            .where('isPayPerUse', isEqualTo: true)
+            .limit(1)
+            .get();
+
+        if (ppuQuery.docs.isEmpty) {
+          debugPrint('[PlanRollOver] No pay-per-use plan available. Aborting rollover.');
+          return;
+        }
+
+        final ppuDoc = ppuQuery.docs.first;
+        final newPlanId = ppuDoc.id;
+
+        // Update user_plans with minimal fields; keep slots_used as-is (ignored for PPU)
+        await upRef.update({
+          'planId': newPlanId,
+          'switched_from_plan': planId,
+          'switched_at': FieldValue.serverTimestamp(),
+        });
+
+        debugPrint('[PlanRollOver] User $uid switched to pay-per-use plan $newPlanId.');
+      } else {
+        debugPrint('[PlanRollOver] No rollover needed for $uid. isPPU=$isPayPerUse, slots=$slots, used=$slotsUsed');
+      }
+    } catch (e) {
+      debugPrint('[PlanRollOver] Error processing rollover: $e');
     }
   }
 
@@ -211,15 +279,12 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // TOP (fixed "Welcome back")
                         const Text(
                           'Welcome back,',
                           style:
                               TextStyle(color: Colors.white70, fontSize: 13),
                         ),
                         const SizedBox(height: 8),
-
-                        // Middle block expands to center Name + Email|Role
                         Expanded(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -560,7 +625,10 @@ class _StudentDashboardState extends State<StudentDashboard> {
   }
 
   void _navigateToStudyMaterials() {
-    debugPrint('Navigate to Study Materials');
+   Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const UserMaterialsPage()),
+    );
   }
 
   void _navigateToMockTests() {

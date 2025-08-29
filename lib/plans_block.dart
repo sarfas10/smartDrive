@@ -249,13 +249,15 @@ class _PlansBlockState extends State<PlansBlock> {
                     slots: 12,
                     studyMaterials: 0,
                     tests: 0,
-                    includeAllStudyMaterials: false,
-                    includeAllTests: false,
+                    // Defaults ON, but editable inside the form
+                    includeAllStudyMaterials: true,
+                    includeAllTests: true,
                     isPayPerUse: false,
-                    extraKmSurcharge: false,
-                    surcharge: 0,
-                    freePickupRadius: false,
-                    freeRadius: 0,
+                    // Required-at-creation transport toggles (locked ON in UI)
+                    extraKmSurcharge: true,
+                    surcharge: 15,
+                    freePickupRadius: true,
+                    freeRadius: 5,
                     active: true,
                   ),
                   isCreate: true,
@@ -282,9 +284,10 @@ class _PlansBlockState extends State<PlansBlock> {
                     slots: 0,
                     studyMaterials: 0,
                     tests: 0,
-                    includeAllStudyMaterials: false,
-                    includeAllTests: false,
+                    includeAllStudyMaterials: false, // ignored for PPU
+                    includeAllTests: false,          // ignored for PPU
                     isPayPerUse: true,
+                    // Required-at-creation transport toggles (locked ON in UI)
                     extraKmSurcharge: true,
                     surcharge: 15,
                     freePickupRadius: true,
@@ -338,13 +341,13 @@ class _PlansBlockState extends State<PlansBlock> {
                 slots: 12,
                 studyMaterials: 0,
                 tests: 0,
-                includeAllStudyMaterials: false,
-                includeAllTests: false,
+                includeAllStudyMaterials: true, // default ON for creation
+                includeAllTests: true,          // default ON for creation
                 isPayPerUse: false,
-                extraKmSurcharge: false,
-                surcharge: 0,
-                freePickupRadius: false,
-                freeRadius: 0,
+                extraKmSurcharge: true,         // required at creation
+                surcharge: 15,
+                freePickupRadius: true,         // required at creation
+                freeRadius: 5,
                 active: true,
               ),
               isCreate: true,
@@ -454,11 +457,14 @@ class _PlansBlockState extends State<PlansBlock> {
     final surchargeCtrl = TextEditingController(text: initial.surcharge.toString());
     final radiusCtrl = TextEditingController(text: initial.freeRadius.toString());
 
-    bool extraKm = initial.extraKmSurcharge;
-    bool freePickup = initial.freePickupRadius;
-    bool active = initial.active;
+    // Transport rules (required at creation → locked ON)
+    bool extraKm = isCreate ? true : initial.extraKmSurcharge;
+    bool freePickup = isCreate ? true : initial.freePickupRadius;
+
+    // Editable always (creation & edit)
     bool allStudy = initial.includeAllStudyMaterials;
     bool allTests = initial.includeAllTests;
+    bool active = initial.active;
 
     await showDialog(
       context: context,
@@ -501,7 +507,7 @@ class _PlansBlockState extends State<PlansBlock> {
                           validator: (v) {
                             if (v == null || v.trim().isEmpty) return 'Enter a price';
                             final n = int.tryParse(v);
-                            if (n == null || n < 0) return 'Enter a valid number';
+                            if (n == null || n <= 0) return 'Enter a valid positive amount';
                             return null;
                           },
                         ),
@@ -517,7 +523,7 @@ class _PlansBlockState extends State<PlansBlock> {
                           decoration: const InputDecoration(hintText: 'e.g., 12'),
                           validator: (v) {
                             final n = int.tryParse(v ?? '');
-                            if (n == null || n < 0) return 'Enter a valid number';
+                            if (n == null || n <= 0) return 'Enter a valid positive number';
                             return null;
                           },
                         ),
@@ -528,6 +534,7 @@ class _PlansBlockState extends State<PlansBlock> {
                       const Text('Study Materials & Tests', style: TextStyle(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
 
+                      // Include All Study Materials — EDITABLE
                       CheckboxListTile(
                         value: allStudy,
                         onChanged: (vv) => setState(() => allStudy = vv ?? false),
@@ -546,6 +553,7 @@ class _PlansBlockState extends State<PlansBlock> {
                               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               decoration: const InputDecoration(hintText: 'e.g., 10'),
                               validator: (v) {
+                                if (allStudy) return null;
                                 final n = int.tryParse(v ?? '');
                                 if (n == null || n < 0) return 'Enter a valid number';
                                 return null;
@@ -554,6 +562,7 @@ class _PlansBlockState extends State<PlansBlock> {
                           ),
                         ),
 
+                      // Include All Tests — EDITABLE
                       CheckboxListTile(
                         value: allTests,
                         onChanged: (vv) => setState(() => allTests = vv ?? false),
@@ -572,6 +581,7 @@ class _PlansBlockState extends State<PlansBlock> {
                               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               decoration: const InputDecoration(hintText: 'e.g., 4'),
                               validator: (v) {
+                                if (allTests) return null;
                                 final n = int.tryParse(v ?? '');
                                 if (n == null || n < 0) return 'Enter a valid number';
                                 return null;
@@ -584,10 +594,15 @@ class _PlansBlockState extends State<PlansBlock> {
                       const Text('Optional Transport Rules', style: TextStyle(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
 
+                      // Extra KM Surcharge — required at creation (locked ON)
                       CheckboxListTile(
                         value: extraKm,
-                        onChanged: (vv) => setState(() => extraKm = vv ?? false),
-                        title: const Text('Extra KM Surcharge'),
+                        onChanged: isCreate ? null : (vv) => setState(() => extraKm = vv ?? false),
+                        title: Row(
+                          children: const [
+                            Text('Extra KM Surcharge'),
+                          ],
+                        ),
                         subtitle: const Text('Charge extra for kilometers beyond limit'),
                         contentPadding: EdgeInsets.zero,
                         controlAffinity: ListTileControlAffinity.leading,
@@ -603,18 +618,25 @@ class _PlansBlockState extends State<PlansBlock> {
                               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               decoration: const InputDecoration(hintText: 'e.g., 15'),
                               validator: (v) {
-                                final n = int.tryParse(v ?? '');
-                                if (n == null || n < 0) return 'Enter a valid number';
+                                final n = int.tryParse((v ?? '').trim());
+                                if (n == null || n <= 0) {
+                                  return 'Enter a positive surcharge';
+                                }
                                 return null;
                               },
                             ),
                           ),
                         ),
 
+                      // Free Pickup Radius — required at creation (locked ON)
                       CheckboxListTile(
                         value: freePickup,
-                        onChanged: (vv) => setState(() => freePickup = vv ?? false),
-                        title: const Text('Free Pickup Radius'),
+                        onChanged: isCreate ? null : (vv) => setState(() => freePickup = vv ?? false),
+                        title: Row(
+                          children: const [
+                            Text('Free Pickup Radius'),
+                          ],
+                        ),
                         subtitle: const Text('Offer free pickup within specified radius'),
                         contentPadding: EdgeInsets.zero,
                         controlAffinity: ListTileControlAffinity.leading,
@@ -630,8 +652,10 @@ class _PlansBlockState extends State<PlansBlock> {
                               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               decoration: const InputDecoration(hintText: 'e.g., 5'),
                               validator: (v) {
-                                final n = int.tryParse(v ?? '');
-                                if (n == null || n < 0) return 'Enter a valid number';
+                                final n = int.tryParse((v ?? '').trim());
+                                if (n == null || n <= 0) {
+                                  return 'Enter a positive radius';
+                                }
                                 return null;
                               },
                             ),
@@ -657,6 +681,11 @@ class _PlansBlockState extends State<PlansBlock> {
                               foregroundColor: Colors.white,
                             ),
                             onPressed: () async {
+                              // Enforce required transport toggles at creation
+                              if (isCreate && (!extraKm || !freePickup)) {
+                                _snack('Extra KM Surcharge and Free Pickup Radius are required.');
+                                return;
+                              }
                               if (!formKey.currentState!.validate()) return;
 
                               final name = nameCtrl.text.trim();
@@ -665,8 +694,8 @@ class _PlansBlockState extends State<PlansBlock> {
                               final slots = int.parse(slotsCtrl.text.trim());
                               final studyMaterials = allStudy ? 0 : int.parse(studyCtrl.text.trim().isEmpty ? '0' : studyCtrl.text.trim());
                               final tests = allTests ? 0 : int.parse(testsCtrl.text.trim().isEmpty ? '0' : testsCtrl.text.trim());
-                              final surcharge = extraKm ? int.parse(surchargeCtrl.text.trim().isEmpty ? '0' : surchargeCtrl.text.trim()) : 0;
-                              final freeRadius = freePickup ? int.parse(radiusCtrl.text.trim().isEmpty ? '0' : radiusCtrl.text.trim()) : 0;
+                              final surcharge = int.parse(surchargeCtrl.text.trim().isEmpty ? '0' : surchargeCtrl.text.trim());
+                              final freeRadius = int.parse(radiusCtrl.text.trim().isEmpty ? '0' : radiusCtrl.text.trim());
 
                               final data = Plan(
                                 id: id,
@@ -678,9 +707,9 @@ class _PlansBlockState extends State<PlansBlock> {
                                 includeAllStudyMaterials: allStudy,
                                 includeAllTests: allTests,
                                 isPayPerUse: false,
-                                extraKmSurcharge: extraKm,
+                                extraKmSurcharge: true, // enforced at creation
                                 surcharge: surcharge,
-                                freePickupRadius: freePickup,
+                                freePickupRadius: true, // enforced at creation
                                 freeRadius: freeRadius,
                                 active: active,
                               );
@@ -740,8 +769,9 @@ class _PlansBlockState extends State<PlansBlock> {
     final surchargeCtrl = TextEditingController(text: initial.surcharge.toString());
     final radiusCtrl = TextEditingController(text: initial.freeRadius.toString());
 
-    bool extraKm = initial.extraKmSurcharge;
-    bool freePickup = initial.freePickupRadius;
+    // Required-at-creation toggles
+    bool extraKm = isCreate ? true : initial.extraKmSurcharge;
+    bool freePickup = isCreate ? true : initial.freePickupRadius;
     bool active = initial.active;
 
     await showDialog(
@@ -774,15 +804,14 @@ class _PlansBlockState extends State<PlansBlock> {
                       ),
                       const SizedBox(height: 12),
 
-                      // No price field for PPU; price is always 0 and UI shows "Pay as you go"
-
                       const Divider(height: 24),
-                      const Text('Optional Transport Rules', style: TextStyle(fontWeight: FontWeight.w600)),
+                      const Text('Transport Rules', style: TextStyle(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
 
+                      // Extra KM Surcharge — required at creation (locked ON)
                       CheckboxListTile(
                         value: extraKm,
-                        onChanged: (vv) => setState(() => extraKm = vv ?? false),
+                        onChanged: isCreate ? null : (vv) => setState(() => extraKm = vv ?? false),
                         title: const Text('Extra KM Surcharge'),
                         subtitle: const Text('Charge extra for kilometers beyond limit'),
                         contentPadding: EdgeInsets.zero,
@@ -799,17 +828,18 @@ class _PlansBlockState extends State<PlansBlock> {
                               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               decoration: const InputDecoration(hintText: 'e.g., 15'),
                               validator: (v) {
-                                final n = int.tryParse(v ?? '');
-                                if (n == null || n < 0) return 'Enter a valid number';
+                                final n = int.tryParse((v ?? '').trim());
+                                if (n == null || n <= 0) return 'Enter a positive surcharge';
                                 return null;
                               },
                             ),
                           ),
                         ),
 
+                      // Free Pickup Radius — required at creation (locked ON)
                       CheckboxListTile(
                         value: freePickup,
-                        onChanged: (vv) => setState(() => freePickup = vv ?? false),
+                        onChanged: isCreate ? null : (vv) => setState(() => freePickup = vv ?? false),
                         title: const Text('Free Pickup Radius'),
                         subtitle: const Text('Offer free pickup within specified radius'),
                         contentPadding: EdgeInsets.zero,
@@ -826,8 +856,8 @@ class _PlansBlockState extends State<PlansBlock> {
                               inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                               decoration: const InputDecoration(hintText: 'e.g., 5'),
                               validator: (v) {
-                                final n = int.tryParse(v ?? '');
-                                if (n == null || n < 0) return 'Enter a valid number';
+                                final n = int.tryParse((v ?? '').trim());
+                                if (n == null || n <= 0) return 'Enter a positive radius';
                                 return null;
                               },
                             ),
@@ -853,12 +883,17 @@ class _PlansBlockState extends State<PlansBlock> {
                               foregroundColor: Colors.white,
                             ),
                             onPressed: () async {
+                              // Enforce required transport toggles at creation
+                              if (isCreate && (!extraKm || !freePickup)) {
+                                _snack('Extra KM Surcharge and Free Pickup Radius are required.');
+                                return;
+                              }
                               if (!formKey.currentState!.validate()) return;
 
                               final name = nameCtrl.text.trim();
                               final id = _safeId(name);
-                              final surcharge = extraKm ? int.parse(surchargeCtrl.text.trim().isEmpty ? '0' : surchargeCtrl.text.trim()) : 0;
-                              final freeRadius = freePickup ? int.parse(radiusCtrl.text.trim().isEmpty ? '0' : radiusCtrl.text.trim()) : 0;
+                              final surcharge = int.parse(surchargeCtrl.text.trim());
+                              final freeRadius = int.parse(radiusCtrl.text.trim());
 
                               final data = Plan(
                                 id: id,
@@ -870,9 +905,9 @@ class _PlansBlockState extends State<PlansBlock> {
                                 includeAllStudyMaterials: false,
                                 includeAllTests: false,
                                 isPayPerUse: true,
-                                extraKmSurcharge: extraKm,
+                                extraKmSurcharge: true, // enforced at creation
                                 surcharge: surcharge,
-                                freePickupRadius: freePickup,
+                                freePickupRadius: true, // enforced at creation
                                 freeRadius: freeRadius,
                                 active: active,
                               );
@@ -1097,7 +1132,6 @@ class _PlanCard extends StatelessWidget {
     );
   }
 }
-
 
 class _Badge extends StatelessWidget {
   final String text;

@@ -1,7 +1,29 @@
+import 'dart:convert';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'login.dart'; // your login screen
+import 'package:http/http.dart' as http;
+import 'package:razorpay_flutter/razorpay_flutter.dart';
+
+import 'login.dart';            // your login screen
+import 'maps_page_user.dart';   // user map picker screen
+
+// ─── Razorpay config ───────────────────────────────────────────────────────────
+
+// Public key via --dart-define (DO NOT hardcode secret)
+const String _razorpayKeyId = String.fromEnvironment('RAZORPAY_KEY_ID');
+
+// Your Hostinger PHP base (same as booking page)
+const String _hostingerBase = 'https://tajdrivingschool.in/smartDrive/payments';
+
+// ───────────────────────────────────────────────────────────────────────────────
+
+class _LatLng {
+  final double latitude;
+  final double longitude;
+  const _LatLng(this.latitude, this.longitude);
+}
 
 class UserSettingsScreen extends StatefulWidget {
   const UserSettingsScreen({super.key});
@@ -35,16 +57,36 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
 
   bool isLoading = true;
 
-  // ---- Lifecycle ----
+  // ─── Razorpay (plan upgrade flow) ────────────────────────────────────────────
+  Razorpay? _razorpay;
+  String? _lastOrderId;            // set after server creates an order
+  String? _pendingPlanId;          // plan currently being purchased
+  int _pendingAmountPaise = 0;     // expected amount for verification
+
+  // ---- track current plan usage so we can warn on upgrade ----
+  int _currentPlanSlots = 0;
+  int _currentSlotsUsed = 0;
+  bool _currentPlanIsPayPerUse = false;
+
+  // ─── Lifecycle ──────────────────────────────────────────────────────────────
   @override
   void initState() {
     super.initState();
     currentUser = _auth.currentUser;
+    _initRazorpay();
     _loadUserData();
+  }
+
+  void _initRazorpay() {
+    _razorpay = Razorpay();
+    _razorpay!.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccessPlan);
+    _razorpay!.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentErrorPlan);
+    _razorpay!.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWalletPlan);
   }
 
   @override
   void dispose() {
+    _razorpay?.clear();
     _nameController.dispose();
     _emailController.dispose();
     _currentPasswordController.dispose();
@@ -53,7 +95,7 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
     super.dispose();
   }
 
-  // ---- Data loading ----
+  // ─── Data loading ───────────────────────────────────────────────────────────
   Future<void> _loadUserData() async {
     if (currentUser == null) {
       _toLogin();
@@ -95,6 +137,9 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
       final uid = currentUser?.uid;
       if (uid == null) {
         currentPlan = null;
+        _currentPlanSlots = 0;
+        _currentSlotsUsed = 0;
+        _currentPlanIsPayPerUse = false;
         return;
       }
 
@@ -103,28 +148,44 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
 
       if (!userPlanDoc.exists) {
         currentPlan = null; // No plan doc created yet
+        _currentPlanSlots = 0;
+        _currentSlotsUsed = 0;
+        _currentPlanIsPayPerUse = false;
         return;
       }
 
-      final data = userPlanDoc.data() as Map<String, dynamic>;
-      final planId = (data['planId'] ?? '').toString().trim();
+      final up = userPlanDoc.data() as Map<String, dynamic>;
+      final planId = (up['planId'] ?? '').toString().trim();
+      _currentSlotsUsed = (up['slots_used'] is num) ? (up['slots_used'] as num).toInt() : 0;
+
       if (planId.isEmpty) {
         currentPlan = null;
+        _currentPlanSlots = 0;
+        _currentPlanIsPayPerUse = false;
         return;
       }
 
       final planDoc = await _firestore.collection('plans').doc(planId).get();
       if (!planDoc.exists || planDoc.data() == null) {
         currentPlan = null;
+        _currentPlanSlots = 0;
+        _currentPlanIsPayPerUse = false;
         return;
       }
 
-      currentPlan = {'id': planDoc.id, ...planDoc.data()!};
+      final p = planDoc.data()!;
+      currentPlan = {'id': planDoc.id, ...p};
+
+      _currentPlanSlots = (p['slots'] is num) ? (p['slots'] as num).toInt() : 0;
+      _currentPlanIsPayPerUse = (p['isPayPerUse'] == true);
     } catch (e) {
       // keep UI stable
       // ignore: avoid_print
       print('Error loading current plan: $e');
       currentPlan = null;
+      _currentPlanSlots = 0;
+      _currentSlotsUsed = 0;
+      _currentPlanIsPayPerUse = false;
     }
   }
 
@@ -132,9 +193,6 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
   Future<void> _loadAvailablePlans() async {
     try {
       Query query = _firestore.collection('plans');
-
-      // If you have an active flag, you can filter:
-      // query = query.where('isActive', isEqualTo: true);
 
       try {
         query = query.orderBy('price');
@@ -157,7 +215,7 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
     }
   }
 
-  // ---- Actions ----
+  // ─── Profile & Security actions ─────────────────────────────────────────────
   Future<void> _updateProfile() async {
     if (!_profileFormKey.currentState!.validate()) return;
 
@@ -252,13 +310,13 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
 
       final userPlanRef = _firestore.collection('user_plans').doc(uid);
 
-      // Update only; if doc doesn't exist, throw & inform user.
       await userPlanRef.update({
         'planId': newPlanId,
         'isActive': true, // keep active flag if you use it elsewhere
         'active': true,   // optional legacy flag
         'startDate': FieldValue.serverTimestamp(),
         'updatedAt': FieldValue.serverTimestamp(),
+        // 'slots_used': 0, // uncomment if you reset counters on upgrade
       });
 
       _showSuccessSnack('Plan updated');
@@ -290,7 +348,215 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
     }
   }
 
-  // ---- UI helpers ----
+  // ─── Boarding selection navigation ──────────────────────────────────────────
+  void _goToBoardingSelection() {
+    if (currentUser == null) {
+      _toLogin();
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MapsPageUser(
+          userId: currentUser!.uid,
+        ),
+      ),
+    );
+  }
+
+  // ─── Razorpay: server helpers ───────────────────────────────────────────────
+  Future<Map<String, dynamic>> _postJson(
+      String url, Map<String, dynamic> body) async {
+    final resp = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
+    }
+    final data = jsonDecode(resp.body);
+    if (data is! Map<String, dynamic>) throw Exception('Invalid JSON');
+    return data;
+  }
+
+  Future<String> _createOrderOnServer({
+    required int amountPaise,
+    required String planId,
+  }) async {
+    final res = await _postJson(
+      '$_hostingerBase/createOrder.php',
+      {
+        'amountPaise': amountPaise,
+        'receipt': 'plan_${planId}_${DateTime.now().millisecondsSinceEpoch}',
+        'notes': {
+          'planId': planId,
+          'userId': currentUser?.uid ?? '',
+        },
+      },
+    );
+    final orderId = (res['orderId'] ?? '').toString();
+    if (orderId.isEmpty) throw Exception('OrderId missing in response');
+    return orderId;
+  }
+
+  Future<bool> _verifyPaymentOnServer({
+    required String razorpayOrderId,
+    required String razorpayPaymentId,
+    required String razorpaySignature,
+    required int expectedAmountPaise,
+  }) async {
+    final res = await _postJson(
+      '$_hostingerBase/verifyPayment.php',
+      {
+        'razorpay_order_id': razorpayOrderId,
+        'razorpay_payment_id': razorpayPaymentId,
+        'razorpay_signature': razorpaySignature,
+        'expectedAmountPaise': expectedAmountPaise,
+      },
+    );
+    return (res['valid'] == true);
+  }
+
+  // ─── Razorpay: open checkout for plan upgrade ───────────────────────────────
+  Future<void> _startPlanPayment({
+    required String planId,
+    required int amountPaise,
+    required String planName,
+  }) async {
+    if (_razorpay == null) {
+      _showErrorDialog('Payment is unavailable right now. Please try again.');
+      return;
+    }
+    if (_razorpayKeyId.isEmpty) {
+      _showErrorDialog(
+          'Razorpay key missing. Pass --dart-define=RAZORPAY_KEY_ID=your_key');
+      return;
+    }
+
+    _pendingPlanId = planId;
+    _pendingAmountPaise = amountPaise;
+
+    try {
+      _lastOrderId =
+          await _createOrderOnServer(amountPaise: amountPaise, planId: planId);
+
+      final options = {
+        'key': _razorpayKeyId,
+        'order_id': _lastOrderId,
+        'amount': amountPaise,
+        'currency': 'INR',
+
+        // Keep header as minimal as Razorpay allows
+        'name': '',
+        'description': planName,
+        'image': '',
+
+        'prefill': {
+          'contact': '',
+          'email': '',
+          'name': '',
+        },
+
+        // Hide EMI, Wallet, Paylater
+        'config': {
+          'display': {
+            'hide': [
+              {'method': 'emi'},
+              {'method': 'wallet'},
+              {'method': 'paylater'},
+            ],
+          }
+        },
+
+        'theme': {'color': '#FFFFFF'},
+        'timeout': 300,
+      };
+
+      _razorpay!.open(options);
+    } catch (e) {
+      _showErrorDialog('Could not start payment: $e');
+    }
+  }
+
+  // ─── Razorpay: callbacks ───────────────────────────────────────────────────
+  Future<void> _onPaymentSuccessPlan(PaymentSuccessResponse r) async {
+    if (r.orderId == null || r.paymentId == null || r.signature == null) {
+      _showErrorDialog('Payment success response incomplete.');
+      return;
+    }
+    if (_pendingPlanId == null || _pendingAmountPaise <= 0) {
+      _showErrorDialog('No pending plan to upgrade.');
+      return;
+    }
+
+    bool valid = false;
+    try {
+      valid = await _verifyPaymentOnServer(
+        razorpayOrderId: r.orderId!,
+        razorpayPaymentId: r.paymentId!,
+        razorpaySignature: r.signature!,
+        expectedAmountPaise: _pendingAmountPaise,
+      );
+    } catch (e) {
+      _showErrorDialog('Verification error: $e');
+      return;
+    }
+
+    if (!valid) {
+      _showErrorDialog('Payment verification failed. Please contact support.');
+      return;
+    }
+
+    // 1) Update user's plan
+    await _upgradePlan(_pendingPlanId!);
+
+    // 2) Log the purchase
+    try {
+      await _firestore.collection('plan_purchases').add({
+        'user_id': currentUser?.uid,
+        'plan_id': _pendingPlanId,
+        'amount': _pendingAmountPaise / 100.0,
+        'currency': 'INR',
+        'razorpay_order_id': r.orderId,
+        'razorpay_payment_id': r.paymentId,
+        'razorpay_signature': r.signature,
+        'created_at': FieldValue.serverTimestamp(),
+      });
+    } catch (_) {}
+
+    _showSuccessSnack('Plan upgraded successfully!');
+    _pendingPlanId = null;
+    _pendingAmountPaise = 0;
+    _lastOrderId = null;
+
+    await _loadCurrentPlan();
+    setState(() {});
+  }
+
+  void _onPaymentErrorPlan(PaymentFailureResponse r) {
+    final msg = r.message?.toString().trim();
+    _showErrorDialog(
+        'Payment failed${msg != null && msg.isNotEmpty ? ':\n$msg' : ''}');
+    // Optional log
+    _firestore.collection('plan_purchases').add({
+      'user_id': currentUser?.uid,
+      'plan_id': _pendingPlanId,
+      'status': 'failed',
+      'code': r.code,
+      'message': r.message,
+      'order_id': _lastOrderId,
+      'created_at': FieldValue.serverTimestamp(),
+    });
+    _pendingPlanId = null;
+    _pendingAmountPaise = 0;
+    _lastOrderId = null;
+  }
+
+  void _onExternalWalletPlan(ExternalWalletResponse r) {
+    _showSuccessSnack('Using external wallet: ${r.walletName ?? ''}');
+  }
+
+  // ─── UI helpers ────────────────────────────────────────────────────────────
   void _toLogin() {
     if (!mounted) return;
     Navigator.of(context).pushAndRemoveUntil(
@@ -401,6 +667,7 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
     );
   }
 
+  // ─── Plans sheet with boarding charges notice ───────────────────────────────
   void _showPlansSheet() {
     if (!mounted) return;
     showModalBottomSheet(
@@ -415,6 +682,25 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
               mainAxisSize: MainAxisSize.min,
               children: [
                 const _SheetTitle('Available Plans'),
+                const SizedBox(height: 6),
+                // Notice explaining boarding charges
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.amber.shade200),
+                  ),
+                  child: Text(
+                    'Note: Additional charges may apply for Boarding pickup beyond the free radius as per plan rules. '
+                    'You can set your boarding point from “Select Boarding Point”.',
+                    style: TextStyle(
+                      color: Colors.amber.shade900,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 8),
                 Flexible(
                   child: ListView.builder(
@@ -469,7 +755,7 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                                   : ElevatedButton(
                                       onPressed: () {
                                         Navigator.pop(ctx);
-                                        _upgradePlan(plan['id'].toString());
+                                        _presentPaymentSummary(plan);
                                       },
                                       child: const Text('Select'),
                                     ),
@@ -488,7 +774,264 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
     );
   }
 
-  // ---- Build ----
+  // ─── Payment Summary before upgrading (with unused-slots warning) ───────────
+  Future<void> _presentPaymentSummary(Map<String, dynamic> plan) async {
+    final planId = (plan['id'] ?? '').toString();
+    if (planId.isEmpty) {
+      _showErrorDialog('Invalid plan selection.');
+      return;
+    }
+
+    // Warn if current plan still has unused slots and is not PPU
+    final bool hasUnusedSlotsToLose = !_currentPlanIsPayPerUse &&
+        _currentPlanSlots > 0 &&
+        _currentSlotsUsed < _currentPlanSlots;
+
+    if (hasUnusedSlotsToLose) {
+      final remaining = _currentPlanSlots - _currentSlotsUsed;
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: const Text('Unused Slots Remaining'),
+          content: Text(
+            'You still have $remaining slot(s) left in your current plan.\n\n'
+            'Upgrading now will reset/forfeit these remaining slots.\n\n'
+            'Do you want to continue?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Keep Current Plan'),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Continue Upgrade'),
+            ),
+          ],
+        ),
+      );
+      if (proceed != true) return; // user cancelled
+    }
+
+    // Plan values
+    final String planName = (plan['name'] ?? planId).toString();
+    final num planPriceNum = (plan['price'] is num) ? plan['price'] as num : 0;
+
+    final bool freePickupRadius = plan['freePickupRadius'] == true;
+    final int freeRadiusKm =
+        freePickupRadius ? ((plan['freeRadius'] ?? 0) as num).toInt() : 0;
+
+    final bool extraKmSurcharge = plan['extraKmSurcharge'] == true;
+    final int surchargePerKm =
+        extraKmSurcharge ? ((plan['surcharge'] ?? 0) as num).toInt() : 0;
+
+    // Fetch coordinates
+    final _LatLng? userBoarding = await _fetchUserBoardingPoint();
+    final _LatLng? officePoint = await _fetchOfficePoint();
+
+    if (userBoarding == null) {
+      _missingBoardingDialog();
+      return;
+    }
+    if (officePoint == null) {
+      _showErrorDialog(
+          'Office location is not configured yet. Please contact support/admin.');
+      return;
+    }
+
+    // Distance (km) using Haversine
+    final double distanceKm = _haversineKm(
+      userBoarding.latitude,
+      userBoarding.longitude,
+      officePoint.latitude,
+      officePoint.longitude,
+    );
+
+    // Additional charge calculation
+    int additionalCharge = 0;
+    int billableKm = 0;
+
+    if (extraKmSurcharge) {
+      final double extra = math.max(0.0, distanceKm - freeRadiusKm);
+      // Charge per full km (ceil to next whole km)
+      billableKm = extra.ceil();
+      additionalCharge = billableKm * surchargePerKm;
+    }
+
+    final int planPrice = planPriceNum.round();
+    final int total = planPrice + additionalCharge;
+
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Payment Summary'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              planName,
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 8),
+            _line('Plan price', _formatCurrency(planPrice)),
+            _line('Distance to office', '${distanceKm.toStringAsFixed(2)} km'),
+            if (freePickupRadius)
+              _line('Free pickup radius', '$freeRadiusKm km'),
+            if (extraKmSurcharge)
+              _line('Surcharge per km', _formatCurrency(surchargePerKm)),
+            const Divider(height: 18),
+            if (extraKmSurcharge) _line('Billable km', '$billableKm km'),
+            if (extraKmSurcharge)
+              _line('Additional charge', _formatCurrency(additionalCharge)),
+            const SizedBox(height: 6),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Text('Total',
+                    style: TextStyle(fontWeight: FontWeight.w800)),
+                Text(_formatCurrency(total),
+                    style: const TextStyle(fontWeight: FontWeight.w800)),
+              ],
+            ),
+            if (hasUnusedSlotsToLose) ...[
+              const SizedBox(height: 10),
+              Text(
+                'Note: Upgrading now will reset your remaining '
+                '${_currentPlanSlots - _currentSlotsUsed} slot(s) from the current plan.',
+                style: const TextStyle(fontSize: 12, color: Colors.redAccent),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+
+              final totalPaise = total * 100;
+
+              if (total <= 0) {
+                // Free plan or no charge → directly update
+                _upgradePlan(planId);
+              } else {
+                _startPlanPayment(
+                  planId: planId,
+                  amountPaise: totalPaise,
+                  planName: planName,
+                );
+              }
+            },
+            child: const Text('Confirm & Upgrade'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _line(String label, String value) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Flexible(child: Text(label)),
+          const SizedBox(width: 12),
+          Text(value, style: const TextStyle(fontWeight: FontWeight.w600)),
+        ],
+      ),
+    );
+  }
+
+  String _formatCurrency(num amount) => '₹${amount.round()}';
+
+  // ─── Data fetchers ──────────────────────────────────────────────────────────
+  Future<_LatLng?> _fetchUserBoardingPoint() async {
+    try {
+      final uid = currentUser?.uid;
+      if (uid == null) return null;
+      final userDoc = await _firestore.collection('users').doc(uid).get();
+      final data = userDoc.data();
+      if (data == null) return null;
+      final b = data['boarding'];
+      if (b is Map<String, dynamic>) {
+        final lat = (b['latitude'] as num?)?.toDouble();
+        final lng = (b['longitude'] as num?)?.toDouble();
+        if (lat != null && lng != null) {
+          return _LatLng(lat, lng);
+        }
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<_LatLng?> _fetchOfficePoint() async {
+    try {
+      final doc =
+          await _firestore.collection('settings').doc('app_settings').get();
+      final data = doc.data();
+      if (data == null) return null;
+      final lat = (data['latitude'] as num?)?.toDouble();
+      final lng = (data['longitude'] as num?)?.toDouble();
+      if (lat != null && lng != null) {
+        return _LatLng(lat, lng);
+      }
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  // Haversine distance in kilometers
+  double _haversineKm(double lat1, double lon1, double lat2, double lon2) {
+    const double R = 6371.0; // Earth radius km
+    final double dLat = _degToRad(lat2 - lat1);
+    final double dLon = _degToRad(lon2 - lon1);
+    final double a = math.sin(dLat / 2) * math.sin(dLat / 2) +
+        math.cos(_degToRad(lat1)) *
+            math.cos(_degToRad(lat2)) *
+            math.sin(dLon / 2) *
+            math.sin(dLon / 2);
+    final double c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a));
+    return R * c;
+  }
+
+  double _degToRad(double deg) => deg * (math.pi / 180.0);
+
+  // Prompt user to set boarding point if missing
+  void _missingBoardingDialog() {
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Boarding Point Required'),
+        content: const Text(
+          'Please select your boarding point first to calculate any additional charges.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              Navigator.pop(context);
+              _goToBoardingSelection();
+            },
+            child: const Text('Select Boarding Point'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ─── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isSmall = MediaQuery.of(context).size.width < 360;
@@ -547,12 +1090,12 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                                         currentPlan: currentPlan,
                                         onShowPlans: _showPlansSheet,
                                         onLogout: _logout,
+                                        onSelectBoarding: _goToBoardingSelection,
                                       ),
                                     ),
                                   ],
                                 ),
                               ] else ...[
-                                // Mobile: NO Expanded/Flexible inside the scroll view
                                 _LeftColumn(
                                   profileFormKey: _profileFormKey,
                                   nameController: _nameController,
@@ -565,6 +1108,7 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                                   currentPlan: currentPlan,
                                   onShowPlans: _showPlansSheet,
                                   onLogout: _logout,
+                                  onSelectBoarding: _goToBoardingSelection,
                                 ),
                               ],
                             ],
@@ -674,14 +1218,13 @@ class _CardSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Text(title,
-                style: theme.textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.bold)),
+                style:
+                    theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
             if (subtitle != null) ...[
               const SizedBox(height: 4),
               Text(
                 subtitle!,
-                style:
-                    theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
+                style: theme.textTheme.bodyMedium?.copyWith(color: theme.hintColor),
               ),
             ],
             const SizedBox(height: 14),
@@ -725,8 +1268,8 @@ class _CurrentPlanTile extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Current Plan: $name',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.bold, fontSize: 16)),
+                    style:
+                        const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                 if (description.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(description),
@@ -755,10 +1298,8 @@ class _SheetTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Text(text,
-        style: Theme.of(context)
-            .textTheme
-            .titleMedium
-            ?.copyWith(fontWeight: FontWeight.w700));
+        style:
+            Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700));
   }
 }
 
@@ -848,11 +1389,13 @@ class _RightColumn extends StatelessWidget {
   final Map<String, dynamic>? currentPlan;
   final VoidCallback onShowPlans;
   final VoidCallback onLogout;
+  final VoidCallback onSelectBoarding;
 
   const _RightColumn({
     required this.currentPlan,
     required this.onShowPlans,
     required this.onLogout,
+    required this.onSelectBoarding,
   });
 
   @override
@@ -897,6 +1440,20 @@ class _RightColumn extends StatelessWidget {
                   foregroundColor: Colors.white,
                 ),
               ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: onSelectBoarding,
+                icon: const Icon(Icons.location_on_outlined),
+                label: const Text('Select Boarding Point'),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'Tip: Boarding pickup beyond free radius may incur extra KM charges as per your plan.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).hintColor,
+                      fontStyle: FontStyle.italic,
+                    ),
+              ),
             ],
           ),
         ),
@@ -914,7 +1471,9 @@ class _RightColumn extends StatelessWidget {
                     title: const Text('Logout'),
                     content: const Text('Are you sure you want to logout?'),
                     actions: [
-                      TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+                      TextButton(
+                          onPressed: () => Navigator.pop(context),
+                          child: const Text('Cancel')),
                       ElevatedButton(
                         onPressed: () {
                           Navigator.pop(context);

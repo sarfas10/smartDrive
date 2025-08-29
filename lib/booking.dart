@@ -1,8 +1,9 @@
-// booking_page that include payments + plan-based free booking logic
+// booking_page with Razorpay + Hostinger order+verify + Firestore booking writes
+// + Transaction that marks slots/{slotId}.status = "booked" only after a successful booking.
+// + Razorpay checkout config to HIDE EMI, Wallet, and Paylater options.
 
 import 'dart:async';
 import 'dart:convert';
-
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart'
@@ -10,9 +11,16 @@ import 'package:flutter/gestures.dart'
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'package:http/http.dart' as http;
 
-// Accent color for Hide Radius button and bubble
 const Color _kAccent = Color(0xFF4C63D2);
+
+// Set via --dart-define (public key only!)
+const String _razorpayKeyId = String.fromEnvironment('RAZORPAY_KEY_ID');
+
+// 🔗 Your Hostinger PHP endpoints base (update this!)
+const String _hostingerBase = 'https://tajdrivingschool.in/smartDrive/payments';
 
 class BookingPage extends StatefulWidget {
   final String userId;
@@ -36,12 +44,12 @@ class _BookingPageState extends State<BookingPage> {
   final Set<Circle> _circles = {};
 
   // Locations
-  LatLng? _selectedLocation;
+  LatLng? _selectedLocation; // boarding point
   LatLng? _officeLocation;
 
-  // Loading flags
+  // Flags
   bool _isMapLoading = true;
-  bool _isLocationLoading = true;
+  bool _isLocationLoading = false;
   bool _isDataLoading = true;
   bool _isBooking = false;
 
@@ -53,21 +61,24 @@ class _BookingPageState extends State<BookingPage> {
   double _freeRadiusKm = 0.0;
   double _surchargePerKm = 0.0;
 
-  // Slot data (kept for later save)
+  // Slot data
   Map<String, dynamic>? _slotData;
 
   // User plan/slots info
   String? _activePlanId;
-  int _planSlots = 0;        // slots from plans/{planId}.slots
-  int _slotsUsed = 0;        // user_plans/{userId}.slots_used (default 0)
-  bool _isFreeByPlan = false; // computed: planSlots>0 && slotsUsed<planSlots
+  int _planSlots = 0;
+  int _slotsUsed = 0;
+  bool _isFreeByPlan = false;
 
-  // Free-radius visibility + hint bubble
+  // UI helpers
   bool _isRadiusVisible = true;
   bool _showHintBubble = false;
   Timer? _hintTimer;
 
-  // Default camera
+  // Razorpay
+  Razorpay? _razorpay;
+  String? _lastOrderId; // set after server creates an order
+
   static const CameraPosition _initialCameraPosition = CameraPosition(
     target: LatLng(28.6139, 77.2090), // New Delhi
     zoom: 12,
@@ -76,20 +87,81 @@ class _BookingPageState extends State<BookingPage> {
   @override
   void initState() {
     super.initState();
+    _initRazorpay();
     _loadInitialData();
+  }
+
+  void _initRazorpay() {
+    _razorpay = Razorpay();
+    _razorpay!.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onPaymentSuccess);
+    _razorpay!.on(Razorpay.EVENT_PAYMENT_ERROR, _onPaymentError);
+    _razorpay!.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
   }
 
   @override
   void dispose() {
     _mapController?.dispose();
     _hintTimer?.cancel();
+    _razorpay?.clear();
     super.dispose();
+  }
+
+  // ===== Snackbar / Logger =====
+  void _snack(String message, {Color? color}) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color ?? Colors.black87,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        margin: const EdgeInsets.all(12),
+      ),
+    );
+  }
+
+  // -------------------- DATA LOAD --------------------
+
+  Future<void> _loadUserBoardingPoint() async {
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(widget.userId)
+          .get();
+
+      final data = userDoc.data();
+      if (data == null) return;
+
+      final b = data['boarding'];
+      if (b is Map<String, dynamic>) {
+        final lat = (b['latitude'] as num?)?.toDouble();
+        final lng = (b['longitude'] as num?)?.toDouble();
+        if (lat != null && lng != null) {
+          final saved = LatLng(lat, lng);
+          _addBoardingPointMarker(saved);
+          if (mounted) setState(() => _isLocationLoading = false);
+          if (_mapController != null) {
+            await _mapController!.animateCamera(
+              CameraUpdate.newCameraPosition(
+                CameraPosition(target: saved, zoom: 16),
+              ),
+            );
+          }
+        }
+      }
+    } catch (e) {
+      _snack('Could not load saved boarding point: $e');
+      if (mounted) setState(() => _isLocationLoading = false);
+    }
   }
 
   Future<void> _loadInitialData() async {
     setState(() => _isDataLoading = true);
     try {
-      // ---- Settings (office location, free radius, surcharge) ----
+      // Settings
       final settingsDoc = await FirebaseFirestore.instance
           .collection('settings')
           .doc('app_settings')
@@ -103,22 +175,17 @@ class _BookingPageState extends State<BookingPage> {
 
         _freeRadiusKm = (s['free_radius_km'] as num?)?.toDouble() ?? 0.0;
         _surchargePerKm = (s['surcharge_per_km'] as num?)?.toDouble() ?? 0.0;
-
         _refreshRadiusOverlay();
       }
 
-      // ---- Slot details (kept) ----
+      // Slot
       final slotDoc = await FirebaseFirestore.instance
           .collection('slots')
           .doc(widget.slotId)
           .get();
+      if (slotDoc.exists) _slotData = slotDoc.data()!;
 
-      if (slotDoc.exists) {
-        _slotData = slotDoc.data()!;
-      }
-
-      // ---- User plan → plan slots and slots_used ----
-      // user_plans/{userId} contains planId and optionally slots_used
+      // Plan
       final userPlanDoc = await FirebaseFirestore.instance
           .collection('user_plans')
           .doc(widget.userId)
@@ -130,15 +197,9 @@ class _BookingPageState extends State<BookingPage> {
             ? null
             : (up['planId'] as String);
 
-        // slots_used may be missing; treat as 0
         final used = (up['slots_used'] ?? 0);
-        if (used is num) {
-          _slotsUsed = used.toInt();
-        } else {
-          _slotsUsed = 0;
-        }
+        _slotsUsed = used is num ? used.toInt() : 0;
 
-        // If we have a planId, load the plan to read its 'slots'
         if (_activePlanId != null) {
           final planDoc = await FirebaseFirestore.instance
               .collection('plans')
@@ -147,22 +208,19 @@ class _BookingPageState extends State<BookingPage> {
           if (planDoc.exists) {
             final pd = planDoc.data()!;
             final slots = (pd['slots'] ?? 0);
-            if (slots is num) {
-              _planSlots = slots.toInt();
-            } else {
-              _planSlots = 0;
-            }
+            _planSlots = slots is num ? slots.toInt() : 0;
           }
         }
       } else {
-        // no user_plan doc → no plan
         _activePlanId = null;
         _planSlots = 0;
         _slotsUsed = 0;
       }
 
-      // Compute free-by-plan eligibility
       _isFreeByPlan = (_planSlots != 0) && (_slotsUsed < _planSlots);
+
+      // Load saved boarding marker (if any)
+      await _loadUserBoardingPoint();
 
       setState(() => _isDataLoading = false);
     } catch (e) {
@@ -170,6 +228,8 @@ class _BookingPageState extends State<BookingPage> {
       _snack('Error loading data: $e');
     }
   }
+
+  // -------------------- MAP HELPERS --------------------
 
   void _refreshRadiusOverlay() {
     if (_officeLocation == null) return;
@@ -246,7 +306,18 @@ class _BookingPageState extends State<BookingPage> {
     setState(() => _isMapLoading = false);
     _addOfficeMarker();
     Future.delayed(const Duration(milliseconds: 300), _refreshRadiusOverlay);
-    _goToCurrentLocation();
+
+    if (_selectedLocation != null) {
+      _mapController!.moveCamera(
+        CameraUpdate.newCameraPosition(
+          CameraPosition(target: _selectedLocation!, zoom: 16),
+        ),
+      );
+      if (mounted) setState(() => _isLocationLoading = false);
+      _calculateHaversineDistance();
+    } else {
+      _goToCurrentLocation();
+    }
   }
 
   void _addOfficeMarker() {
@@ -329,13 +400,21 @@ class _BookingPageState extends State<BookingPage> {
         ),
       );
       final current = LatLng(position.latitude, position.longitude);
-      _addBoardingPointMarker(current);
 
-      await _mapController?.animateCamera(
-        CameraUpdate.newCameraPosition(
-          CameraPosition(target: current, zoom: 16),
-        ),
-      );
+      if (_selectedLocation == null) {
+        _addBoardingPointMarker(current);
+        await _mapController?.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(target: current, zoom: 16),
+          ),
+        );
+      } else {
+        await _mapController?.animateCamera(
+          CameraUpdate.newCameraPosition(
+            CameraPosition(target: _selectedLocation!, zoom: 16),
+          ),
+        );
+      }
     } catch (e) {
       _snack('Error getting location: $e');
     } finally {
@@ -359,13 +438,67 @@ class _BookingPageState extends State<BookingPage> {
 
   double get _vehicleCost => _numToDouble(_slotData?['vehicle_cost']);
   double get _additionalCost => _numToDouble(_slotData?['additional_cost']);
-
-  // Base total cost before plan logic
   double get _baseTotalCost =>
       double.parse((_vehicleCost + _additionalCost + _surcharge).toStringAsFixed(2));
-
-  // Final payable after plan benefit
   double get _finalPayable => _isFreeByPlan ? 0.0 : _baseTotalCost;
+
+  // -------------------- SERVER HELPERS --------------------
+
+  Future<Map<String, dynamic>> _postJson(
+    String url,
+    Map<String, dynamic> body,
+  ) async {
+    final resp = await http.post(
+      Uri.parse(url),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    );
+    if (resp.statusCode < 200 || resp.statusCode >= 300) {
+      throw Exception('HTTP ${resp.statusCode}: ${resp.body}');
+    }
+    final data = jsonDecode(resp.body);
+    if (data is! Map<String, dynamic>) {
+      throw Exception('Invalid JSON from server');
+    }
+    return data;
+  }
+
+  Future<String> _createOrderOnServer({required int amountPaise}) async {
+    final res = await _postJson(
+      '$_hostingerBase/createOrder.php',
+      {
+        'amountPaise': amountPaise,
+        'receipt': 'slot_${widget.slotId}_${DateTime.now().millisecondsSinceEpoch}',
+        'notes': {
+          'slotId': widget.slotId,
+          'userId': widget.userId,
+        },
+      },
+    );
+    final orderId = (res['orderId'] ?? '').toString();
+    if (orderId.isEmpty) throw Exception('OrderId missing in response');
+    return orderId;
+  }
+
+  Future<bool> _verifyPaymentOnServer({
+    required String razorpayOrderId,
+    required String razorpayPaymentId,
+    required String razorpaySignature,
+    required int expectedAmountPaise,
+  }) async {
+    final res = await _postJson(
+      '$_hostingerBase/verifyPayment.php',
+      {
+        'razorpay_order_id': razorpayOrderId,
+        'razorpay_payment_id': razorpayPaymentId,
+        'razorpay_signature': razorpaySignature,
+        'expectedAmountPaise': expectedAmountPaise,
+      },
+    );
+    return (res['valid'] == true);
+  }
+
+  // -------------------- PAYMENT FLOW --------------------
 
   Future<void> _proceedToPay() async {
     if (_selectedLocation == null) {
@@ -373,8 +506,154 @@ class _BookingPageState extends State<BookingPage> {
       return;
     }
 
+    // Free under plan → create booking immediately and increment slots_used
+    if (_finalPayable <= 0.0) {
+      await _createBookingAndMaybeIncrement(
+        status: 'confirmed',
+        paidAmount: 0,
+        paymentInfo: null,
+      );
+      return;
+    }
+
+    // Paid → create order on server, then open Razorpay
+    try {
+      final amountPaise = (_finalPayable * 100).round();
+      _snack('Preparing payment…');
+      _lastOrderId = await _createOrderOnServer(amountPaise: amountPaise);
+      _openRazorpayCheckout(orderId: _lastOrderId!, amountPaise: amountPaise);
+    } catch (e) {
+      _snack('Could not start payment: $e', color: Colors.red);
+    }
+  }
+
+  void _openRazorpayCheckout({required String orderId, required int amountPaise}) {
+    if (_razorpay == null) {
+      _snack('Payment is unavailable right now. Please try again.');
+      return;
+    }
+    if (_razorpayKeyId.isEmpty) {
+      _snack('Razorpay key missing. Pass --dart-define=RAZORPAY_KEY_ID=your_key');
+      return;
+    }
+
+    final options = {
+      'key': _razorpayKeyId,
+      'order_id': orderId, // IMPORTANT: use server-created order
+      'amount': amountPaise, // paise
+      'currency': 'INR',
+      'prefill': {'contact': '', 'email': '', 'name': ''},
+          'name': '',
+          'description': '',
+          'image': '',
+          'theme': {'color': '#FFFFFF'},
+
+
+      // ---------- HIDE EMI, Wallet, Paylater ----------
+      'config': {
+        'display': {
+          'hide': [
+            {'method': 'emi'},
+            {'method': 'wallet'},
+            {'method': 'paylater'},
+          ],
+          // If an older SDK ignores 'hide', uncomment below to whitelist only UPI + Card:
+          // 'blocks': {
+          //   'upi': {'name': 'UPI'},
+          //   'card': {'name': 'Cards'},
+          // },
+          // 'sequence': ['block.upi', 'block.card'],
+          // 'preferences': {'show_default_blocks': false},
+        }
+      },
+      // -------------------------------------------------
+
+      
+      'timeout': 300,
+    };
+
+    try {
+      _razorpay!.open(options);
+    } catch (e) {
+      _snack('Unable to open payment: $e', color: Colors.red);
+    }
+  }
+
+  Future<void> _onPaymentSuccess(PaymentSuccessResponse r) async {
+    // Guard: we must have created an order
+    if (r.orderId == null || r.paymentId == null || r.signature == null) {
+      _snack('Payment success response incomplete', color: Colors.red);
+      return;
+    }
+
+    final amountPaise = (_finalPayable * 100).round();
+
+    // Verify with server before writing booking
+    bool valid = false;
+    try {
+      valid = await _verifyPaymentOnServer(
+        razorpayOrderId: r.orderId!,
+        razorpayPaymentId: r.paymentId!,
+        razorpaySignature: r.signature!,
+        expectedAmountPaise: amountPaise,
+      );
+    } catch (e) {
+      _snack('Verification error: $e', color: Colors.red);
+      return;
+    }
+
+    if (!valid) {
+      _snack('Payment verification failed. Please contact support.', color: Colors.red);
+      return;
+    }
+
+    // Verified → write booking as paid
+    await _createBookingAndMaybeIncrement(
+      status: 'paid',
+      paidAmount: _finalPayable,
+      paymentInfo: {
+        'razorpay_payment_id': r.paymentId,
+        'razorpay_order_id': r.orderId,
+        'razorpay_signature': r.signature,
+      },
+    );
+  }
+
+  void _onPaymentError(PaymentFailureResponse r) {
+    final msg = r.message?.toString().trim();
+    _snack('Payment failed${msg != null && msg.isNotEmpty ? ': $msg' : ''}', color: Colors.red);
+
+    // Optional: log failed attempt
+    FirebaseFirestore.instance.collection('payment_attempts').add({
+      'user_id': widget.userId,
+      'slot_id': widget.slotId,
+      'status': 'failed',
+      'code': r.code,
+      'message': r.message,
+      'order_id': _lastOrderId,
+      'created_at': FieldValue.serverTimestamp(),
+    });
+  }
+
+  void _onExternalWallet(ExternalWalletResponse r) {
+    _snack('Using external wallet: ${r.walletName ?? ''}');
+  }
+
+  // -------------------- FIRESTORE WRITE (Transaction) --------------------
+
+  Future<void> _createBookingAndMaybeIncrement({
+    required String status,
+    required num paidAmount,
+    Map<String, dynamic>? paymentInfo,
+  }) async {
     setState(() => _isBooking = true);
     try {
+      final fs = FirebaseFirestore.instance;
+
+      final bookingRef = fs.collection('bookings').doc();
+      final userPlanRef = fs.collection('user_plans').doc(widget.userId);
+      final slotRef = fs.collection('slots').doc(widget.slotId);
+
       final bookingData = {
         'user_id': widget.userId,
         'slot_id': widget.slotId,
@@ -384,37 +663,73 @@ class _BookingPageState extends State<BookingPage> {
         'surcharge': _surcharge,
         'vehicle_cost': _vehicleCost,
         'additional_cost': _additionalCost,
-        'total_cost': _finalPayable, // <-- reflect plan-based free
-        'status': 'pending',
+        'total_cost': _finalPayable,
+        'status': status, // 'paid' or 'confirmed'
         'created_at': FieldValue.serverTimestamp(),
 
-        // Extra audit fields (useful later)
+        // plan info
         'plan_id': _activePlanId,
         'plan_slots': _planSlots,
         'plan_slots_used': _slotsUsed,
         'free_by_plan': _isFreeByPlan,
+
+        // payment info
+        if (paymentInfo != null) 'payment': paymentInfo,
+        if (_lastOrderId != null) 'razorpay_order_id': _lastOrderId,
+        'paid_amount': paidAmount,
       };
 
-      await FirebaseFirestore.instance.collection('bookings').add(bookingData);
+      // Transaction to prevent double-booking
+      await fs.runTransaction((tx) async {
+        // 1) Check slot is not already booked
+        final slotSnap = await tx.get(slotRef);
+        final currentStatus = (slotSnap.data()?['status'] ?? '').toString();
+        if (currentStatus.toLowerCase() == 'booked') {
+          throw Exception('Slot already booked');
+        }
+
+        // 2) Create booking
+        tx.set(bookingRef, bookingData);
+
+        // 3) If free by plan, increment user's slots_used
+        if (_activePlanId != null && _isFreeByPlan) {
+          tx.set(userPlanRef, {'slots_used': _slotsUsed + 1}, SetOptions(merge: true));
+        }
+
+        // 4) Mark slot as booked
+        tx.set(
+          slotRef,
+          {
+            'status': 'booked',
+            'booked_by': widget.userId,
+            'booking_id': bookingRef.id,
+            'booked_at': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      });
 
       _snack(
-        _isFreeByPlan ? 'Booking created successfully (FREE under your plan)!'
-                      : 'Booking created successfully!',
+        status == 'paid'
+            ? 'Payment successful. Booking created.'
+            : 'Booking created successfully (FREE under your plan)!',
         color: Colors.green,
       );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
-      _snack('Error creating booking: $e', color: Colors.red);
+      // If anything fails inside the transaction, no writes were committed.
+      final msg = e.toString();
+      if (msg.contains('already booked')) {
+        _snack('Sorry, this slot was just booked by someone else.', color: Colors.red);
+      } else {
+        _snack('Error creating booking: $e', color: Colors.red);
+      }
     } finally {
       if (mounted) setState(() => _isBooking = false);
     }
   }
 
-  void _snack(String msg, {Color color = Colors.black87}) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: color),
-    );
-  }
+  // -------------------- UI --------------------
 
   @override
   Widget build(BuildContext context) {
@@ -461,15 +776,13 @@ class _BookingPageState extends State<BookingPage> {
                   child: _RoundedButtonsColumn(
                     children: [
                       IconButton(
-                        onPressed: () =>
-                            _mapController?.animateCamera(CameraUpdate.zoomIn()),
+                        onPressed: () => _mapController?.animateCamera(CameraUpdate.zoomIn()),
                         icon: const Icon(Icons.add),
                         tooltip: 'Zoom In',
                       ),
                       const SizedBox(height: 8),
                       IconButton(
-                        onPressed: () =>
-                            _mapController?.animateCamera(CameraUpdate.zoomOut()),
+                        onPressed: () => _mapController?.animateCamera(CameraUpdate.zoomOut()),
                         icon: const Icon(Icons.remove),
                         tooltip: 'Zoom Out',
                       ),
@@ -493,7 +806,7 @@ class _BookingPageState extends State<BookingPage> {
                   ),
                 ),
 
-                // Go to Office (no toast)
+                // Go to Office
                 Positioned(
                   left: 16,
                   bottom: 140,
@@ -542,7 +855,7 @@ class _BookingPageState extends State<BookingPage> {
             additionalCost: _additionalCost,
             surcharge: _surcharge,
             distanceKm: _distanceKm,
-            totalCost: _finalPayable, // <-- show final payable (free if eligible)
+            totalCost: _finalPayable,
             freeRadiusKm: _freeRadiusKm,
             isBooking: _isBooking,
             onProceed: _proceedToPay,
@@ -550,7 +863,7 @@ class _BookingPageState extends State<BookingPage> {
             isRadiusVisible: _isRadiusVisible,
             onToggleRadius: _toggleRadiusVisibility,
             showHintBubble: _showHintBubble,
-            isFreeByPlan: _isFreeByPlan,           // for UI badge/note
+            isFreeByPlan: _isFreeByPlan,
             planSlots: _planSlots,
             slotsUsed: _slotsUsed,
           ),
@@ -560,7 +873,8 @@ class _BookingPageState extends State<BookingPage> {
   }
 }
 
-/// Translucent blocking overlay
+// -------------------- Small UI helpers (unchanged) --------------------
+
 class _LoadingOverlay extends StatelessWidget {
   const _LoadingOverlay({required this.text});
   final String text;
@@ -578,16 +892,16 @@ class _LoadingOverlay extends StatelessWidget {
             padding: const EdgeInsets.all(20),
             child: Row(
               mainAxisSize: MainAxisSize.min,
-              children: const [
-                SizedBox(
+              children: [
+                const SizedBox(
                   width: 28,
                   height: 28,
                   child: CircularProgressIndicator(strokeWidth: 3),
                 ),
-                SizedBox(width: 14),
+                const SizedBox(width: 14),
                 Text(
-                  'Initializing map & location...',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  text,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                 ),
               ],
             ),
@@ -598,7 +912,6 @@ class _LoadingOverlay extends StatelessWidget {
   }
 }
 
-/// A column for rounded icon buttons (used for map controls)
 class _RoundedButtonsColumn extends StatelessWidget {
   const _RoundedButtonsColumn({Key? key, required this.children})
       : super(key: key);
@@ -621,7 +934,6 @@ class _RoundedButtonsColumn extends StatelessWidget {
   }
 }
 
-/// Toggle button for showing/hiding the free radius (colored)
 class _RadiusToggleButton extends StatelessWidget {
   const _RadiusToggleButton({
     Key? key,
@@ -689,7 +1001,6 @@ class _RadiusToggleButton extends StatelessWidget {
   }
 }
 
-/// A small speech bubble used to "nudge" the user near the toggle button.
 class _SpeechBubble extends StatelessWidget {
   const _SpeechBubble({
     Key? key,
@@ -736,7 +1047,7 @@ class _TrianglePointer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Transform.rotate(
-      angle: 0.785398, // 45 degrees
+      angle: 0.785398,
       child: Container(
         width: 12,
         height: 12,
@@ -746,10 +1057,9 @@ class _TrianglePointer extends StatelessWidget {
   }
 }
 
-/// Bottom cost summary with CTA (lesson details UI removed)
 class _SummarySheet extends StatelessWidget {
   const _SummarySheet({
-    required this.slotData,           // kept for later save
+    required this.slotData,
     required this.vehicleCost,
     required this.additionalCost,
     required this.surcharge,
@@ -762,8 +1072,6 @@ class _SummarySheet extends StatelessWidget {
     required this.isRadiusVisible,
     required this.onToggleRadius,
     required this.showHintBubble,
-
-    // new plan-based props
     required this.isFreeByPlan,
     required this.planSlots,
     required this.slotsUsed,
@@ -790,7 +1098,6 @@ class _SummarySheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      // No rounded corners on the summary container
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -827,17 +1134,13 @@ class _SummarySheet extends StatelessWidget {
                 ],
               ),
 
-              // Bubble prompting to hide radius (shown near the button)
               if (showHintBubble) ...[
                 const SizedBox(height: 8),
                 Row(
                   children: const [
                     Spacer(),
                     _SpeechBubble(
-                      text:
-                          'Tip: Hide the radius to select points inside the free area.',
-                      background: _kAccent,
-                      textColor: Colors.white,
+                      text: 'Tip: Hide the radius to select points inside the free area.',
                     ),
                   ],
                 ),
@@ -845,7 +1148,6 @@ class _SummarySheet extends StatelessWidget {
 
               const SizedBox(height: 16),
 
-              // === Plan Benefit Note (if free) ===
               if (isFreeByPlan) ...[
                 Container(
                   padding: const EdgeInsets.all(12),
@@ -874,7 +1176,6 @@ class _SummarySheet extends StatelessWidget {
                 const SizedBox(height: 12),
               ],
 
-              // === Cost Breakdown ===
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -922,7 +1223,6 @@ class _SummarySheet extends StatelessWidget {
                     Container(height: 1, color: Colors.grey[300]),
                     const SizedBox(height: 12),
 
-                    // Total
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
@@ -935,13 +1235,11 @@ class _SummarySheet extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          isFreeByPlan
-                              ? 'FREE'
-                              : '₹${totalCost.toStringAsFixed(2)}',
-                          style: TextStyle(
+                          isFreeByPlan ? 'FREE' : '₹${totalCost.toStringAsFixed(2)}',
+                          style: const TextStyle(
                             fontSize: 20,
                             fontWeight: FontWeight.bold,
-                            color: isFreeByPlan ? Colors.green : Colors.green,
+                            color: Colors.green,
                           ),
                         ),
                       ],
@@ -952,7 +1250,6 @@ class _SummarySheet extends StatelessWidget {
 
               const SizedBox(height: 20),
 
-              // Proceed Button
               SizedBox(
                 width: double.infinity,
                 child: ElevatedButton(
@@ -1019,8 +1316,8 @@ class _SummarySheet extends StatelessWidget {
     );
   }
 
-  // ---- helpers ----
-  Widget _costRow(String label, double amount, {bool isHighlight = false, bool strike = false}) {
+  Widget _costRow(String label, double amount,
+      {bool isHighlight = false, bool strike = false}) {
     final valueText = '₹${amount.toStringAsFixed(2)}';
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,

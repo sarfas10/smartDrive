@@ -24,20 +24,24 @@ class _OnboardingFormState extends State<OnboardingForm> {
   final _personalKey = GlobalKey<FormState>();
   final _kycKey = GlobalKey<FormState>();
 
-  // ===== Cloudinary config (replace with your real values) =====
-  static const String _cloudName = 'dxeunc4vd';
-  static const String _unsignedUploadPreset = 'smartDrive';
+  // ===== Cloudinary & Server Config =====
+  static const String _cloudName = 'dxeunc4vd'; // keep in sync with .env
   static const String _baseFolder = 'smartDrive';
+  static const String _hostingerBase =
+      'https://tajdrivingschool.in/smartDrive/cloudinary';
 
   // ===== Personal fields =====
   final _address1Ctrl = TextEditingController();
   final _address2Ctrl = TextEditingController();
   final _zipCtrl = TextEditingController();
+  final _latCtrl = TextEditingController();
+  final _lngCtrl = TextEditingController();
+
   DateTime? _dob;
   double? _homeLat;
   double? _homeLng;
-  XFile? _profilePhoto; // local pick
-  String? _photoUrl;    // existing remote photo
+  XFile? _profilePhoto;
+  String? _photoUrl;
 
   // ===== KYC fields =====
   String? _docType; // Aadhaar / PAN / VoterId
@@ -45,11 +49,11 @@ class _OnboardingFormState extends State<OnboardingForm> {
   XFile? _docBack;
 
   // ===== State / Flow =====
-  int _step = 0; // 0 = Personal, 1 = KYC
+  int _step = 0;
   bool _saving = false;
   bool _loadingState = true;
-  String? _onboardingStatus; // 'personal_saved','kyc_pending','kyc_approved','kyc_rejected'
-  String? _kycStatus;        // 'pending','approved','rejected'
+  String? _onboardingStatus;
+  String? _kycStatus;
   final _picker = ImagePicker();
 
   bool get _isUnderVerification =>
@@ -57,6 +61,9 @@ class _OnboardingFormState extends State<OnboardingForm> {
   bool get _isApproved =>
       _kycStatus == 'approved' || _onboardingStatus == 'kyc_approved';
   bool get _isReadOnly => _isUnderVerification || _isApproved;
+
+  // Remove ALL whitespace (to avoid signature mismatch)
+  String _clean(String s) => s.replaceAll(RegExp(r'\s+'), '');
 
   @override
   void initState() {
@@ -69,24 +76,20 @@ class _OnboardingFormState extends State<OnboardingForm> {
     _address1Ctrl.dispose();
     _address2Ctrl.dispose();
     _zipCtrl.dispose();
+    _latCtrl.dispose();
+    _lngCtrl.dispose();
     super.dispose();
   }
 
-  // ---------- Helpers ----------
   bool _isPersonalCompleteFromData(Map<String, dynamic> data) {
     final addr1 = (data['address_line1'] ?? '').toString().trim();
     final zip = (data['zipcode'] ?? '').toString().trim();
     final dob = data['dob'];
     final lat = data['home_lat'];
     final lng = data['home_lng'];
-    return addr1.isNotEmpty &&
-        zip.isNotEmpty &&
-        dob != null &&
-        lat != null &&
-        lng != null;
+    return addr1.isNotEmpty && zip.isNotEmpty && dob != null && lat != null && lng != null;
   }
 
-  // ================== Hydrate from Firestore ONLY ==================
   Future<void> _hydrateState() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
@@ -95,9 +98,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
     }
 
     try {
-      // 1) Profile doc
-      final profRef =
-          FirebaseFirestore.instance.collection('user_profiles').doc(user.uid);
+      final profRef = FirebaseFirestore.instance.collection('user_profiles').doc(user.uid);
       final profSnap = await profRef.get();
 
       Map<String, dynamic>? data;
@@ -112,9 +113,11 @@ class _OnboardingFormState extends State<OnboardingForm> {
         _dob = ts?.toDate();
         _homeLat = (data?['home_lat'] as num?)?.toDouble();
         _homeLng = (data?['home_lng'] as num?)?.toDouble();
+
+        _latCtrl.text = _homeLat != null ? _homeLat!.toStringAsFixed(6) : '';
+        _lngCtrl.text = _homeLng != null ? _homeLng!.toStringAsFixed(6) : '';
       }
 
-      // 2) Latest KYC status
       final kycQ = await FirebaseFirestore.instance
           .collection('documents')
           .where('uid', isEqualTo: user.uid)
@@ -126,30 +129,23 @@ class _OnboardingFormState extends State<OnboardingForm> {
         _kycStatus = kycQ.docs.first.data()['status'] as String?;
       }
 
-      // 3) Decide step
       if (_isUnderVerification || _isApproved) {
-        _step = 1; // show KYC (locked)
-      } else if (_onboardingStatus == 'personal_saved' ||
-          (data != null && _isPersonalCompleteFromData(data))) {
-        // Either marked by flag OR data satisfies required fields
-        _step = 1; // jump to KYC
+        _step = 1;
+      } else if (_onboardingStatus == 'personal_saved' || (data != null && _isPersonalCompleteFromData(data))) {
+        _step = 1;
       } else {
-        _step = 0; // start at Personal
+        _step = 0;
       }
     } catch (_) {
-      // If anything fails, start from Personal
       _step = 0;
     } finally {
       if (mounted) setState(() => _loadingState = false);
     }
   }
 
-  // ================== Image Pick (no crop) ==================
+  // Pick image (you can switch to file_picker if you truly want ANY file from UI)
   Future<XFile?> _pickImage() async {
-    return await _picker.pickImage(
-      source: ImageSource.gallery,
-      imageQuality: 90,
-    );
+    return await _picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
   }
 
   Future<void> _pickAvatar() async {
@@ -157,39 +153,62 @@ class _OnboardingFormState extends State<OnboardingForm> {
     if (x != null) setState(() => _profilePhoto = x);
   }
 
-  // ================== Cloudinary Upload ==================
-  Future<String> _uploadToCloudinary({
+  // ===== Signed Upload: Get server signature =====
+  Future<Map<String, dynamic>> _getSignature({
+    required String publicId,
+    required String folder,
+    String overwrite = 'true',
+  }) async {
+    final uri = Uri.parse('$_hostingerBase/signature.php');
+    final body = {
+      'public_id': _clean(publicId),
+      'folder': _clean(folder),
+      'overwrite': overwrite,
+    };
+    final res = await http.post(uri, body: body);
+    if (res.statusCode != 200) {
+      throw Exception('Signature server error: ${res.statusCode} ${res.body}');
+    }
+    final json = jsonDecode(res.body) as Map<String, dynamic>;
+    if (json['signature'] == null || json['api_key'] == null || json['timestamp'] == null) {
+      throw Exception('Invalid signature response: $json');
+    }
+    return json;
+  }
+
+  // ===== Signed Upload to Cloudinary (ANY file type via /auto/upload) =====
+  Future<String> _uploadToCloudinarySigned({
     required XFile xfile,
     required String publicId,
-    String? folder,
+    required String folder,
+    String overwrite = 'true',
   }) async {
-    final uri =
-        Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/image/upload');
+    final signed = await _getSignature(publicId: publicId, folder: folder, overwrite: overwrite);
+    final timestamp = signed['timestamp'].toString();
+    final signature = signed['signature'] as String;
+    final apiKey = signed['api_key'] as String;
+
+    // Use /auto/upload to accept any format (image, video, raw, pdf, etc.)
+    final uri = Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/auto/upload');
 
     final req = http.MultipartRequest('POST', uri)
-      ..fields['upload_preset'] = _unsignedUploadPreset
-      ..fields['public_id'] = publicId;
+      ..fields['api_key'] = apiKey
+      ..fields['timestamp'] = timestamp
+      ..fields['signature'] = signature
+      ..fields['public_id'] = _clean(publicId)
+      ..fields['folder'] = _clean(folder)
+      ..fields['overwrite'] = overwrite;
 
-    if (folder != null && folder.isNotEmpty) {
-      req.fields['folder'] = folder;
-    }
+    // generic content-type so ANY file works
+    final mediaType = MediaType('application', 'octet-stream');
 
     if (kIsWeb) {
       final bytes = await xfile.readAsBytes();
-      final filename = xfile.name.isNotEmpty ? xfile.name : 'upload.jpg';
-      req.files.add(http.MultipartFile.fromBytes(
-        'file',
-        bytes,
-        filename: filename,
-        contentType: MediaType('image', 'jpeg'),
-      ));
+      final filename = xfile.name.isNotEmpty ? xfile.name : 'upload.bin';
+      req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename, contentType: mediaType));
     } else {
-      req.files.add(await http.MultipartFile.fromPath(
-        'file',
-        xfile.path,
-        filename: xfile.name.isNotEmpty ? xfile.name : 'upload.jpg',
-        contentType: MediaType('image', 'jpeg'),
-      ));
+      final filename = xfile.name.isNotEmpty ? xfile.name : 'upload.bin';
+      req.files.add(await http.MultipartFile.fromPath('file', xfile.path, filename: filename, contentType: mediaType));
     }
 
     final streamed = await req.send();
@@ -201,18 +220,17 @@ class _OnboardingFormState extends State<OnboardingForm> {
     return (json['secure_url'] as String?) ?? (json['url'] as String);
   }
 
-  // ================== Location ==================
+  // ===== Location =====
   Future<void> _useCurrentLocation() async {
     LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
+    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
       permission = await Geolocator.requestPermission();
     }
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
+    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Location permission denied')));
+          const SnackBar(content: Text('Location permission denied')),
+        );
       }
       return;
     }
@@ -220,18 +238,19 @@ class _OnboardingFormState extends State<OnboardingForm> {
     setState(() {
       _homeLat = pos.latitude;
       _homeLng = pos.longitude;
+      _latCtrl.text = _homeLat!.toStringAsFixed(6);
+      _lngCtrl.text = _homeLng!.toStringAsFixed(6);
     });
   }
 
-  // ================== Save Personal ==================
+  // ===== Save Personal =====
   Future<void> _savePersonal() async {
     if (!_personalKey.currentState!.validate()) return;
     if (_isReadOnly) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Not logged in')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not logged in')));
       return;
     }
 
@@ -239,18 +258,19 @@ class _OnboardingFormState extends State<OnboardingForm> {
     try {
       String? photoUrl = _photoUrl;
       if (_profilePhoto != null) {
-        photoUrl = await _uploadToCloudinary(
+        final folder = _clean('$_baseFolder/users/${user.uid}/profile');
+        final publicId = _clean('profile');
+        photoUrl = await _uploadToCloudinarySigned(
           xfile: _profilePhoto!,
-          publicId: 'profile',
-          folder: '$_baseFolder/users/${user.uid}',
+          publicId: publicId,
+          folder: folder,
         );
       }
 
       final data = {
         'uid': user.uid,
         'address_line1': _address1Ctrl.text.trim(),
-        'address_line2':
-            _address2Ctrl.text.trim().isEmpty ? null : _address2Ctrl.text.trim(),
+        'address_line2': _address2Ctrl.text.trim().isEmpty ? null : _address2Ctrl.text.trim(),
         'zipcode': _zipCtrl.text.trim(),
         'dob': _dob != null ? Timestamp.fromDate(_dob!) : null,
         'home_lat': _homeLat,
@@ -261,50 +281,49 @@ class _OnboardingFormState extends State<OnboardingForm> {
         'created_at': FieldValue.serverTimestamp(),
       };
 
-      await FirebaseFirestore.instance
-          .collection('user_profiles')
-          .doc(user.uid)
-          .set(data, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('user_profiles').doc(user.uid).set(
+            data,
+            SetOptions(merge: true),
+          );
 
       _photoUrl = photoUrl;
       setState(() {
         _onboardingStatus = 'personal_saved';
-        _step = 1; // immediately move to KYC
+        _step = 1;
       });
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Personal info saved')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Personal info saved')));
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  // ================== Submit KYC ==================
+  // ===== Submit KYC =====
   Future<void> _submitKyc() async {
     if (!_kycKey.currentState!.validate()) return;
     if (_isReadOnly) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Not logged in')));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not logged in')));
       return;
     }
     setState(() => _saving = true);
     try {
       final doctype = _docType!.toLowerCase(); // "aadhaar" | "pan" | "voterid"
-      final String frontUrl = await _uploadToCloudinary(
+      final baseFolder = _clean('$_baseFolder/users/${user.uid}/kyc/$doctype');
+
+      final String frontUrl = await _uploadToCloudinarySigned(
         xfile: _docFront!,
-        publicId: 'kyc_${doctype}_front',
-        folder: '$_baseFolder/users/${user.uid}/kyc',
+        publicId: _clean('kyc_${doctype}_front'),
+        folder: baseFolder,
       );
-      final String backUrl = await _uploadToCloudinary(
+      final String backUrl = await _uploadToCloudinarySigned(
         xfile: _docBack!,
-        publicId: 'kyc_${doctype}_back',
-        folder: '$_baseFolder/users/${user.uid}/kyc',
+        publicId: _clean('kyc_${doctype}_back'),
+        folder: baseFolder,
       );
 
       await FirebaseFirestore.instance.collection('documents').add({
@@ -317,30 +336,26 @@ class _OnboardingFormState extends State<OnboardingForm> {
         'updated_at': FieldValue.serverTimestamp(),
       });
 
-      // Mark profile as KYC pending
-      await FirebaseFirestore.instance
-          .collection('user_profiles')
-          .doc(user.uid)
-          .set(
-              {'onboarding_status': 'kyc_pending', 'updated_at': FieldValue.serverTimestamp()},
-              SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('user_profiles').doc(user.uid).set(
+        {'onboarding_status': 'kyc_pending', 'updated_at': FieldValue.serverTimestamp()},
+        SetOptions(merge: true),
+      );
 
       setState(() {
         _onboardingStatus = 'kyc_pending';
         _kycStatus = 'pending';
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('KYC submitted. Status: pending')));
-    } catch (e) {
       ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error: $e')));
+          .showSnackBar(const SnackBar(content: Text('KYC submitted. Status: pending')));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
   }
 
-  // ================== UI ==================
+  // ===== UI =====
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -358,8 +373,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
                 constraints: const BoxConstraints(maxWidth: 640),
                 child: Card(
                   elevation: 0,
-                  shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   margin: const EdgeInsets.all(16),
                   child: Padding(
                     padding: const EdgeInsets.all(18),
@@ -370,28 +384,23 @@ class _OnboardingFormState extends State<OnboardingForm> {
                         if (_isUnderVerification)
                           const _StatusBanner(
                             type: BannerType.info,
-                            text:
-                                'Your KYC is under verification. Editing is disabled.',
+                            text: 'Your KYC is under verification. Editing is disabled.',
                           ),
                         if (_isApproved)
                           const _StatusBanner(
                             type: BannerType.success,
                             text: 'Your KYC is approved.',
                           ),
-                        if (_kycStatus == 'rejected' ||
-                            _onboardingStatus == 'kyc_rejected')
+                        if (_kycStatus == 'rejected' || _onboardingStatus == 'kyc_rejected')
                           const _StatusBanner(
                             type: BannerType.error,
-                            text:
-                                'Your KYC was rejected. Please fix and resubmit.',
+                            text: 'Your KYC was rejected. Please fix and resubmit.',
                           ),
                         const SizedBox(height: 8),
                         Expanded(
                           child: AnimatedSwitcher(
                             duration: const Duration(milliseconds: 300),
-                            child: _step == 0
-                                ? _buildPersonalForm()
-                                : _buildKycForm(),
+                            child: _step == 0 ? _buildPersonalForm() : _buildKycForm(),
                           ),
                         ),
                       ],
@@ -410,7 +419,6 @@ class _OnboardingFormState extends State<OnboardingForm> {
       child: ListView(
         padding: const EdgeInsets.only(top: 6),
         children: [
-          // ===== Avatar first =====
           Center(
             child: Column(
               children: [
@@ -419,10 +427,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
                   child: Stack(
                     alignment: Alignment.bottomRight,
                     children: [
-                      _AvatarPreview(
-                          xfile: _profilePhoto,
-                          networkUrl: _photoUrl,
-                          radius: 48),
+                      _AvatarPreview(xfile: _profilePhoto, networkUrl: _photoUrl, radius: 48),
                       if (!disabled)
                         Container(
                           decoration: BoxDecoration(
@@ -430,8 +435,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
                             borderRadius: BorderRadius.circular(16),
                           ),
                           padding: const EdgeInsets.all(6),
-                          child: const Icon(Icons.edit,
-                              size: 16, color: Colors.white),
+                          child: const Icon(Icons.edit, size: 16, color: Colors.white),
                         )
                     ],
                   ),
@@ -453,8 +457,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
               controller: _address1Ctrl,
               enabled: !disabled,
               decoration: _inputDecoration('House / Street / Area'),
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Required' : null,
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
           ),
           const SizedBox(height: 12),
@@ -464,8 +467,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
             child: TextFormField(
               controller: _address2Ctrl,
               enabled: !disabled,
-              decoration:
-                  _inputDecoration('Apartment / Landmark (optional)'),
+              decoration: _inputDecoration('Apartment / Landmark (optional)'),
             ),
           ),
           const SizedBox(height: 12),
@@ -477,8 +479,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
               enabled: !disabled,
               decoration: _inputDecoration('e.g. 682001'),
               keyboardType: TextInputType.number,
-              validator: (v) =>
-                  (v == null || v.trim().isEmpty) ? 'Required' : null,
+              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
           ),
           const SizedBox(height: 12),
@@ -493,8 +494,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
                       final picked = await showDatePicker(
                         context: context,
                         firstDate: DateTime(1900),
-                        lastDate:
-                            DateTime(now.year - 10, now.month, now.day),
+                        lastDate: DateTime(now.year - 10, now.month, now.day),
                         initialDate: DateTime(now.year - 18),
                       );
                       if (picked != null) setState(() => _dob = picked);
@@ -505,8 +505,8 @@ class _OnboardingFormState extends State<OnboardingForm> {
                   _dob == null
                       ? 'Tap to select'
                       : '${_dob!.day.toString().padLeft(2, '0')}-'
-                        '${_dob!.month.toString().padLeft(2, '0')}-'
-                        '${_dob!.year}',
+                          '${_dob!.month.toString().padLeft(2, '0')}-'
+                          '${_dob!.year}',
                 ),
               ),
             ),
@@ -521,10 +521,8 @@ class _OnboardingFormState extends State<OnboardingForm> {
                   child: TextFormField(
                     decoration: _inputDecoration('Latitude'),
                     enabled: !disabled,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    controller: TextEditingController(
-                        text: _homeLat?.toStringAsFixed(6) ?? ''),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    controller: _latCtrl,
                     onChanged: (v) => _homeLat = double.tryParse(v.trim()),
                     validator: (v) => (_homeLat == null) ? 'Required' : null,
                   ),
@@ -534,10 +532,8 @@ class _OnboardingFormState extends State<OnboardingForm> {
                   child: TextFormField(
                     decoration: _inputDecoration('Longitude'),
                     enabled: !disabled,
-                    keyboardType:
-                        const TextInputType.numberWithOptions(decimal: true),
-                    controller: TextEditingController(
-                        text: _homeLng?.toStringAsFixed(6) ?? ''),
+                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                    controller: _lngCtrl,
                     onChanged: (v) => _homeLng = double.tryParse(v.trim()),
                     validator: (v) => (_homeLng == null) ? 'Required' : null,
                   ),
@@ -591,8 +587,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
                 DropdownMenuItem(value: 'VoterId', child: Text('Voter ID')),
               ],
               onChanged: disabled ? null : (v) => setState(() => _docType = v),
-              validator: (v) =>
-                  (v == null || v.isEmpty) ? 'Required' : null,
+              validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
             ),
           ),
           const SizedBox(height: 12),
@@ -673,8 +668,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
     return InputDecoration(
       hintText: hint,
       isDense: true,
-      contentPadding:
-          const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
     );
   }
@@ -694,8 +688,7 @@ class _Header extends StatelessWidget {
     ];
     return Row(
       children: [
-        const Text('Onboarding',
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+        const Text('Onboarding', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
         const Spacer(),
         Wrap(spacing: 8, children: chips),
       ],
@@ -707,8 +700,7 @@ class _StepChip extends StatelessWidget {
   final String label;
   final bool active;
   final bool done;
-  const _StepChip(
-      {required this.label, required this.active, required this.done});
+  const _StepChip({required this.label, required this.active, required this.done});
 
   @override
   Widget build(BuildContext context) {
@@ -759,8 +751,7 @@ class _SubmitButton extends StatelessWidget {
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
           elevation: 0,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
           backgroundColor: const Color(0xFF6759FF),
           foregroundColor: Colors.white,
         ),
@@ -780,7 +771,7 @@ class _SubmitButton extends StatelessWidget {
 class _Labeled extends StatelessWidget {
   final String label;
   final Widget child;
-  final String? Function()? validator; // optional hook
+  final String? Function()? validator;
   const _Labeled(this.label, {required this.child, this.validator});
 
   @override
@@ -789,16 +780,13 @@ class _Labeled extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
         const SizedBox(height: 8),
         child,
         if (errorText != null)
           Padding(
             padding: const EdgeInsets.only(top: 6, left: 4),
-            child: Text(errorText,
-                style:
-                    TextStyle(color: Colors.red.shade700, fontSize: 12)),
+            child: Text(errorText, style: TextStyle(color: Colors.red.shade700, fontSize: 12)),
           ),
       ],
     );
@@ -858,21 +846,17 @@ class _StatusBanner extends StatelessWidget {
   }
 }
 
-// Avatar preview (local XFile OR existing network URL)
 class _AvatarPreview extends StatelessWidget {
   final XFile? xfile;
   final String? networkUrl;
   final double radius;
-  const _AvatarPreview(
-      {required this.xfile, this.networkUrl, this.radius = 48});
+  const _AvatarPreview({required this.xfile, this.networkUrl, this.radius = 48});
 
   @override
   Widget build(BuildContext context) {
     ImageProvider? provider;
     if (xfile != null) {
-      provider = kIsWeb
-          ? NetworkImage(xfile!.path)
-          : FileImage(File(xfile!.path)) as ImageProvider;
+      provider = kIsWeb ? NetworkImage(xfile!.path) : FileImage(File(xfile!.path)) as ImageProvider;
     } else if (networkUrl != null && networkUrl!.isNotEmpty) {
       provider = NetworkImage(networkUrl!);
     }
@@ -885,13 +869,13 @@ class _AvatarPreview extends StatelessWidget {
       );
     }
     return CircleAvatar(
-        radius: radius,
-        backgroundImage: provider,
-        backgroundColor: const Color(0xFFE9EAF4));
+      radius: radius,
+      backgroundImage: provider,
+      backgroundColor: const Color(0xFFE9EAF4),
+    );
   }
 }
 
-// Small thumbnail preview for KYC files
 class _ThumbPreview extends StatelessWidget {
   final XFile xfile;
   const _ThumbPreview({required this.xfile});
@@ -902,8 +886,7 @@ class _ThumbPreview extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       child: kIsWeb
           ? Image.network(xfile.path, width: 64, height: 64, fit: BoxFit.cover)
-          : Image.file(File(xfile.path),
-              width: 64, height: 64, fit: BoxFit.cover),
+          : Image.file(File(xfile.path), width: 64, height: 64, fit: BoxFit.cover),
     );
   }
 }
