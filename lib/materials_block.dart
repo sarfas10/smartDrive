@@ -1,5 +1,7 @@
+// lib/materials_block.dart
 import 'dart:convert';
 import 'dart:typed_data';
+import 'dart:io' show File;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -38,6 +40,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
   String? _pickedPath; // for non-web
 
   bool _isUploading = false;
+  bool _saving = false; // double-click guard
   double _progress = 0.0; // visual only
   String? _uploadedUrl;
 
@@ -71,10 +74,21 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     return ok ? null : 'Use version like 1, 1.0 or 2.1.3';
   }
 
+  String _resourceTypeFor(String name) {
+    final ext = name.split('.').last.toLowerCase();
+    const img = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'svg'];
+    const vid = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'];
+    if (img.contains(ext)) return 'image';
+    if (vid.contains(ext)) return 'video';
+    // PDFs and everything else => raw
+    return 'raw';
+  }
+
   // ── Server: signature ──────────────────────────────────────────────────────
   Future<Map<String, dynamic>> _getSignature({
     required String publicId,
     required String folder,
+    required String resourceType, // NEW
     String overwrite = 'true',
   }) async {
     final res = await http
@@ -82,6 +96,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
           'public_id': _sanitizeParam(publicId),
           'folder': _sanitizeParam(folder),
           'overwrite': overwrite,
+          'resource_type': resourceType, // ensure your PHP includes this in the signature
         })
         .timeout(const Duration(seconds: 20));
     if (res.statusCode != 200) {
@@ -115,20 +130,24 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     }
   }
 
-  /// Upload ANY file type to Cloudinary using /auto/upload (web & mobile).
+  /// Upload ANY file type to Cloudinary using the correct resource type endpoint.
   Future<Map<String, dynamic>> _uploadToCloudinarySignedAny({
     required PlatformFile file,
     required String publicId,
     required String folder,
     String overwrite = 'true',
   }) async {
+    final resourceType = _resourceTypeFor(file.name); // 'image' | 'video' | 'raw'
+
     final signed = await _getSignature(
       publicId: publicId,
       folder: folder,
+      resourceType: resourceType,
       overwrite: overwrite,
     );
 
-    final uri = Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/auto/upload');
+    // Use matching endpoint (no /auto/)
+    final uri = Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/upload');
 
     final req = http.MultipartRequest('POST', uri)
       ..fields['api_key'] = signed['api_key'].toString()
@@ -231,7 +250,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                           ? null
                           : () {
                               final uri = Uri.tryParse(_uploadedUrl!);
-                              if (uri != null) launchUrl(uri, mode: LaunchMode.externalApplication);
+                              if (uri != null) launchUrl(uri, mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication);
                             },
                     ),
                   ],
@@ -258,6 +277,18 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                 );
               }
 
+              if (snap.hasError) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Text(
+                      'Failed to load materials: ${snap.error}',
+                      style: const TextStyle(color: Colors.red),
+                    ),
+                  ),
+                );
+              }
+
               if (!snap.hasData || snap.data!.docs.isEmpty) {
                 return _buildEmptyLibrary();
               }
@@ -266,7 +297,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
               for (final d in snap.data!.docs) {
                 final m = d.data() as Map<String, dynamic>;
                 rows.add([
-                  // Title & description (file size removed)
+                  // Title & description
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
@@ -291,16 +322,10 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                     ],
                   ),
 
-                  // Category chip
                   _CategoryChip(category: _asText(m['category'])),
-
-                  // Detected type
                   _DetectedTypeBadge(kind: _asText(m['detected_type'])),
-
-                  // Version
                   _Badge(text: _asText(m['version'], fallback: '1.0')),
 
-                  // Date
                   Text(
                     (m['created_at'] is Timestamp)
                         ? (m['created_at'] as Timestamp).toDate().toString().split(' ').first
@@ -308,7 +333,6 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                     style: const TextStyle(fontSize: 12),
                   ),
 
-                  // Downloads
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
@@ -318,7 +342,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                     ],
                   ),
 
-                  // Actions (icons only, same row, scrollable if tight)
+                  // Actions
                   SingleChildScrollView(
                     scrollDirection: Axis.horizontal,
                     child: Row(
@@ -508,7 +532,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
           const SizedBox(height: 8),
           const _HintRow(
             icon: Icons.verified_user_outlined,
-            text: 'Any format is accepted (image, video, PDF, audio, archives, docs) via Cloudinary auto-upload.',
+            text: 'Any format is accepted (image, video, PDF, audio, archives, docs) with correct resource type.',
           ),
         ],
       ),
@@ -575,19 +599,22 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
   }
 
   Future<void> _saveMaterial() async {
+    if (_saving) return; // prevent double-click spam
+    _saving = true;
+
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) {
       _snack('Title is required', isError: true);
-      return;
+      _saving = false; return;
     }
     final vErr = _validateVersion(_versionCtrl.text);
     if (vErr != null) {
       _snack(vErr, isError: true);
-      return;
+      _saving = false; return;
     }
     if (_editingRef == null && _picked == null) {
       _snack('Please select a file', isError: true);
-      return;
+      _saving = false; return;
     }
 
     setState(() {
@@ -614,10 +641,22 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
           folder: folder,
         );
 
-        _uploadedUrl = (res['secure_url'] as String?) ?? (res['url'] as String?);
-        fileUrlToSave = _uploadedUrl;
+        final returnedRt = (res['resource_type'] ?? '').toString(); // 'raw'|'image'|'video'
+        final rawUrl = (res['secure_url'] as String?) ?? (res['url'] as String?);
+
+        // Normalize URL to the correct /{rt}/upload/ segment
+        String? finalUrl = rawUrl;
+        if (rawUrl != null && returnedRt.isNotEmpty) {
+          finalUrl = rawUrl
+              .replaceFirst('/image/upload/', '/$returnedRt/upload/')
+              .replaceFirst('/video/upload/', '/$returnedRt/upload/')
+              .replaceFirst('/raw/upload/',   '/$returnedRt/upload/');
+        }
+
+        _uploadedUrl = finalUrl;
+        fileUrlToSave = finalUrl;
         publicIdToSave = res['public_id'] as String?;
-        resourceTypeToSave = res['resource_type'] as String?; // image | video | raw
+        resourceTypeToSave = returnedRt; // image | video | raw
         detectedKind = _detectKind(_picked!.name).name;
       }
 
@@ -668,6 +707,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     } catch (e) {
       _snack('Error uploading: $e', isError: true);
     } finally {
+      _saving = false;
       if (mounted) setState(() => _isUploading = false);
     }
   }
@@ -679,18 +719,45 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
           .doc(docId)
           .update({'downloads': FieldValue.increment(1)});
     } catch (_) {}
+
     if (url.isEmpty) {
       _snack('File URL missing', isError: true);
       return;
     }
-    final uri = Uri.tryParse(url);
-    if (uri == null) {
+    final uri0 = Uri.tryParse(url);
+    if (uri0 == null) {
       _snack('Invalid URL', isError: true);
       return;
     }
-    if (!await launchUrl(uri, mode: LaunchMode.externalApplication)) {
-      _snack('Could not open file', isError: true);
-    }
+
+    // Try swapping to the stored resource_type if needed
+    Uri candidate = uri0;
+    try {
+      final snap = await FirebaseFirestore.instance.collection('materials').doc(docId).get();
+      final m = snap.data() as Map<String, dynamic>? ?? {};
+      final rt = (m['cloudinary_resource_type'] ?? '').toString(); // 'raw' | 'image' | 'video'
+      if (rt.isNotEmpty) {
+        final fixed = url
+            .replaceFirst('/image/upload/', '/$rt/upload/')
+            .replaceFirst('/video/upload/', '/$rt/upload/')
+            .replaceFirst('/raw/upload/',   '/$rt/upload/');
+        final fixedUri = Uri.tryParse(fixed);
+        if (fixedUri != null) candidate = fixedUri;
+      }
+    } catch (_) {}
+
+    // Optional: quick HEAD probe (some CDNs block HEAD; we still attempt open).
+    try {
+      final head = await http.head(candidate).timeout(const Duration(seconds: 7));
+      if (head.statusCode == 404) {
+        _snack('File unavailable (404). It may be private or deleted.', isError: true);
+        return;
+      }
+    } catch (_) {}
+
+    final mode = kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication;
+    final ok = await launchUrl(candidate, mode: mode);
+    if (!ok) _snack('Could not open file', isError: true);
   }
 
   Future<void> _deleteMaterial(DocumentSnapshot doc) async {
@@ -844,7 +911,7 @@ class _HeaderCard extends StatelessWidget {
         gradient: gradient,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: Colors.white.withOpacity(0.6)),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.06), blurRadius: 12, offset: Offset(0, 6))],
+        boxShadow: [BoxShadow(color: Colors.black26.withOpacity(0.06), blurRadius: 12, offset: const Offset(0, 6))],
       ),
       child: Row(
         children: [
@@ -858,7 +925,7 @@ class _HeaderCard extends StatelessWidget {
             ),
           ),
           Tooltip(
-            message: 'Uploads go to Cloudinary (resource_type=auto). Large files supported.',
+            message: 'Uploads go to Cloudinary with correct resource_type. Large files supported.',
             child: Icon(Icons.info_outline, color: Colors.deepPurple.shade400),
           ),
         ],
@@ -953,8 +1020,6 @@ class _HintRow extends StatelessWidget {
     );
   }
 }
-
-// ── Small chips/badges (unchanged logic) ─────────────────────────────────────
 
 class _CategoryChip extends StatelessWidget {
   final String category;
