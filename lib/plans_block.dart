@@ -11,7 +11,7 @@ class PlansBlock extends StatefulWidget {
   State<PlansBlock> createState() => _PlansBlockState();
 }
 
-/// Plan model
+/// Plan model (Study Materials & Tests removed)
 class Plan {
   final String id; // slug of name
   final String name;
@@ -22,12 +22,6 @@ class Plan {
 
   /// Slot-based charging
   final int slots;
-
-  /// Study materials & tests (ignored if include-all is true)
-  final int studyMaterials;
-  final int tests;
-  final bool includeAllStudyMaterials;
-  final bool includeAllTests;
 
   /// Alternate plan type
   final bool isPayPerUse;
@@ -47,10 +41,6 @@ class Plan {
     required this.name,
     required this.price,
     required this.slots,
-    required this.studyMaterials,
-    required this.tests,
-    required this.includeAllStudyMaterials,
-    required this.includeAllTests,
     required this.isPayPerUse,
     required this.extraKmSurcharge,
     required this.surcharge,
@@ -63,8 +53,9 @@ class Plan {
 
   factory Plan.fromDoc(DocumentSnapshot doc) {
     final d = (doc.data() as Map<String, dynamic>? ?? {});
-    final legacyFlexible = (d['isFlexible'] == true) ||
-        ((d['slots'] ?? 0) == 0 && (d['lessons'] != null));
+
+    // Back-compat: if slots == 0 and old 'lessons' existed, treat as PPU
+    final legacyFlexible = ((d['slots'] ?? 0) == 0 && (d['lessons'] != null));
     final isPPU = (d['isPayPerUse'] ?? false) as bool || legacyFlexible;
 
     return Plan(
@@ -72,19 +63,11 @@ class Plan {
       name: (d['name'] ?? doc.id).toString(),
       price: isPPU ? 0 : (d['price'] ?? 0) as int, // PPU force 0
       slots: (d['slots'] ?? 0) as int,
-
-      studyMaterials: (d['studyMaterials'] ?? 0) as int,
-      tests: (d['tests'] ?? 0) as int,
-      includeAllStudyMaterials: (d['includeAllStudyMaterials'] ?? false) as bool,
-      includeAllTests: (d['includeAllTests'] ?? false) as bool,
-
       isPayPerUse: isPPU,
-
       extraKmSurcharge: (d['extraKmSurcharge'] ?? false) as bool,
       surcharge: (d['surcharge'] ?? 0) as int,
       freePickupRadius: (d['freePickupRadius'] ?? false) as bool,
       freeRadius: (d['freeRadius'] ?? 0) as int,
-
       active: (d['active'] ?? true) as bool,
       createdAt: d['created_at'] as Timestamp?,
       updatedAt: d['updated_at'] as Timestamp?,
@@ -97,17 +80,14 @@ class Plan {
       'name': name,
       'price': isPayPerUse ? 0 : price, // persist 0 for PPU
       'slots': isPayPerUse ? 0 : slots,
-      'studyMaterials': isPayPerUse ? 0 : (includeAllStudyMaterials ? 0 : studyMaterials),
-      'tests': isPayPerUse ? 0 : (includeAllTests ? 0 : tests),
-      'includeAllStudyMaterials': isPayPerUse ? false : includeAllStudyMaterials,
-      'includeAllTests': isPayPerUse ? false : includeAllTests,
-      'isPayPerUse': isPayPerUse,
 
+      // transport
       'extraKmSurcharge': extraKmSurcharge,
       'surcharge': extraKmSurcharge ? surcharge : 0,
       'freePickupRadius': freePickupRadius,
       'freeRadius': freePickupRadius ? freeRadius : 0,
 
+      'isPayPerUse': isPayPerUse,
       'active': active,
       if (forCreate) 'created_at': now,
       'updated_at': now,
@@ -116,10 +96,12 @@ class Plan {
 }
 
 class _PlansBlockState extends State<PlansBlock> {
-  final _currency = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
+  final _currency =
+      NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
 
   void _snack(String msg) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(msg)));
 
   Future<void> _runWithSpinner(Future<void> Function() task) async {
     showDialog(
@@ -242,16 +224,11 @@ class _PlansBlockState extends State<PlansBlock> {
               child: OutlinedButton.icon(
                 onPressed: () => _openSlotsPlanForm(
                   context,
-                  initial: Plan(
+                  initial: const Plan(
                     id: '',
                     name: '',
                     price: 0,
                     slots: 12,
-                    studyMaterials: 0,
-                    tests: 0,
-                    // Defaults ON, but editable inside the form
-                    includeAllStudyMaterials: true,
-                    includeAllTests: true,
                     isPayPerUse: false,
                     // Required-at-creation transport toggles (locked ON in UI)
                     extraKmSurcharge: true,
@@ -277,15 +254,11 @@ class _PlansBlockState extends State<PlansBlock> {
               child: ElevatedButton.icon(
                 onPressed: () => _openPayPerUseForm(
                   context,
-                  initial: Plan(
+                  initial: const Plan(
                     id: 'pay-per-use',
                     name: 'Pay-Per-Use',
                     price: 0, // forced 0; UI shows "Pay as you go"
                     slots: 0,
-                    studyMaterials: 0,
-                    tests: 0,
-                    includeAllStudyMaterials: false, // ignored for PPU
-                    includeAllTests: false,          // ignored for PPU
                     isPayPerUse: true,
                     // Required-at-creation transport toggles (locked ON in UI)
                     extraKmSurcharge: true,
@@ -334,15 +307,11 @@ class _PlansBlockState extends State<PlansBlock> {
           return _EmptyState(onPrimaryAction: () {
             _openSlotsPlanForm(
               context,
-              initial: Plan(
+              initial: const Plan(
                 id: '',
                 name: '',
                 price: 0,
                 slots: 12,
-                studyMaterials: 0,
-                tests: 0,
-                includeAllStudyMaterials: true, // default ON for creation
-                includeAllTests: true,          // default ON for creation
                 isPayPerUse: false,
                 extraKmSurcharge: true,         // required at creation
                 surcharge: 15,
@@ -404,10 +373,6 @@ class _PlansBlockState extends State<PlansBlock> {
       name: '${p.name} Copy',
       price: p.isPayPerUse ? 0 : p.price,
       slots: p.slots,
-      studyMaterials: p.studyMaterials,
-      tests: p.tests,
-      includeAllStudyMaterials: p.includeAllStudyMaterials,
-      includeAllTests: p.includeAllTests,
       isPayPerUse: p.isPayPerUse,
       extraKmSurcharge: p.extraKmSurcharge,
       surcharge: p.surcharge,
@@ -415,7 +380,10 @@ class _PlansBlockState extends State<PlansBlock> {
       freeRadius: p.freeRadius,
       active: p.active,
     );
-    await FirebaseFirestore.instance.collection('plans').doc(newId).set(newPlan.toMap(forCreate: true));
+    await FirebaseFirestore.instance
+        .collection('plans')
+        .doc(newId)
+        .set(newPlan.toMap(forCreate: true));
     _snack('Duplicated "${p.name}"');
   }
 
@@ -452,8 +420,6 @@ class _PlansBlockState extends State<PlansBlock> {
     final nameCtrl = TextEditingController(text: initial.name);
     final priceCtrl = TextEditingController(text: initial.price == 0 ? '' : initial.price.toString());
     final slotsCtrl = TextEditingController(text: initial.slots.toString());
-    final studyCtrl = TextEditingController(text: initial.studyMaterials.toString());
-    final testsCtrl = TextEditingController(text: initial.tests.toString());
     final surchargeCtrl = TextEditingController(text: initial.surcharge.toString());
     final radiusCtrl = TextEditingController(text: initial.freeRadius.toString());
 
@@ -461,9 +427,7 @@ class _PlansBlockState extends State<PlansBlock> {
     bool extraKm = isCreate ? true : initial.extraKmSurcharge;
     bool freePickup = isCreate ? true : initial.freePickupRadius;
 
-    // Editable always (creation & edit)
-    bool allStudy = initial.includeAllStudyMaterials;
-    bool allTests = initial.includeAllTests;
+    // Editable always
     bool active = initial.active;
 
     await showDialog(
@@ -528,67 +492,6 @@ class _PlansBlockState extends State<PlansBlock> {
                           },
                         ),
                       ),
-                      const SizedBox(height: 12),
-
-                      const Divider(height: 24),
-                      const Text('Study Materials & Tests', style: TextStyle(fontWeight: FontWeight.w600)),
-                      const SizedBox(height: 8),
-
-                      // Include All Study Materials — EDITABLE
-                      CheckboxListTile(
-                        value: allStudy,
-                        onChanged: (vv) => setState(() => allStudy = vv ?? false),
-                        title: const Text('Include All Study Materials'),
-                        contentPadding: EdgeInsets.zero,
-                        controlAffinity: ListTileControlAffinity.leading,
-                      ),
-                      if (!allStudy)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: _LabeledField(
-                            label: 'Number of Study Materials',
-                            child: TextFormField(
-                              controller: studyCtrl,
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                              decoration: const InputDecoration(hintText: 'e.g., 10'),
-                              validator: (v) {
-                                if (allStudy) return null;
-                                final n = int.tryParse(v ?? '');
-                                if (n == null || n < 0) return 'Enter a valid number';
-                                return null;
-                              },
-                            ),
-                          ),
-                        ),
-
-                      // Include All Tests — EDITABLE
-                      CheckboxListTile(
-                        value: allTests,
-                        onChanged: (vv) => setState(() => allTests = vv ?? false),
-                        title: const Text('Include All Tests'),
-                        contentPadding: EdgeInsets.zero,
-                        controlAffinity: ListTileControlAffinity.leading,
-                      ),
-                      if (!allTests)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 8),
-                          child: _LabeledField(
-                            label: 'Number of Tests',
-                            child: TextFormField(
-                              controller: testsCtrl,
-                              keyboardType: TextInputType.number,
-                              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                              decoration: const InputDecoration(hintText: 'e.g., 4'),
-                              validator: (v) {
-                                if (allTests) return null;
-                                final n = int.tryParse(v ?? '');
-                                if (n == null || n < 0) return 'Enter a valid number';
-                                return null;
-                              },
-                            ),
-                          ),
-                        ),
 
                       const Divider(height: 24),
                       const Text('Optional Transport Rules', style: TextStyle(fontWeight: FontWeight.w600)),
@@ -598,11 +501,7 @@ class _PlansBlockState extends State<PlansBlock> {
                       CheckboxListTile(
                         value: extraKm,
                         onChanged: isCreate ? null : (vv) => setState(() => extraKm = vv ?? false),
-                        title: Row(
-                          children: const [
-                            Text('Extra KM Surcharge'),
-                          ],
-                        ),
+                        title: const Text('Extra KM Surcharge'),
                         subtitle: const Text('Charge extra for kilometers beyond limit'),
                         contentPadding: EdgeInsets.zero,
                         controlAffinity: ListTileControlAffinity.leading,
@@ -632,11 +531,7 @@ class _PlansBlockState extends State<PlansBlock> {
                       CheckboxListTile(
                         value: freePickup,
                         onChanged: isCreate ? null : (vv) => setState(() => freePickup = vv ?? false),
-                        title: Row(
-                          children: const [
-                            Text('Free Pickup Radius'),
-                          ],
-                        ),
+                        title: const Text('Free Pickup Radius'),
                         subtitle: const Text('Offer free pickup within specified radius'),
                         contentPadding: EdgeInsets.zero,
                         controlAffinity: ListTileControlAffinity.leading,
@@ -692,8 +587,6 @@ class _PlansBlockState extends State<PlansBlock> {
                               final id = _safeId(name);
                               final price = int.parse(priceCtrl.text.trim());
                               final slots = int.parse(slotsCtrl.text.trim());
-                              final studyMaterials = allStudy ? 0 : int.parse(studyCtrl.text.trim().isEmpty ? '0' : studyCtrl.text.trim());
-                              final tests = allTests ? 0 : int.parse(testsCtrl.text.trim().isEmpty ? '0' : testsCtrl.text.trim());
                               final surcharge = int.parse(surchargeCtrl.text.trim().isEmpty ? '0' : surchargeCtrl.text.trim());
                               final freeRadius = int.parse(radiusCtrl.text.trim().isEmpty ? '0' : radiusCtrl.text.trim());
 
@@ -702,10 +595,6 @@ class _PlansBlockState extends State<PlansBlock> {
                                 name: name,
                                 price: price,
                                 slots: slots,
-                                studyMaterials: studyMaterials,
-                                tests: tests,
-                                includeAllStudyMaterials: allStudy,
-                                includeAllTests: allTests,
                                 isPayPerUse: false,
                                 extraKmSurcharge: true, // enforced at creation
                                 surcharge: surcharge,
@@ -716,7 +605,10 @@ class _PlansBlockState extends State<PlansBlock> {
 
                               await _runWithSpinner(() async {
                                 if (isCreate) {
-                                  await FirebaseFirestore.instance.collection('plans').doc(id).set(data.toMap(forCreate: true));
+                                  await FirebaseFirestore.instance
+                                      .collection('plans')
+                                      .doc(id)
+                                      .set(data.toMap(forCreate: true));
                                   _snack('Plan “$name” created');
                                 } else {
                                   if (id != initial.id) {
@@ -727,7 +619,10 @@ class _PlansBlockState extends State<PlansBlock> {
                                     batch.delete(oldRef);
                                     await batch.commit();
                                   } else {
-                                    await FirebaseFirestore.instance.collection('plans').doc(id).update(data.toMap());
+                                    await FirebaseFirestore.instance
+                                        .collection('plans')
+                                        .doc(id)
+                                        .update(data.toMap());
                                   }
                                   _snack('Plan “$name” updated');
                                 }
@@ -752,8 +647,6 @@ class _PlansBlockState extends State<PlansBlock> {
     nameCtrl.dispose();
     priceCtrl.dispose();
     slotsCtrl.dispose();
-    studyCtrl.dispose();
-    testsCtrl.dispose();
     surchargeCtrl.dispose();
     radiusCtrl.dispose();
   }
@@ -900,10 +793,6 @@ class _PlansBlockState extends State<PlansBlock> {
                                 name: name,
                                 price: 0, // Pay as you go
                                 slots: 0,
-                                studyMaterials: 0,
-                                tests: 0,
-                                includeAllStudyMaterials: false,
-                                includeAllTests: false,
                                 isPayPerUse: true,
                                 extraKmSurcharge: true, // enforced at creation
                                 surcharge: surcharge,
@@ -914,7 +803,10 @@ class _PlansBlockState extends State<PlansBlock> {
 
                               await _runWithSpinner(() async {
                                 if (isCreate) {
-                                  await FirebaseFirestore.instance.collection('plans').doc(id).set(data.toMap(forCreate: true));
+                                  await FirebaseFirestore.instance
+                                      .collection('plans')
+                                      .doc(id)
+                                      .set(data.toMap(forCreate: true));
                                   _snack('Pay-Per-Use “$name” created');
                                 } else {
                                   if (id != initial.id) {
@@ -925,7 +817,10 @@ class _PlansBlockState extends State<PlansBlock> {
                                     batch.delete(oldRef);
                                     await batch.commit();
                                   } else {
-                                    await FirebaseFirestore.instance.collection('plans').doc(id).update(data.toMap());
+                                    await FirebaseFirestore.instance
+                                        .collection('plans')
+                                        .doc(id)
+                                        .update(data.toMap());
                                   }
                                   _snack('Pay-Per-Use “$name” updated');
                                 }
@@ -1095,19 +990,12 @@ class _PlanCard extends StatelessWidget {
             spacing: 14,
             runSpacing: 8,
             children: [
-              if (!plan.isPayPerUse) ...[
-                _Feature(icon: Icons.event_available, label: '${plan.slots} slots'),
-                plan.includeAllStudyMaterials
-                    ? const _Feature(icon: Icons.menu_book, label: 'All study materials')
-                    : _Feature(icon: Icons.menu_book, label: '${plan.studyMaterials} study materials'),
-                plan.includeAllTests
-                    ? const _Feature(icon: Icons.fact_check, label: 'All tests')
-                    : _Feature(icon: Icons.fact_check, label: '${plan.tests} tests'),
-              ] else ...[
-                const _Feature(icon: Icons.flash_on, label: 'Pay per session'),
-              ],
-              if (plan.extraKmSurcharge) _Feature(icon: Icons.local_gas_station, label: '₹${plan.surcharge}/km extra'),
-              if (plan.freePickupRadius) _Feature(icon: Icons.location_on, label: '${plan.freeRadius} km pickup'),
+              if (!plan.isPayPerUse) _Feature(icon: Icons.event_available, label: '${plan.slots} slots'),
+              if (plan.isPayPerUse) const _Feature(icon: Icons.flash_on, label: 'Pay per session'),
+              if (plan.extraKmSurcharge)
+                _Feature(icon: Icons.local_gas_station, label: '₹${plan.surcharge}/km extra'),
+              if (plan.freePickupRadius)
+                _Feature(icon: Icons.location_on, label: '${plan.freeRadius} km pickup'),
             ],
           ),
           const Spacer(),
@@ -1216,7 +1104,8 @@ class _EmptyState extends StatelessWidget {
           children: [
             const Icon(Icons.inbox, size: 64, color: Color(0xFF9CA3AF)),
             const SizedBox(height: 12),
-            const Text('No plans yet', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF374151))),
+            const Text('No plans yet',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF374151))),
             const SizedBox(height: 4),
             const Text(
               'Create your first plan: Slot-based (priced once) or Pay-Per-Use (Pay as you go).',
