@@ -166,7 +166,6 @@ class _AttendTestPageState extends State<AttendTestPage> {
       Query q = col.where('pool_id', isEqualTo: widget.poolId).where('status', isEqualTo: 'completed');
       q = (uid != null) ? q.where('student_uid', isEqualTo: uid) : q.where('student_id', isEqualTo: sid);
 
-      // Avoid orderBy to reduce index requirements; we just take the first (most recent isn't critical).
       final snap = await q.limit(1).get();
       if (snap.docs.isEmpty) return false;
 
@@ -238,6 +237,7 @@ class _AttendTestPageState extends State<AttendTestPage> {
             pass: pass,
             items: items,
             attemptId: attemptDoc.id,
+            poolId: widget.poolId, // pass along for Go again convenience
           ),
         ),
       );
@@ -284,7 +284,7 @@ class _AttendTestPageState extends State<AttendTestPage> {
           });
           if (left.isNegative || left.inSeconds == 0) {
             _timer?.cancel();
-            _submit(auto: true);
+            _submit(auto: true); // auto-submit when time runs out
           }
         });
       }
@@ -380,6 +380,7 @@ class _AttendTestPageState extends State<AttendTestPage> {
           pass: pass,
           items: _buildResultItems(),
           attemptId: attemptId.isEmpty ? null : attemptId,
+          poolId: widget.poolId,
         ),
       ),
     );
@@ -405,108 +406,144 @@ class _AttendTestPageState extends State<AttendTestPage> {
   String _norm(String s) =>
       s.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
 
+  // ── Back handling ──────────────────────────────────────────────────────────
+  Future<bool> _onWillPop() async {
+    if (_loading) return true; // allow leaving while loading
+    final shouldExit = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => AlertDialog(
+        title: const Text('Exit test?'),
+        content: const Text(
+          "If you leave now, your answers won't be saved.",
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Stay'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Exit'),
+          ),
+        ],
+      ),
+    );
+    return shouldExit ?? false;
+  }
+
   // ── UI ─────────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
     final isCompact = MediaQuery.of(context).size.width < 420;
 
-    return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
-      appBar: AppBar(
-        elevation: 0,
-        backgroundColor: kBrand,
-        title: Text(_loading ? 'Loading…' : _title),
-        actions: [
-          if (!_loading && _durationMin > 0)
-            Padding(
-              padding: const EdgeInsets.only(right: 12),
-              child: Center(child: _TimerPill(remaining: _remaining)),
-            ),
-        ],
-      ),
-      body: _loading
-          ? const Center(child: CircularProgressIndicator())
-          : (_questions.isEmpty
-              ? const _CenteredEmpty(
-                  title: 'No questions in this test',
-                  caption: 'Contact your instructor.',
-                )
-              : SafeArea(
-                  child: Column(
-                    children: [
-                      Padding(
-                        padding: EdgeInsets.fromLTRB(
-                            isCompact ? 12 : 16, 12, isCompact ? 12 : 16, 6),
-                        child: _ProgressHeader(
-                          index: _index,
-                          total: _questions.length,
-                          onJump: (i) => setState(() => _index = i),
-                          answered: _answers,
-                          questions: _questions,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Expanded(
-                        child: SingleChildScrollView(
+    return WillPopScope(
+      onWillPop: _onWillPop,
+      child: Scaffold(
+        backgroundColor: const Color(0xFFF6F7FB),
+        appBar: AppBar(
+          elevation: 0,
+          backgroundColor: kBrand,
+          title: Text(_loading ? 'Loading…' : _title),
+          leading: BackButton(
+            onPressed: () async {
+              if (await _onWillPop()) {
+                if (mounted) Navigator.of(context).pop();
+              }
+            },
+          ),
+          actions: [
+            if (!_loading && _durationMin > 0)
+              Padding(
+                padding: const EdgeInsets.only(right: 12),
+                child: Center(child: _TimerPill(remaining: _remaining)),
+              ),
+          ],
+        ),
+        body: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : (_questions.isEmpty
+                ? const _CenteredEmpty(
+                    title: 'No questions in this test',
+                    caption: 'Contact your instructor.',
+                  )
+                : SafeArea(
+                    child: Column(
+                      children: [
+                        Padding(
                           padding: EdgeInsets.fromLTRB(
-                              isCompact ? 12 : 16, 6, isCompact ? 12 : 16, 100),
-                          child: _QuestionCard(
-                            q: _questions[_index],
-                            value: _answers[_questions[_index].id],
-                            onChanged: (v) {
-                              setState(() {
-                                _answers[_questions[_index].id] = v;
-                              });
-                            },
+                              isCompact ? 12 : 16, 12, isCompact ? 12 : 16, 6),
+                          child: _ProgressHeader(
+                            index: _index,
+                            total: _questions.length,
+                            onJump: (i) => setState(() => _index = i),
+                            answered: _answers,
+                            questions: _questions,
                           ),
                         ),
+                        const SizedBox(height: 4),
+                        Expanded(
+                          child: SingleChildScrollView(
+                            padding: EdgeInsets.fromLTRB(
+                                isCompact ? 12 : 16, 6, isCompact ? 12 : 16, 100),
+                            child: _QuestionCard(
+                              q: _questions[_index],
+                              value: _answers[_questions[_index].id],
+                              onChanged: (v) {
+                                setState(() {
+                                  _answers[_questions[_index].id] = v;
+                                });
+                              },
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  )),
+        bottomNavigationBar: _loading
+            ? null
+            : SafeArea(
+                top: false,
+                child: Container(
+                  padding: EdgeInsets.fromLTRB(
+                      isCompact ? 12 : 16, 10, isCompact ? 12 : 16, 10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    border:
+                        Border(top: BorderSide(color: Colors.black12.withOpacity(.06))),
+                  ),
+                  child: Row(
+                    children: [
+                      OutlinedButton.icon(
+                        onPressed: _index == 0 ? null : () => setState(() => _index--),
+                        icon: const Icon(Icons.chevron_left),
+                        label: const Text('Previous'),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: _index >= _questions.length - 1
+                            ? null
+                            : () => setState(() => _index++),
+                        icon: const Icon(Icons.chevron_right),
+                        label: const Text('Next'),
+                      ),
+                      const Spacer(),
+                      FilledButton.icon(
+                        style: FilledButton.styleFrom(
+                          backgroundColor: kBrand,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 16, vertical: 12),
+                        ),
+                        onPressed: () => _confirmSubmit(context),
+                        icon: const Icon(Icons.check_circle_outline),
+                        label: const Text('Submit Test'),
                       ),
                     ],
                   ),
-                )),
-      bottomNavigationBar: _loading
-          ? null
-          : SafeArea(
-              top: false,
-              child: Container(
-                padding: EdgeInsets.fromLTRB(
-                    isCompact ? 12 : 16, 10, isCompact ? 12 : 16, 10),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  border:
-                      Border(top: BorderSide(color: Colors.black12.withOpacity(.06))),
-                ),
-                child: Row(
-                  children: [
-                    OutlinedButton.icon(
-                      onPressed: _index == 0 ? null : () => setState(() => _index--),
-                      icon: const Icon(Icons.chevron_left),
-                      label: const Text('Previous'),
-                    ),
-                    const SizedBox(width: 8),
-                    OutlinedButton.icon(
-                      onPressed: _index >= _questions.length - 1
-                          ? null
-                          : () => setState(() => _index++),
-                      icon: const Icon(Icons.chevron_right),
-                      label: const Text('Next'),
-                    ),
-                    const Spacer(),
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: kBrand,
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 16, vertical: 12),
-                      ),
-                      onPressed: () => _confirmSubmit(context),
-                      icon: const Icon(Icons.check_circle_outline),
-                      label: const Text('Submit Test'),
-                    ),
-                  ],
                 ),
               ),
-            ),
+      ),
     );
   }
 
@@ -514,7 +551,7 @@ class _AttendTestPageState extends State<AttendTestPage> {
     final unattempted = _questions.where((q) =>
         !_answers.containsKey(q.id) ||
         (_answers[q.id] is String &&
-            (_answers[q.id] as String).trim().isEmpty)).length;
+            (_answers[q.id] as String).trim().isNotEmpty == false)).length;
     final proceed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
@@ -740,7 +777,6 @@ class _QuestionCard extends StatelessWidget {
                   child: Image.network(
                     q.imageUrl!,
                     fit: BoxFit.cover,
-                    // helpful in case of bad links:
                     errorBuilder: (_, __, ___) => Container(
                       color: const Color(0xFFF1F3F5),
                       alignment: Alignment.center,
