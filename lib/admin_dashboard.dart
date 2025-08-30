@@ -8,7 +8,7 @@ import 'users_block.dart';
 import 'materials_block.dart';
 import 'tests_block.dart';
 import 'notifications_block.dart';
-import 'attendance_block.dart';
+
 import 'settings_block.dart';
 import 'slots_block.dart';
 import 'plans_block.dart'; // New import for plans management
@@ -117,8 +117,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return const PlansBlock(); // New plans block
       case 'notifications':
         return const NotificationsBlock();
-      case 'attendance':
-        return const AttendanceBlock();
+      
       case 'settings':
         return const SettingsBlock();
       default:
@@ -231,7 +230,7 @@ class Sidebar extends StatelessWidget {
     (Icons.quiz_rounded, 'Tests', 'tests'),
     (Icons.payment_rounded, 'Plans', 'plans'), // New plans menu item
     (Icons.notifications_rounded, 'Notifications', 'notifications'),
-    (Icons.checklist_rtl_rounded, 'Attendance', 'attendance'),
+    
     (Icons.settings_rounded, 'Settings', 'settings'),
   ];
 
@@ -536,7 +535,7 @@ class _RecentActivities extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           _kv('Slot ID', (b['slot_id'] ?? '-').toString()),
-                          _kv('Student ID', (b['student_id'] ?? '-').toString()),
+                          _kv('Student ID', (b['user_id'] ?? '-').toString()),
                           _kv('Status', (b['status'] ?? '-').toString()),
                           _kv('Date', createdAt?.toString().split('.').first ?? '-'),
                         ],

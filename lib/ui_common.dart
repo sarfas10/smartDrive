@@ -141,25 +141,47 @@ class TableHeader extends StatelessWidget {
   final String title;
   final Widget? trailing;
   const TableHeader({super.key, required this.title, this.trailing});
+
   @override
   Widget build(BuildContext context) {
     final fs = _clamp(context.sp(2.1), 14, 19);
     final trailingFs = _clamp(context.sp(1.8), 12, 16);
+
     return Padding(
-      padding: EdgeInsets.fromLTRB(context.wp(3), context.hp(1.2), context.wp(3), context.hp(0.8)),
+      padding: EdgeInsets.fromLTRB(
+        context.wp(3),
+        context.hp(1.2),
+        context.wp(3),
+        context.hp(0.8),
+      ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Flexible(
-            child: Text(title, overflow: TextOverflow.ellipsis, style: TextStyle(fontWeight: FontWeight.w700, fontSize: fs)),
+            child: Text(
+              title,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: fs,
+                color: Colors.black87, // title always black87
+              ),
+            ),
           ),
           if (trailing != null)
-            DefaultTextStyle.merge(style: TextStyle(fontSize: trailingFs), child: trailing!),
+            DefaultTextStyle.merge(
+              style: TextStyle(fontSize: trailingFs, color: Colors.black87),
+              child: IconTheme.merge(
+                data: const IconThemeData(color: Colors.black87),
+                child: trailing!,
+              ),
+            ),
         ],
       ),
     );
   }
 }
+
 
 /// ─────────────────────────────────────────────────────────────────────────────
 /// Data Table (horizontal scroll on small screens)
@@ -168,6 +190,7 @@ class DataTableWrap extends StatelessWidget {
   final List<String> columns;
   final List<List<Widget>> rows;
   const DataTableWrap({super.key, required this.columns, required this.rows});
+
   @override
   Widget build(BuildContext context) {
     final headingFs = _clamp(context.sp(1.8), 12, 15);
@@ -178,18 +201,24 @@ class DataTableWrap extends StatelessWidget {
     final cellPadV = _clamp(context.hp(0.9), 4, 10);
 
     final table = DataTable(
-      headingRowColor: const WidgetStatePropertyAll(Color(0x1A4c63d2)),
+      headingRowColor: const WidgetStatePropertyAll(Color(0x1A4C63D2)),
       columnSpacing: colSpacing,
       dataRowMinHeight: rowMinH,
       dataRowMaxHeight: rowMaxH,
       columns: columns
-          .map((c) => DataColumn(
-                label: Text(
-                  c,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(fontWeight: FontWeight.w700, color: kBrand, fontSize: headingFs),
+          .map(
+            (c) => DataColumn(
+              label: Text(
+                c,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontWeight: FontWeight.w700,
+                  color: kBrand, // brand color for headers
+                  fontSize: headingFs,
                 ),
-              ))
+              ),
+            ),
+          )
           .toList(),
       rows: rows
           .map(
@@ -198,10 +227,21 @@ class DataTableWrap extends StatelessWidget {
                   .map(
                     (w) => DataCell(
                       ConstrainedBox(
-                        constraints: BoxConstraints(minWidth: _clamp(context.wp(8), 40, 120)),
+                        constraints: BoxConstraints(
+                          minWidth: _clamp(context.wp(8), 40, 120),
+                        ),
                         child: Padding(
                           padding: EdgeInsets.symmetric(vertical: cellPadV),
-                          child: DefaultTextStyle.merge(style: TextStyle(fontSize: cellFs), child: w),
+                          child: DefaultTextStyle.merge(
+                            style: TextStyle(
+                              fontSize: cellFs,
+                              color: Colors.black54,
+                            ),
+                            child: IconTheme.merge(
+                              data: const IconThemeData(color: Colors.black87),
+                              child: w,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -212,9 +252,13 @@ class DataTableWrap extends StatelessWidget {
           .toList(),
     );
 
-    return SingleChildScrollView(scrollDirection: Axis.horizontal, child: table);
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: table,
+    );
   }
 }
+
 
 /// ─────────────────────────────────────────────────────────────────────────────
 /// Cards & Stats (percentage-based sizing; no overflow)

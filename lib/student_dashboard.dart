@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:smart_drive/UserAttendancePanel.dart';
 import 'package:smart_drive/mock_tests_list_page.dart';
 
 import 'package:smart_drive/onboarding_forms.dart';
@@ -644,7 +645,10 @@ class _StudentDashboardState extends State<StudentDashboard> {
   }
 
   void _navigateToAttendance() {
-    debugPrint('Navigate to Attendance');
+    Navigator.push(
+  context,
+  MaterialPageRoute(builder: (_) => const UserAttendancePage()),
+);
   }
 
   void _navigateToInvoices() {
