@@ -3,6 +3,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:smart_drive/mock_tests_list_page.dart';
 
 import 'package:smart_drive/onboarding_forms.dart';
 import 'package:smart_drive/user_materials_page.dart';
@@ -632,7 +633,10 @@ class _StudentDashboardState extends State<StudentDashboard> {
   }
 
   void _navigateToMockTests() {
-    debugPrint('Navigate to Mock Tests');
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const MockTestsListPage()),
+    );
   }
 
   void _navigateToProfile() {

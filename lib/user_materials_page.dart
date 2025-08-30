@@ -12,7 +12,6 @@ class UserMaterialsPage extends StatefulWidget {
 }
 
 class _UserMaterialsPageState extends State<UserMaterialsPage> {
-  // ── Filters & Sort ─────────────────────────────────────────────────────────
   final _searchCtrl = TextEditingController();
   Timer? _debounce;
 
@@ -41,26 +40,28 @@ class _UserMaterialsPageState extends State<UserMaterialsPage> {
     super.dispose();
   }
 
+  /// Build a Firestore query that avoids composite-index requirements:
+  /// - If category is "All": do server-side ordering (fast, no where).
+  /// - If a specific category is selected: only use `where` and sort on the client.
   Query _buildQuery() {
-    Query q = FirebaseFirestore.instance.collection('materials');
-    if (_selectedCategory != 'All') {
-      q = q.where('category', isEqualTo: _selectedCategory);
+    final col = FirebaseFirestore.instance.collection('materials');
+
+    if (_selectedCategory == 'All') {
+      switch (_sortBy) {
+        case 'Oldest':
+          return col.orderBy('created_at', descending: false);
+        case 'Downloads':
+          return col.orderBy('downloads', descending: true).orderBy('created_at', descending: true);
+        case 'Title A–Z':
+          return col.orderBy('title', descending: false);
+        case 'Newest':
+        default:
+          return col.orderBy('created_at', descending: true);
+      }
+    } else {
+      // Category selected: only filter; sort client-side to avoid composite index
+      return col.where('category', isEqualTo: _selectedCategory);
     }
-    switch (_sortBy) {
-      case 'Oldest':
-        q = q.orderBy('created_at', descending: false);
-        break;
-      case 'Downloads':
-        q = q.orderBy('downloads', descending: true).orderBy('created_at', descending: true);
-        break;
-      case 'Title A–Z':
-        q = q.orderBy('title', descending: false);
-        break;
-      case 'Newest':
-      default:
-        q = q.orderBy('created_at', descending: true);
-    }
-    return q;
   }
 
   Future<void> _openAndCount(String docId, String url) async {
@@ -76,28 +77,205 @@ class _UserMaterialsPageState extends State<UserMaterialsPage> {
     }
   }
 
-  void _copyLink(String url) {
-    if (url.isEmpty) return;
-    Clipboard.setData(ClipboardData(text: url));
-    _snack('Link copied');
+  void _snack(String msg, {bool isError = false}) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: isError ? Colors.red : Colors.green,
+      ),
+    );
   }
 
-  Future<void> _refresh() async {
-    setState(() => _streamKey = UniqueKey());
-    await Future<void>.delayed(const Duration(milliseconds: 200));
-  }
+  // ── Build ──────────────────────────────────────────────────────────────────
+  @override
+  Widget build(BuildContext context) {
+    final query = _buildQuery();
 
-  void _onSearchChanged(String _) {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 250), () => setState(() {}));
-  }
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text("Study Materials"),
+        actions: [
+          PopupMenuButton<String>(
+            tooltip: 'Sort',
+            initialValue: _sortBy,
+            onSelected: (v) => setState(() => _sortBy = v),
+            itemBuilder: (_) =>
+                _sortOptions.map((s) => PopupMenuItem<String>(value: s, child: Text(s))).toList(),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Search bar
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (_) {
+                _debounce?.cancel();
+                _debounce = Timer(const Duration(milliseconds: 250), () => setState(() {}));
+              },
+              decoration: InputDecoration(
+                hintText: 'Search by title or description',
+                prefixIcon: const Icon(Icons.search),
+                suffixIcon: _searchCtrl.text.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'Clear',
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() {});
+                        },
+                        icon: const Icon(Icons.close),
+                      ),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              ),
+            ),
+          ),
 
-  String _formatBytes(int? bytes) {
-    if (bytes == null) return '-';
-    if (bytes < 1024) return '$bytes B';
-    if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
-    return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
+          // Category chips
+          SizedBox(
+            height: 48,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemBuilder: (_, i) {
+                final c = _categories[i];
+                return ChoiceChip(
+                  label: Text(c),
+                  selected: c == _selectedCategory,
+                  onSelected: (_) => setState(() => _selectedCategory = c),
+                );
+              },
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemCount: _categories.length,
+            ),
+          ),
+
+          const Divider(height: 1),
+
+          // List (rows)
+          Expanded(
+            child: StreamBuilder<QuerySnapshot>(
+              key: _streamKey,
+              stream: query.snapshots(),
+              builder: (context, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+
+                if (snap.hasError) {
+                  // Show a helpful message; log full error to console.
+                  // If you see an index link in the error, you can tap it in logs.
+                  // ignore: avoid_print
+                  print('Materials stream error: ${snap.error}');
+                  return _ErrorView(
+                    message: 'Could not load materials.',
+                    detail: snap.error.toString(),
+                  );
+                }
+
+                if (!snap.hasData || snap.data!.docs.isEmpty) {
+                  return const Center(child: Text("No materials available"));
+                }
+
+                // Map documents
+                final rawDocs = snap.data!.docs.map((d) {
+                  final m = (d.data() as Map<String, dynamic>);
+                  return _MaterialRowModel(
+                    id: d.id,
+                    title: (m['title'] ?? '').toString(),
+                    description: (m['description'] ?? '').toString(),
+                    category: (m['category'] ?? '').toString(),
+                    fileUrl: (m['file_url'] ?? '').toString(),
+                    kind: (m['detected_type'] ?? 'other').toString(),
+                    downloads: (m['downloads'] is num) ? (m['downloads'] as num).toInt() : 0,
+                    createdAt: (m['created_at'] is Timestamp)
+                        ? (m['created_at'] as Timestamp).toDate()
+                        : null,
+                    titleLower: (m['title'] ?? '').toString().toLowerCase(),
+                    descLower: (m['description'] ?? '').toString().toLowerCase(),
+                  );
+                }).toList();
+
+                // Client-side search filter
+                final search = _searchCtrl.text.trim().toLowerCase();
+                var docs = rawDocs.where((r) {
+                  if (search.isEmpty) return true;
+                  return r.titleLower.contains(search) || r.descLower.contains(search);
+                }).toList();
+
+                // Client-side sort when category filtered; otherwise keep server order
+                if (_selectedCategory != 'All') {
+                  docs.sort((a, b) {
+                    switch (_sortBy) {
+                      case 'Oldest':
+                        final at = a.createdAt?.millisecondsSinceEpoch ?? -1;
+                        final bt = b.createdAt?.millisecondsSinceEpoch ?? -1;
+                        return at.compareTo(bt);
+                      case 'Downloads':
+                        final c = b.downloads.compareTo(a.downloads);
+                        if (c != 0) return c;
+                        // tie-breaker: newest first
+                        final at2 = a.createdAt?.millisecondsSinceEpoch ?? -1;
+                        final bt2 = b.createdAt?.millisecondsSinceEpoch ?? -1;
+                        return bt2.compareTo(at2);
+                      case 'Title A–Z':
+                        return a.title.toLowerCase().compareTo(b.title.toLowerCase());
+                      case 'Newest':
+                      default:
+                        final at3 = a.createdAt?.millisecondsSinceEpoch ?? -1;
+                        final bt3 = b.createdAt?.millisecondsSinceEpoch ?? -1;
+                        return bt3.compareTo(at3);
+                    }
+                  });
+                }
+
+                if (docs.isEmpty) {
+                  return const Center(child: Text("No results found"));
+                }
+
+                return ListView.separated(
+                  itemCount: docs.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, i) {
+                    final r = docs[i];
+                    final icon = _typeIcon(r.kind);
+                    final color = _typeColor(r.kind);
+
+                    final subtitle = StringBuffer();
+                    if (r.description.isNotEmpty) {
+                      subtitle.write(r.description);
+                      subtitle.write('\n');
+                    }
+                    subtitle.write('${r.downloads} downloads');
+
+                    return ListTile(
+                      dense: false,
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                      leading: Icon(icon, color: color),
+                      title: Text(r.title, style: const TextStyle(fontWeight: FontWeight.w600)),
+                      subtitle: Text(
+                        subtitle.toString(),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      trailing: IconButton(
+                        icon: const Icon(Icons.open_in_new, color: Colors.deepPurple),
+                        onPressed: () => _openAndCount(r.id, r.fileUrl),
+                      ),
+                      onTap: () => _openAndCount(r.id, r.fileUrl),
+                    );
+                  },
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Color _typeColor(String k) {
@@ -123,281 +301,61 @@ class _UserMaterialsPageState extends State<UserMaterialsPage> {
       default: return Icons.insert_drive_file_outlined;
     }
   }
+}
 
-  void _snack(String msg, {bool isError = false}) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(msg),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: isError ? Colors.red : Colors.green,
-      ),
-    );
-  }
+/// Row model for easier client-side sort/filter
+class _MaterialRowModel {
+  final String id;
+  final String title;
+  final String description;
+  final String category;
+  final String fileUrl;
+  final String kind;
+  final int downloads;
+  final DateTime? createdAt;
+  final String titleLower;
+  final String descLower;
 
-  // ── Build ──────────────────────────────────────────────────────────────────
+  _MaterialRowModel({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.category,
+    required this.fileUrl,
+    required this.kind,
+    required this.downloads,
+    required this.createdAt,
+    required this.titleLower,
+    required this.descLower,
+  });
+}
+
+/// Nice inline error view with details (helps spot index errors)
+class _ErrorView extends StatelessWidget {
+  final String message;
+  final String? detail;
+
+  const _ErrorView({required this.message, this.detail});
+
   @override
   Widget build(BuildContext context) {
-    final query = _buildQuery();
-
-    return Scaffold(
-      body: RefreshIndicator(
-        onRefresh: _refresh,
-        child: CustomScrollView(
-          slivers: [
-            // Top row: back + sort
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(8, 16, 8, 0),
-                child: Row(
-                  children: [
-                    IconButton(
-                      tooltip: 'Back',
-                      icon: const Icon(Icons.arrow_back),
-                      onPressed: () => Navigator.pop(context),
-                    ),
-                    const Spacer(),
-                    PopupMenuButton<String>(
-                      tooltip: 'Sort',
-                      icon: const Icon(Icons.sort),
-                      initialValue: _sortBy,
-                      onSelected: (v) => setState(() => _sortBy = v),
-                      itemBuilder: (_) => _sortOptions
-                          .map((s) => PopupMenuItem<String>(value: s, child: Text(s)))
-                          .toList(),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-
-            // Search bar
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                child: TextField(
-                  controller: _searchCtrl,
-                  onChanged: _onSearchChanged,
-                  decoration: InputDecoration(
-                    hintText: 'Search by title or description',
-                    prefixIcon: const Icon(Icons.search),
-                    suffixIcon: _searchCtrl.text.isEmpty
-                        ? null
-                        : IconButton(
-                            tooltip: 'Clear',
-                            onPressed: () {
-                              _searchCtrl.clear();
-                              setState(() {});
-                            },
-                            icon: const Icon(Icons.close),
-                          ),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                ),
-              ),
-            ),
-
-            // Category chips
-            SliverToBoxAdapter(
-              child: SizedBox(
-                height: 52,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
-                  itemBuilder: (_, i) {
-                    final c = _categories[i];
-                    return ChoiceChip(
-                      label: Text(c),
-                      selected: c == _selectedCategory,
-                      onSelected: (_) => setState(() => _selectedCategory = c),
-                    );
-                  },
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemCount: _categories.length,
-                ),
-              ),
-            ),
-
-            // Grid
-            StreamBuilder<QuerySnapshot>(
-              key: _streamKey,
-              stream: query.snapshots(),
-              builder: (context, snap) {
-                if (snap.connectionState == ConnectionState.waiting) {
-                  return _loadingBox();
-                }
-                if (!snap.hasData || snap.data!.docs.isEmpty) {
-                  return _emptyBox('No materials available');
-                }
-
-                final search = _searchCtrl.text.trim().toLowerCase();
-                final docs = snap.data!.docs.where((d) {
-                  if (search.isEmpty) return true;
-                  final m = d.data() as Map<String, dynamic>;
-                  final t = (m['title'] ?? '').toString().toLowerCase();
-                  final desc = (m['description'] ?? '').toString().toLowerCase();
-                  return t.contains(search) || desc.contains(search);
-                }).toList();
-
-                if (docs.isEmpty) {
-                  return _emptyBox('No results found');
-                }
-
-                return SliverPadding(
-                  padding: const EdgeInsets.all(8),
-                  sliver: SliverGrid(
-                    gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                      maxCrossAxisExtent: 380,
-                      mainAxisSpacing: 8,
-                      crossAxisSpacing: 8,
-                      childAspectRatio: 1.45,
-                    ),
-                    delegate: SliverChildBuilderDelegate(
-                      (context, i) {
-                        final d = docs[i];
-                        final m = d.data() as Map<String, dynamic>;
-                        final id = d.id;
-                        final title = (m['title'] ?? '').toString();
-                        final desc = (m['description'] ?? '').toString();
-                        final category = (m['category'] ?? '').toString();
-                        final version = (m['version'] ?? '1.0').toString();
-                        final fileUrl = (m['file_url'] ?? '').toString();
-                        final fileName = (m['file_name'] ?? '').toString();
-                        final fileSize = (m['file_size'] is num) ? (m['file_size'] as num).toInt() : null;
-                        final kind = (m['detected_type'] ?? 'other').toString();
-                        final downloads = (m['downloads'] is num) ? (m['downloads'] as num).toInt() : 0;
-                        final createdAt = (m['created_at'] is Timestamp)
-                            ? (m['created_at'] as Timestamp).toDate()
-                            : null;
-                        final tc = _typeColor(kind);
-                        final ti = _typeIcon(kind);
-                        final dateStr = createdAt == null
-                            ? '-'
-                            : '${createdAt.year}-${createdAt.month.toString().padLeft(2, '0')}-${createdAt.day.toString().padLeft(2, '0')}';
-
-                        return Card(
-                          elevation: 2,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                          child: Padding(
-                            padding: const EdgeInsets.all(14),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Container(
-                                      width: 36,
-                                      height: 36,
-                                      decoration: BoxDecoration(
-                                        color: tc.withOpacity(0.12),
-                                        borderRadius: BorderRadius.circular(10),
-                                      ),
-                                      child: Icon(ti, color: tc),
-                                    ),
-                                    const SizedBox(width: 10),
-                                    _chip(kind.toUpperCase(), tc),
-                                    const Spacer(),
-                                    _chip(category, Colors.deepPurple),
-                                  ],
-                                ),
-                                const SizedBox(height: 10),
-                                Text(title,
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                        fontSize: 16, fontWeight: FontWeight.w800)),
-                                if (desc.isNotEmpty) ...[
-                                  const SizedBox(height: 6),
-                                  Text(desc,
-                                      maxLines: 3,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(color: Colors.grey.shade700)),
-                                ],
-                                const SizedBox(height: 8),
-                                _meta(Icons.badge_outlined, 'Version', version),
-                                _meta(Icons.insert_drive_file_outlined, 'File name',
-                                    fileName.isEmpty ? '-' : fileName),
-                                _meta(Icons.storage, 'Size', _formatBytes(fileSize)),
-                                _meta(Icons.calendar_today_outlined, 'Uploaded', dateStr),
-                                const Spacer(),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.download,
-                                        size: 16, color: Colors.green),
-                                    const SizedBox(width: 6),
-                                    Text('$downloads downloads',
-                                        style: const TextStyle(fontWeight: FontWeight.w600)),
-                                    const Spacer(),
-                                    FilledButton.icon(
-                                      style: FilledButton.styleFrom(
-                                        backgroundColor: Colors.deepPurple,
-                                        shape: RoundedRectangleBorder(
-                                            borderRadius: BorderRadius.circular(10)),
-                                      ),
-                                      onPressed: () => _openAndCount(id, fileUrl),
-                                      icon: const Icon(Icons.open_in_new, size: 18),
-                                      label: const Text('Open'),
-                                    ),
-                                  ],
-                                )
-                              ],
-                            ),
-                          ),
-                        );
-                      },
-                      childCount: docs.length,
-                    ),
-                  ),
-                );
-              },
+    return Padding(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(message, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          if (detail != null) ...[
+            const SizedBox(height: 8),
+            Text(
+              detail!,
+              style: TextStyle(color: Colors.grey[700]),
+              maxLines: 6,
+              overflow: TextOverflow.ellipsis,
             ),
           ],
-        ),
+        ],
       ),
     );
   }
-
-  Widget _chip(String text, Color color) => Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.08),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: color.withOpacity(0.25)),
-        ),
-        child: Text(text,
-            style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 12)),
-      );
-
-  Widget _meta(IconData i, String l, String v) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 2),
-        child: Row(
-          children: [
-            Icon(i, size: 16, color: Colors.grey.shade700),
-            const SizedBox(width: 8),
-            Text('$l: ',
-                style: TextStyle(
-                    color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
-            Expanded(
-              child: Text(v,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontWeight: FontWeight.w500)),
-            )
-          ],
-        ),
-      );
-
-  SliverToBoxAdapter _loadingBox() => const SliverToBoxAdapter(
-        child: Padding(
-          padding: EdgeInsets.all(32),
-          child: Center(child: CircularProgressIndicator()),
-        ),
-      );
-
-  SliverToBoxAdapter _emptyBox(String text) => SliverToBoxAdapter(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Center(child: Text(text, style: TextStyle(color: Colors.grey))),
-        ),
-      );
 }
