@@ -410,7 +410,8 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
             : 'Created $toWrite slot document(s).';
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
-        _clearAll();
+        // Force clear even though we're still inside _runLocked (busy state)
+        _clearAll(force: true);
       } catch (e) {
         if (!mounted) return;
         ScaffoldMessenger.of(context).showSnackBar(
@@ -467,8 +468,9 @@ class _AddSlotsPageState extends State<AddSlotsPage> {
     });
   }
 
-  void _clearAll() {
-    if (_isBusy) return;
+  // NOTE: added {bool force = false} and busy check respects force
+  void _clearAll({bool force = false}) {
+    if (_isBusy && !force) return;
     setState(() {
       selectedDates.clear();
       selectedTimeSlots.clear();

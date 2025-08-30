@@ -624,15 +624,15 @@ class _BookingPageState extends State<BookingPage> {
     _snack('Payment failed${msg != null && msg.isNotEmpty ? ': $msg' : ''}', color: Colors.red);
 
     // Optional: log failed attempt
-    FirebaseFirestore.instance.collection('payment_attempts').add({
-      'user_id': widget.userId,
-      'slot_id': widget.slotId,
-      'status': 'failed',
-      'code': r.code,
-      'message': r.message,
-      'order_id': _lastOrderId,
-      'created_at': FieldValue.serverTimestamp(),
-    });
+    // FirebaseFirestore.instance.collection('payment_attempts').add({
+    //   'user_id': widget.userId,
+    //   'slot_id': widget.slotId,
+    //   'status': 'failed',
+    //   'code': r.code,
+    //   'message': r.message,
+    //   'order_id': _lastOrderId,
+    //   'created_at': FieldValue.serverTimestamp(),
+    // });
   }
 
   void _onExternalWallet(ExternalWalletResponse r) {
