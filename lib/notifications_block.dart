@@ -1,4 +1,7 @@
+// lib/notifications_block.dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'ui_common.dart';
 
@@ -9,173 +12,650 @@ class NotificationsBlock extends StatefulWidget {
 }
 
 class _NotificationsBlockState extends State<NotificationsBlock> {
-  final titleCtrl = TextEditingController();
-  final msgCtrl = TextEditingController();
-  final urlCtrl = TextEditingController();
-  String schedule = 'Send Now';
-  DateTime? when;
-  final segments = <String>{};
+  final _formKey = GlobalKey<FormState>();
+  final _titleCtrl = TextEditingController();
+  final _msgCtrl = TextEditingController();
+  final _urlCtrl = TextEditingController();
+
+  // segments & schedule
+  final Set<String> _segments = {}; // multi-select
+  static const _segmentOptions = ['all', 'students', 'instructors', 'active', 'pending'];
+  String _schedule = 'Send Now'; // or 'Schedule for Later'
+  DateTime? _when;
+  bool _busy = false;
+
+  // ======= CONFIG: point to your Hostinger API and admin key =======
+  static const String _apiBase = 'https://tajdrivingschool.in/smartDrive/notification/api';
+  static const String _adminApiKey = 'noTi34279bfksdfkafafqeffbdcce';
+  // ================================================================
+
+  final _filterAnchorKey = GlobalKey();
+
+  @override
+  void dispose() {
+    _titleCtrl.dispose();
+    _msgCtrl.dispose();
+    _urlCtrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final history = FirebaseFirestore.instance.collection('notifications').orderBy('created_at', descending: true);
-    return ListView(
-      children: [
-        Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: AppCard(
-            title: 'Send Push Notification (record)',
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
+    final mq = MediaQuery.of(context);
+    final isWide = mq.size.width >= 860; // breakpoint for desktop/tablet
+
+    return SafeArea(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(12),
+        physics: const AlwaysScrollableScrollPhysics(),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            AppCard(
+              title: 'Send Push Notification',
+              child: Form(
+                key: _formKey,
+                child: Column(
                   children: [
-                    _seg('all'),
-                    _seg('students'),
-                    _seg('instructors'),
-                    _seg('pending'),
-                    _seg('active'),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                field('Notification Title', titleCtrl),
-                const SizedBox(height: 8),
-                area('Message', msgCtrl),
-                const SizedBox(height: 8),
-                field('Action URL (optional)', urlCtrl),
-                const SizedBox(height: 8),
-                DropdownButtonFormField<String>(
-                  value: schedule,
-                  items: const [
-                    DropdownMenuItem(value: 'Send Now', child: Text('Send Now')),
-                    DropdownMenuItem(value: 'Schedule for Later', child: Text('Schedule for Later')),
-                  ],
-                  onChanged: (v) => setState(() => schedule = v ?? 'Send Now'),
-                  decoration: const InputDecoration(labelText: 'Schedule', border: OutlineInputBorder()),
-                ),
-                const SizedBox(height: 8),
-                if (schedule == 'Schedule for Later')
-                  ElevatedButton(
-                    onPressed: () async {
-                      final picked = await showDatePicker(
-                        context: context,
-                        firstDate: DateTime.now(),
-                        lastDate: DateTime.now().add(const Duration(days: 365)),
-                        initialDate: DateTime.now().add(const Duration(days: 1)),
-                      );
-                      if (picked != null) {
-                        final t = await showTimePicker(context: context, initialTime: TimeOfDay.now());
-                        if (t != null) {
-                          setState(() => when = DateTime(picked.year, picked.month, picked.day, t.hour, t.minute));
-                        }
-                      }
-                    },
-                    child: Text(when == null ? 'Pick Date & Time' : when.toString()),
-                  ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton(
-                        onPressed: () async {
-                          await FirebaseFirestore.instance.collection('notifications').add({
-                            'title': titleCtrl.text.trim(),
-                            'message': msgCtrl.text.trim(),
-                            'segments': segments.toList(),
-                            'action_url': urlCtrl.text.trim(),
-                            'schedule': schedule,
-                            'scheduled_at': when,
-                            'status': schedule == 'Send Now' ? 'sent' : 'scheduled',
-                            'created_at': FieldValue.serverTimestamp(),
-                          });
-                          titleCtrl.clear();
-                          msgCtrl.clear();
-                          urlCtrl.clear();
-                          setState(() {
-                            schedule = 'Send Now';
-                            when = null;
-                            segments.clear();
-                          });
-                        },
-                        child: const Text('Save'),
+                    // Top row: Filters + quick summary
+                    Row(
+                      children: [
+                        Tooltip(
+                          message: 'Choose target segments',
+                          child: IconButton.filledTonal(
+                            key: _filterAnchorKey,
+                            onPressed: () => _openFilterPicker(isWide: isWide),
+                            icon: const Icon(Icons.filter_list_rounded),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _segmentSummary(),
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  color: Theme.of(context).colorScheme.onSurface.withOpacity(.75),
+                                ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        if (_segments.isNotEmpty)
+                          TextButton.icon(
+                            onPressed: () => setState(_segments.clear),
+                            icon: const Icon(Icons.close_rounded, size: 18),
+                            label: const Text('Clear'),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Title + URL (adaptive, no Expanded in vertical)
+                    _twoUp(
+                      isWide: isWide,
+                      left: _Labeled(
+                        'Notification Title',
+                        TextFormField(
+                          controller: _titleCtrl,
+                          textInputAction: TextInputAction.next,
+                          maxLength: 60,
+                          validator: (v) => (v == null || v.trim().isEmpty) ? 'Title required' : null,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            hintText: 'Eg. New Test Available',
+                          ),
+                        ),
+                      ),
+                      right: _Labeled(
+                        'Action URL (optional)',
+                        TextFormField(
+                          controller: _urlCtrl,
+                          textInputAction: TextInputAction.next,
+                          keyboardType: TextInputType.url,
+                          decoration: const InputDecoration(
+                            border: OutlineInputBorder(),
+                            hintText: 'https://example.com',
+                          ),
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
-                        onPressed: () async {
-                          await FirebaseFirestore.instance.collection('notifications').add({
-                            'title': titleCtrl.text.trim(),
-                            'message': msgCtrl.text.trim(),
-                            'segments': segments.toList(),
-                            'action_url': urlCtrl.text.trim(),
-                            'schedule': schedule,
-                            'scheduled_at': when,
-                            'status': 'draft',
-                            'created_at': FieldValue.serverTimestamp(),
-                          });
-                          titleCtrl.clear();
-                          msgCtrl.clear();
-                          urlCtrl.clear();
-                          setState(() {
-                            schedule = 'Send Now';
-                            when = null;
-                            segments.clear();
-                          });
-                        },
-                        child: const Text('Save as Draft'),
+                    const SizedBox(height: 12),
+
+                    // Message
+                    _Labeled(
+                      'Message',
+                      TextFormField(
+                        controller: _msgCtrl,
+                        maxLines: 4,
+                        maxLength: 240,
+                        validator: (v) => (v == null || v.trim().isEmpty) ? 'Message required' : null,
+                        decoration: const InputDecoration(
+                          border: OutlineInputBorder(),
+                          hintText: 'Write the push message…',
+                        ),
                       ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Schedule row (adaptive)
+                    _twoUp(
+                      isWide: isWide,
+                      left: DropdownButtonFormField<String>(
+                        value: _schedule,
+                        items: const [
+                          DropdownMenuItem(value: 'Send Now', child: Text('Send Now')),
+                          DropdownMenuItem(value: 'Schedule for Later', child: Text('Schedule for Later')),
+                        ],
+                        onChanged: (v) => setState(() {
+                          _schedule = v ?? 'Send Now';
+                          if (_schedule == 'Send Now') _when = null;
+                        }),
+                        decoration: const InputDecoration(
+                          border: OutlineInputBorder(),
+                          labelText: 'Schedule',
+                        ),
+                      ),
+                      right: (_schedule == 'Schedule for Later')
+                          ? OutlinedButton.icon(
+                              icon: const Icon(Icons.calendar_today_outlined),
+                              label: Text(_when == null ? 'Pick Date & Time' : _format(_when!)),
+                              onPressed: _pickDateTime,
+                            )
+                          : const SizedBox.shrink(),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Actions
+                    Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            icon: _busy
+                                ? const SizedBox(
+                                    width: 16,
+                                    height: 16,
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  )
+                                : const Icon(Icons.send_outlined),
+                            label: const Text('Send / Schedule'),
+                            onPressed: _busy ? null : _submit,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.orange,
+                              foregroundColor: Colors.white,
+                            ),
+                            icon: const Icon(Icons.drafts_outlined),
+                            label: const Text('Save Draft (Firestore only)'),
+                            onPressed: _busy
+                                ? null
+                                : () async {
+                                    await _saveHistoryFirestore(status: 'draft');
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(
+                                        const SnackBar(content: Text('Draft saved.')),
+                                      );
+                                    }
+                                  },
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
-              ],
+              ),
             ),
-          ),
+
+            const SizedBox(height: 8),
+            const SectionHeader(title: 'Notification History (Firestore)'),
+            const Divider(height: 1),
+
+            // History — adaptive: cards on phones, table on wide
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: StreamBuilder<QuerySnapshot>(
+                stream: FirebaseFirestore.instance
+                    .collection('notifications')
+                    .orderBy('created_at', descending: true)
+                    .snapshots(),
+                builder: (context, snap) {
+                  if (snap.connectionState == ConnectionState.waiting) {
+                    return const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Center(child: CircularProgressIndicator()),
+                    );
+                  }
+                  if (snap.hasError) {
+                    return Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text('Error loading history: ${snap.error}'),
+                    );
+                  }
+                  final docs = snap.data?.docs ?? const [];
+                  if (docs.isEmpty) {
+                    return const Padding(
+                      padding: EdgeInsets.all(16),
+                      child: Text('No notifications yet.'),
+                    );
+                  }
+
+                  if (!isWide) {
+                    // PHONE: render as vertical cards (avoid nested unbounded flex)
+                    return ListView.separated(
+                      shrinkWrap: true,
+                      primary: false,
+                      itemCount: docs.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) {
+                        final m = (docs[i].data() as Map).cast<String, dynamic>();
+                        final title = (m['title'] ?? '-') as String;
+                        final segs = (m['segments'] as List?)?.join(', ') ?? 'all';
+                        final when = _format((m['scheduled_at'] as Timestamp?)?.toDate() ??
+                            (m['created_at'] as Timestamp?)?.toDate());
+                        final status = (m['status']?.toString() ?? '-');
+
+                        return Card(
+                          elevation: 0,
+                          color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(.25),
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  title,
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleMedium
+                                      ?.copyWith(fontWeight: FontWeight.w600),
+                                ),
+                                const SizedBox(height: 4),
+                                Text('Target: $segs', maxLines: 1, overflow: TextOverflow.ellipsis),
+                                const SizedBox(height: 2),
+                                Text('When: $when'),
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    _StatusPill(status),
+                                    const Spacer(),
+                                    TextButton(
+                                      onPressed: () => _preview(context, m),
+                                      child: const Text('View'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      },
+                    );
+                  }
+
+                  // WIDE: tabular view
+                  final rows = <List<Widget>>[];
+                  for (final d in docs) {
+                    final m = (d.data() as Map).cast<String, dynamic>();
+                    rows.add([
+                      Text(m['title'] ?? '-', overflow: TextOverflow.ellipsis),
+                      Text((m['segments'] as List?)?.join(', ') ?? 'all', overflow: TextOverflow.ellipsis),
+                      Text(_format((m['scheduled_at'] as Timestamp?)?.toDate() ??
+                          (m['created_at'] as Timestamp?)?.toDate())),
+                      _StatusPill(m['status']?.toString() ?? '-'),
+                      TextButton(
+                        onPressed: () => _preview(context, m),
+                        child: const Text('View'),
+                      ),
+                    ]);
+                  }
+
+                  return SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: DataTableWrap(
+                      columns: const ['Title', 'Target', 'When', 'Status', 'Actions'],
+                      rows: rows,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
-        const SectionHeader(title: 'Notification History'),
-        const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.all(12.0),
-          child: StreamBuilder<QuerySnapshot>(
-            stream: history.snapshots(),
-            builder: (context, snap) {
-              final rows = <List<Widget>>[];
-              if (snap.hasData) {
-                for (final d in snap.data!.docs) {
-                  final m = d.data() as Map;
-                  rows.add([
-                    Text(m['title']?.toString() ?? '-', overflow: TextOverflow.ellipsis),
-                    Text((m['segments'] as List?)?.join(', ') ?? 'all', overflow: TextOverflow.ellipsis),
-                    Text((m['created_at'] as Timestamp?)?.toDate().toString().split(' ').first ?? '-'),
-                    Text(m['status']?.toString() ?? '-'),
-                    ElevatedButton(onPressed: () {}, child: const Text('View')),
-                  ]);
-                }
-              }
-              return DataTableWrap(columns: const ['Title', 'Target', 'Created', 'Status', 'Actions'], rows: rows);
-            },
-          ),
-        ),
+      ),
+    );
+  }
+
+  // ---------------- UI helpers ----------------
+
+  /// Layout helper: two fields side-by-side on wide screens, stacked on phones.
+  /// IMPORTANT: On phones this returns a Column with NO Expanded/Flexible.
+  Widget _twoUp({
+    required bool isWide,
+    required Widget left,
+    required Widget right,
+  }) {
+    if (isWide) {
+      return Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Expanded(child: left),
+          const SizedBox(width: 12),
+          Expanded(child: right),
+        ],
+      );
+    }
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        left,
+        const SizedBox(height: 12),
+        right,
       ],
     );
   }
 
-  Widget _seg(String s) {
-    final selected = segments.contains(s);
-    return InkWell(
-      onTap: () => setState(() => selected ? segments.remove(s) : segments.add(s)),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          border: Border.all(color: const Color(0xFF4c63d2), width: 2),
-          color: selected ? const Color(0xFF4c63d2) : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
+  Future<void> _openFilterPicker({required bool isWide}) async {
+    if (isWide) {
+      // Desktop/tablet: contextual menu near the icon
+      final box = _filterAnchorKey.currentContext?.findRenderObject() as RenderBox?;
+      final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
+      if (box == null) return;
+
+      final position = RelativeRect.fromRect(
+        Rect.fromPoints(
+          box.localToGlobal(Offset.zero, ancestor: overlay),
+          box.localToGlobal(box.size.bottomRight(Offset.zero), ancestor: overlay),
         ),
-        child: Text(s, style: TextStyle(color: selected ? Colors.white : const Color(0xFF4c63d2), fontWeight: FontWeight.w600)),
+        Offset.zero & overlay.size,
+      );
+
+      final selected = await showMenu<String>(
+        context: context,
+        position: position,
+        items: [
+          for (final s in _segmentOptions)
+            CheckedPopupMenuItem<String>(
+              value: s,
+              checked: _segments.contains(s) || (_segments.isEmpty && s == 'all'),
+              child: Text(s),
+            ),
+        ],
+      );
+
+      if (selected != null) {
+        _toggleSegment(selected);
+      }
+      return;
+    }
+
+    // Phone: bottom sheet with checkboxes (better for small screens)
+    final localSelections = Set<String>.from(_segments.isEmpty ? ['all'] : _segments);
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (ctx) {
+        return Padding(
+          padding: EdgeInsets.only(
+            bottom: MediaQuery.of(ctx).viewInsets.bottom,
+            left: 16,
+            right: 16,
+            top: 8,
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const SizedBox(height: 6),
+              Text('Choose target segments', style: Theme.of(ctx).textTheme.titleMedium),
+              const SizedBox(height: 8),
+              ..._segmentOptions.map((s) {
+                final checked = localSelections.contains(s) || (localSelections.isEmpty && s == 'all');
+                return CheckboxListTile(
+                  value: checked,
+                  title: Text(s),
+                  onChanged: (v) {
+                    if (v == null) return;
+                    if (s == 'all') {
+                      localSelections
+                        ..clear()
+                        ..add('all');
+                    } else {
+                      if (checked) {
+                        localSelections.remove(s);
+                      } else {
+                        localSelections.add(s);
+                      }
+                      if (localSelections.length > 1 && localSelections.contains('all')) {
+                        localSelections.remove('all');
+                      }
+                    }
+                    // rebuild sheet
+                    (ctx as Element).markNeedsBuild();
+                  },
+                );
+              }),
+              const SizedBox(height: 8),
+              Row(
+                children: [
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.pop(ctx),
+                      child: const Text('Cancel'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: FilledButton(
+                      onPressed: () {
+                        setState(() {
+                          _segments
+                            ..clear()
+                            ..addAll(localSelections);
+                        });
+                        Navigator.pop(ctx);
+                      },
+                      child: const Text('Apply'),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  void _toggleSegment(String selected) {
+    setState(() {
+      if (selected == 'all') {
+        _segments
+          ..clear()
+          ..add('all');
+      } else {
+        if (_segments.contains(selected)) {
+          _segments.remove(selected);
+        } else {
+          _segments.add(selected);
+        }
+        if (_segments.length > 1 && _segments.contains('all')) {
+          _segments.remove('all');
+        }
+      }
+    });
+  }
+
+  String _segmentSummary() {
+    if (_segments.isEmpty || _segments.contains('all')) return 'Target: all';
+    final parts = _segments.toList()..sort();
+    return 'Target: ${parts.join(", ")}';
+  }
+
+  // ---------------- Actions ----------------
+  Future<void> _pickDateTime() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      firstDate: now,
+      lastDate: now.add(const Duration(days: 365)),
+      initialDate: now.add(const Duration(days: 1)),
+    );
+    if (date == null) return;
+    final time = await showTimePicker(context: context, initialTime: TimeOfDay.now());
+    if (time == null) return;
+    setState(() => _when = DateTime(date.year, date.month, date.day, time.hour, time.minute));
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    if (_segments.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pick at least one segment (or “all”)')),
+      );
+      return;
+    }
+    if (_schedule == 'Schedule for Later' && _when == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Pick a schedule date & time')),
+      );
+      return;
+    }
+
+    setState(() => _busy = true);
+    try {
+      final body = {
+        'title': _titleCtrl.text.trim(),
+        'message': _msgCtrl.text.trim(),
+        'segments': _segments.toList(),
+        'action_url': _urlCtrl.text.trim().isEmpty ? null : _urlCtrl.text.trim(),
+        if (_schedule == 'Schedule for Later') 'scheduled_at': _when!.toIso8601String(),
+      };
+
+     
+      final uri = Uri.parse(
+        '$_apiBase/${_schedule == "Send Now" ? "notify_send.php" : "notify_schedule.php"}',
+      );
+
+      final res = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json', 'X-API-KEY': _adminApiKey},
+        body: jsonEncode(body),
+      );
+
+      if (res.statusCode >= 200 && res.statusCode < 300) {
+        await _saveHistoryFirestore(status: _schedule == 'Send Now' ? 'queued' : 'scheduled');
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text(_schedule == 'Send Now' ? 'Queued to send now.' : 'Scheduled.')),
+          );
+        }
+        _titleCtrl.clear();
+        _msgCtrl.clear();
+        _urlCtrl.clear();
+        setState(() {
+          _segments.clear();
+          _schedule = 'Send Now';
+          _when = null;
+        });
+      } else {
+        throw Exception('API error ${res.statusCode}: ${res.body}');
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _saveHistoryFirestore({required String status}) async {
+    await FirebaseFirestore.instance.collection('notifications').add({
+      'title': _titleCtrl.text.trim(),
+      'message': _msgCtrl.text.trim(),
+      'segments': _segments.toList().isEmpty ? ['all'] : _segments.toList(),
+      'action_url': _urlCtrl.text.trim(),
+      'schedule': _schedule,
+      'scheduled_at': _when,
+      'status': status, // draft | queued | scheduled (UI mirror)
+      'created_at': FieldValue.serverTimestamp(),
+    });
+  }
+
+  void _preview(BuildContext ctx, Map<String, dynamic> m) {
+    showDialog(
+      context: ctx,
+      builder: (_) => AlertDialog(
+        title: Text(m['title'] ?? '-'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(m['message'] ?? ''),
+              const SizedBox(height: 8),
+              if ((m['action_url'] ?? '').toString().isNotEmpty)
+                SelectableText('URL: ${m['action_url']}'),
+              const SizedBox(height: 8),
+              Text('Segments: ${(m['segments'] as List?)?.join(", ") ?? "all"}'),
+              Text('Status: ${m['status']}'),
+            ],
+          ),
+        ),
+        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
       ),
+    );
+  }
+
+  static String _format(DateTime? dt) {
+    if (dt == null) return '-';
+    final d = dt.toLocal();
+    return '${d.year.toString().padLeft(4, '0')}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')} '
+        '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
+}
+
+// ------- small UI helpers -------
+class _Labeled extends StatelessWidget {
+  final String label;
+  final Widget child;
+  const _Labeled(this.label, this.child, {super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+      ),
+      child,
+    ]);
+  }
+}
+
+class _StatusPill extends StatelessWidget {
+  final String status;
+  const _StatusPill(this.status, {super.key});
+  @override
+  Widget build(BuildContext context) {
+    Color c = switch (status) {
+      'draft' => Colors.grey,
+      'queued' => Colors.blue,
+      'scheduled' => Colors.amber,
+      'sent' => Colors.green,
+      'error' => Colors.red,
+      _ => Colors.black54,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: c.withOpacity(.12),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: c.withOpacity(.35)),
+      ),
+      child: Text(status, style: TextStyle(color: c, fontWeight: FontWeight.w600)),
     );
   }
 }

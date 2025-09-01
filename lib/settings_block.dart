@@ -1,10 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import 'ui_common.dart';
 import 'package:smart_drive/reusables/vehicle_icons.dart';
 import 'maps_page_admin.dart'; // for navigation to the maps page
+
+// 🔽 NEW: add these imports
+import 'login.dart';                  // navigate to login after logout
+import 'messaging_setup.dart';        // unsubscribeRoleStatusTopics()
+import 'services/session_service.dart'; // clear saved session
 
 class SettingsBlock extends StatefulWidget {
   const SettingsBlock({super.key});
@@ -18,6 +24,9 @@ class _SettingsBlockState extends State<SettingsBlock> {
   final TextEditingController _radiusCtrl = TextEditingController();
   final TextEditingController _perKmCtrl = TextEditingController();
   final TextEditingController _policyCtrl = TextEditingController();
+
+  // 🔽 NEW: auth handle
+  final FirebaseAuth _auth = FirebaseAuth.instance;
 
   // Keep the last Firestore payload we applied to avoid thrashing controllers.
   Map<String, dynamic>? _lastAppliedSettings;
@@ -93,6 +102,9 @@ class _SettingsBlockState extends State<SettingsBlock> {
                   _buildVehicleManagementCard(pad, gap, cardRadius, sw),
                   SizedBox(height: gap),
                   _buildPaymentSettingsCard(doc, pad, cardRadius),
+                  SizedBox(height: gap),
+                  // 🔽 NEW: logout card
+                  _buildLogoutCard(pad, cardRadius),
                 ],
               ),
             ),
@@ -105,9 +117,6 @@ class _SettingsBlockState extends State<SettingsBlock> {
   // ---------------- UI SECTIONS ----------------
 
   /// Office Location card:
-  /// - If saved lat/long exists -> show values + "Update Location" button
-  /// - If not -> show "No lat/long saved" + "Add Location" button
-  /// The button navigates to `MapsPageAdmin` to manage the location.
   Widget _buildOfficeLocationCard({
     required DocumentReference doc,
     required double pad,
@@ -205,10 +214,10 @@ class _SettingsBlockState extends State<SettingsBlock> {
     );
   }
 
-  /// Vehicles card with modern header + add button + card list UI
+  /// Vehicles card
   Widget _buildVehicleManagementCard(
       double pad, double gap, double radius, double sw) {
-    final iconBox = (sw * 0.12).clamp(44.0, 64.0); // 12% of width, clamped
+    final iconBox = (sw * 0.12).clamp(44.0, 64.0);
     final iconSize = (iconBox * 0.56).clamp(22.0, 36.0);
 
     return Container(
@@ -228,7 +237,7 @@ class _SettingsBlockState extends State<SettingsBlock> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header Row (icon + title + add button)
+          // Header Row
           Row(
             children: [
               Icon(Icons.directions_car, color: Colors.blue[600], size: 22),
@@ -413,6 +422,67 @@ class _SettingsBlockState extends State<SettingsBlock> {
           ),
         ),
       ]),
+    );
+  }
+
+  // 🔽 NEW: Logout card
+  Widget _buildLogoutCard(double pad, double radius) {
+    return Container(
+      padding: EdgeInsets.all(pad),
+      decoration: BoxDecoration(
+        color: Colors.grey[50],
+        border: Border.all(color: Colors.grey[300]!),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _title('Logout'),
+          SizedBox(height: pad * 0.75),
+          Text(
+            'Sign out from this device.',
+            style: TextStyle(color: Colors.grey[700]),
+          ),
+          SizedBox(height: pad * 0.75),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: const Text('Logout'),
+                    content: const Text('Are you sure you want to logout?'),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text('Cancel'),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _logout();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          foregroundColor: Colors.white,
+                        ),
+                        child: const Text('Logout'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              icon: const Icon(Icons.logout),
+              label: const Text('Logout'),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -606,6 +676,33 @@ class _SettingsBlockState extends State<SettingsBlock> {
         );
       },
     );
+  }
+
+  // ---------------- Logout logic ----------------
+
+  Future<void> _logout() async {
+    try {
+      // 1) stop role/status notifications (set alsoAll: true to silence everything)
+      await unsubscribeRoleStatusTopics(alsoAll: false);
+
+      // 2) clear saved session (userId/role/status in SharedPreferences)
+      await SessionService().clear();
+
+      // 3) Firebase sign out
+      await _auth.signOut();
+
+      // 4) navigate to Login
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (_) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error logging out: $e')),
+      );
+    }
   }
 
   // ---------------- Utils ----------------

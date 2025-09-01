@@ -1,5 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+import 'services/session_service.dart';
+import 'messaging_setup.dart';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
@@ -158,7 +160,10 @@ class _LoginScreenState extends State<LoginScreen>
       }
 
       final data = doc.data();
-      final rawRole = (data?['role'] ?? '').toString().trim().toLowerCase();
+final rawRole = (data?['role'] ?? '').toString().trim().toLowerCase();
+// default to 'active' if you don't store a status
+final rawStatus = (data?['status'] ?? 'active').toString().trim().toLowerCase();
+
 
       final prefs = await SharedPreferences.getInstance();
       if (rememberMe) {
@@ -172,21 +177,37 @@ class _LoginScreenState extends State<LoginScreen>
       if (!mounted) return;
 
       Widget next;
-      switch (rawRole) {
-        case 'student':
-          next = StudentDashboard();
-          break;
-        case 'instructor':
-        case 'intsrtuctor': // handle typo
-          next = const InstructorDashboard();
-          break;
-        case 'admin':
-          next = const AdminDashboard();
-          break;
-        default:
-          _showToast('Unknown role "$rawRole". Contact support.', isError: true);
-          return;
-      }
+switch (rawRole) {
+  case 'student':
+    next = StudentDashboard();
+    break;
+  case 'instructor':
+  case 'intsrtuctor': // handle typo
+    next =  InstructorDashboardPage();
+    break;
+  case 'admin':
+    next = const AdminDashboard();
+    break;
+  default:
+    _showToast('Unknown role "$rawRole". Contact support.', isError: true);
+    return;
+}
+
+// ⭐ Save session + subscribe to FCM topics
+try {
+  await SessionService().save(
+    userId: user.uid,
+    role: rawRole,
+    status: rawStatus,
+  );
+  await subscribeUserSegments(role: rawRole, status: rawStatus);
+} catch (e) {
+  // Non-fatal: continue to dashboard even if this fails
+  debugPrint('Topic/Session error: $e');
+}
+
+
+
 
       await Navigator.of(context).pushReplacement(PageRouteBuilder(
         pageBuilder: (_, __, ___) => next,

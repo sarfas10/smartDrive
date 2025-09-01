@@ -5,6 +5,8 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:razorpay_flutter/razorpay_flutter.dart';
+import 'messaging_setup.dart';          // for unsubscribeRoleStatusTopics()
+import 'services/session_service.dart'; // for clearing saved session
 
 import 'login.dart';            // your login screen
 import 'maps_page_user.dart';   // user map picker screen
@@ -340,13 +342,24 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
   }
 
   Future<void> _logout() async {
-    try {
-      await _auth.signOut();
-      _toLogin();
-    } catch (e) {
-      _showErrorDialog('Error logging out: $e');
-    }
+  try {
+    // 1) Stop receiving role/status notifications on this device
+    //    (set alsoAll: true if you want to unsubscribe from 'all' too)
+    await unsubscribeRoleStatusTopics(alsoAll: false);
+
+    // 2) Clear saved session (userId/role/status in SharedPreferences)
+    await SessionService().clear();
+
+    // 3) Sign out from FirebaseAuth
+    await _auth.signOut();
+
+    // 4) Go to login screen
+    _toLogin();
+  } catch (e) {
+    _showErrorDialog('Error logging out: $e');
   }
+}
+
 
   // ─── Boarding selection navigation ──────────────────────────────────────────
   void _goToBoardingSelection() {

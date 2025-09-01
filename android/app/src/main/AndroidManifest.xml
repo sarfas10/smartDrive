@@ -3,6 +3,8 @@
     <!-- Location perms (ok here, outside <application>) -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <!-- (Recommended for release builds) -->
     <uses-permission android:name="android.permission.INTERNET"/>
 

@@ -1,10 +1,19 @@
+// users_block.dart
+import 'dart:async';
+import 'dart:ui' show FontFeature;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'ui_common.dart';
+
+// 👉 Import your external details pages
+import 'student_details.dart' as details;
+import 'instructor_details.dart' as inst;
+
+// Responsive breakpoint for switching List ↔ Table
+const kTableBreakpoint = 720.0;
 
 class UsersBlock extends StatefulWidget {
   const UsersBlock({super.key});
-  
+
   @override
   State<UsersBlock> createState() => _UsersBlockState();
 }
@@ -13,773 +22,790 @@ class _UsersBlockState extends State<UsersBlock> {
   String _roleFilter = 'all';
   String _statusFilter = 'all';
   final _searchController = TextEditingController();
+  Timer? _debounce;
+  bool _compact = false; // affects table row heights
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _searchController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        _buildFiltersSection(),
-        const Divider(height: 1),
-        Expanded(child: _buildUsersList()),
-      ],
-    );
-  }
+    final width = MediaQuery.sizeOf(context).width;
+    final isTable = width >= kTableBreakpoint;
 
-  Widget _buildFiltersSection() {
-    return Padding(
-      padding: const EdgeInsets.all(16.0),
+    return SafeArea(
+      top: false,
+      bottom: false,
       child: Column(
         children: [
-          // Search Bar
-          TextField(
+          _FiltersBar(
+            roleValue: _roleFilter,
+            statusValue: _statusFilter,
             controller: _searchController,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
-              isDense: true,
-              prefixIcon: const Icon(Icons.search, size: 20),
-              hintText: 'Search users...',
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            ),
+            compact: _compact,
+            onCompactToggle: () => setState(() => _compact = !_compact),
+            onSearchChanged: () {
+              _debounce?.cancel();
+              _debounce = Timer(const Duration(milliseconds: 250), () {
+                if (mounted) setState(() {});
+              });
+            },
+            onReset: () {
+              _searchController.clear();
+              setState(() {
+                _roleFilter = 'all';
+                _statusFilter = 'all';
+              });
+            },
+            onRoleChanged: (v) => setState(() => _roleFilter = v ?? 'all'),
+            onStatusChanged: (v) => setState(() => _statusFilter = v ?? 'all'),
           ),
-          const SizedBox(height: 16),
-          
-          // Filters Row
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            alignment: WrapAlignment.center,
-            children: [
-              // Role Filters
-              _buildFilterChip('All', _roleFilter == 'all', () => _setRoleFilter('all')),
-              _buildFilterChip('Students', _roleFilter == 'student', () => _setRoleFilter('student')),
-              _buildFilterChip('Instructors', _roleFilter == 'instructor', () => _setRoleFilter('instructor')),
-              
-              const SizedBox(width: 8),
-              
-              // Status Filter Dropdown
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                decoration: BoxDecoration(
-                  border: Border.all(color: Colors.grey.shade300),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: _statusFilter,
-                    items: const [
-                      DropdownMenuItem(value: 'all', child: Text('All Status')),
-                      DropdownMenuItem(value: 'pending', child: Text('Pending')),
-                      DropdownMenuItem(value: 'active', child: Text('Active')),
-                      DropdownMenuItem(value: 'blocked', child: Text('Blocked')),
-                    ],
-                    onChanged: (value) => _setStatusFilter(value ?? 'all'),
-                  ),
+          const Divider(height: 1),
+          Expanded(
+            child: _TableTheme(
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _UsersBody(
+                  roleFilter: _roleFilter,
+                  statusFilter: _statusFilter,
+                  searchText: _searchController.text,
+                  compact: _compact,
+                  isTable: isTable,
                 ),
               ),
-            ],
+            ),
           ),
         ],
       ),
     );
   }
+}
 
-  Widget _buildFilterChip(String label, bool selected, VoidCallback onTap) {
-    return FilterChip(
-      label: Text(label),
-      selected: selected,
-      onSelected: (_) => onTap(),
-      selectedColor: Theme.of(context).primaryColor.withOpacity(0.2),
-      checkmarkColor: Theme.of(context).primaryColor,
-    );
+// ──────────────────────────────────────────────────────────────────────────────
+// BODY: streams, filtering, and responsive rendering
+
+class _UsersBody extends StatelessWidget {
+  final String roleFilter;
+  final String statusFilter;
+  final String searchText;
+  final bool compact;
+  final bool isTable;
+
+  const _UsersBody({
+    required this.roleFilter,
+    required this.statusFilter,
+    required this.searchText,
+    required this.compact,
+    required this.isTable,
+  });
+
+  Query _buildQuery() {
+    Query q = FirebaseFirestore.instance.collection('users');
+    if (roleFilter != 'all') q = q.where('role', isEqualTo: roleFilter);
+    if (statusFilter != 'all') q = q.where('status', isEqualTo: statusFilter);
+    if (roleFilter == 'all' && statusFilter == 'all') q = q.orderBy('name');
+    return q;
   }
 
-  Widget _buildUsersList() {
-    final query = _buildFirestoreQuery();
-    
+  List<QueryDocumentSnapshot> _filterDocs(List<QueryDocumentSnapshot> docs) {
+    final s = searchText.trim().toLowerCase();
+    final filtered = docs.where((d) {
+      if (s.isEmpty) return true;
+      final m = d.data() as Map<String, dynamic>;
+      final hay = [
+        m['name'],
+        m['email'],
+        m['phone'],
+        m['role'],
+        m['status'],
+      ].where((x) => x != null).join(' ').toLowerCase();
+      return hay.contains(s);
+    }).toList();
+
+    if (roleFilter != 'all' || statusFilter != 'all') {
+      filtered.sort((a, b) {
+        final an = ((a.data() as Map<String, dynamic>)['name'] ?? '')
+            .toString()
+            .toLowerCase();
+        final bn = ((b.data() as Map<String, dynamic>)['name'] ?? '')
+            .toString()
+            .toLowerCase();
+        return an.compareTo(bn);
+      });
+    }
+    return filtered;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final query = _buildQuery();
+
     return StreamBuilder<QuerySnapshot>(
       stream: query.snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return _buildErrorWidget(snapshot.error.toString());
+          return Center(
+            child: _InfoCard(
+              icon: Icons.error_outline,
+              iconColor: Colors.red,
+              title: 'Error loading users',
+              subtitle: snapshot.error.toString(),
+              ctaText: 'Retry',
+              onTap: () {},
+            ),
+          );
         }
-        
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final filteredUsers = _filterUsers(snapshot.data!.docs);
-        
-        if (filteredUsers.isEmpty) {
-          return _buildEmptyWidget();
+        final allDocs = snapshot.data!.docs;
+        final rowsDocs = _filterDocs(allDocs);
+        final total = allDocs.length;
+        final shown = rowsDocs.length;
+
+        if (rowsDocs.isEmpty) {
+          return _EmptyState(
+            title: 'No users match your filters',
+            subtitle: 'Try clearing the search or changing role/status.',
+            onClear: () {},
+          );
         }
 
-        return FutureBuilder<Map<String, Map<String, dynamic>>>(
-          future: _loadUserProfiles(filteredUsers),
-          builder: (context, profileSnapshot) {
-            final profiles = profileSnapshot.data ?? {};
-            
-            return LayoutBuilder(
-              builder: (context, constraints) {
-                final isSmallScreen = constraints.maxWidth < 700;
-                
-                return isSmallScreen 
-                  ? _buildMobileView(filteredUsers, profiles)
-                  : _buildDesktopView(filteredUsers, profiles);
-              },
-            );
-          },
+        // Show count
+        final header = Align(
+          alignment: Alignment.centerRight,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+            child: Text(
+              '$shown of $total users',
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+            ),
+          ),
+        );
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            header,
+            const SizedBox(height: 4),
+            Expanded(
+              child: isTable
+                  ? _UsersDataTable(docs: rowsDocs, compact: compact)
+                  : _UsersListMobile(docs: rowsDocs),
+            ),
+          ],
         );
       },
     );
   }
+}
 
-  Widget _buildMobileView(List<QueryDocumentSnapshot> users, Map<String, Map<String, dynamic>> profiles) {
-    return ListView.separated(
-      padding: const EdgeInsets.all(16),
-      itemCount: users.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 12),
-      itemBuilder: (_, index) => _UserCard(
-        user: users[index],
-        profile: profiles[(users[index].data() as Map)['uid']] ?? {},
-        onAction: (action) => _handleUserAction(action, users[index]),
-      ),
-    );
-  }
+// ──────────────────────────────────────────────────────────────────────────────
+/* DESKTOP / TABLET: DataTable */
 
-  Widget _buildDesktopView(List<QueryDocumentSnapshot> users, Map<String, Map<String, dynamic>> profiles) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: DataTable(
-        columns: const [
-          DataColumn(label: Text('User')),
-          DataColumn(label: Text('Contact')),
-          DataColumn(label: Text('Role')),
-          DataColumn(label: Text('Status')),
-          DataColumn(label: Text('Location')),
-          DataColumn(label: Text('Actions')),
-        ],
-        rows: users.map((doc) {
-          final userData = doc.data() as Map<String, dynamic>;
-          final profile = profiles[userData['uid']] ?? {};
-          
-          return DataRow(cells: [
-            DataCell(_buildUserCell(userData, profile)),
-            DataCell(_buildContactCell(userData)),
-            DataCell(RoleBadge(role: userData['role'] ?? '')),
-            DataCell(_buildStatusBadge(userData['status'] ?? 'active')),
-            DataCell(Text(profile['zipcode']?.toString() ?? '-')),
-            DataCell(_buildActionButtons(doc)),
-          ]);
-        }).toList(),
-      ),
-    );
-  }
+class _UsersDataTable extends StatelessWidget {
+  final List<QueryDocumentSnapshot> docs;
+  final bool compact;
+  const _UsersDataTable({required this.docs, required this.compact});
 
-  Widget _buildUserCell(Map<String, dynamic> userData, Map<String, dynamic> profile) {
-    final name = userData['name']?.toString() ?? 'Unknown';
-    final photoUrl = profile['photo_url']?.toString() ?? '';
-    
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        CircleAvatar(
-          radius: 16,
-          backgroundImage: photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
-          child: photoUrl.isEmpty ? Text(name.substring(0, 1).toUpperCase()) : null,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Text(name, style: const TextStyle(fontWeight: FontWeight.w600)),
-              if (userData['uid']?.toString().isNotEmpty ?? false)
-                Text(
-                  userData['uid'].toString(),
-                  style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+  @override
+  Widget build(BuildContext context) {
+    return Scrollbar(
+      thumbVisibility: true,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.all(16),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minWidth: 760),
+          child: Scrollbar(
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              child: Card(
+                margin: EdgeInsets.zero,
+                elevation: 0,
+                clipBehavior: Clip.antiAlias,
+                child: DataTable(
+                  showCheckboxColumn: false,
+                  dividerThickness: 0.6,
+                  columnSpacing: 28,
+                  headingRowHeight: 44,
+                  dataRowMinHeight: compact ? 40 : 52,
+                  dataRowMaxHeight: compact ? 52 : 68,
+                  columns: const [
+                    DataColumn(label: _HeaderLabel('Name')),
+                    DataColumn(label: _HeaderLabel('Email')),
+                    DataColumn(label: _HeaderLabel('Role')),
+                    DataColumn(label: _HeaderLabel('Status')),
+                  ],
+                  rows: docs.asMap().entries.map((entry) {
+                    final i = entry.key;
+                    final doc = entry.value;
+                    final m = doc.data() as Map<String, dynamic>;
+                    final name = (m['name'] ?? 'Unknown').toString();
+                    final email = (m['email'] ?? '-').toString();
+                    final role = (m['role'] ?? '-').toString();
+                    final status = (m['status'] ?? 'active').toString();
+                    final uid = (m['uid']?.toString().isNotEmpty ?? false)
+                        ? m['uid'].toString()
+                        : doc.id;
+
+                    return DataRow(
+                      color: MaterialStateProperty.resolveWith((states) {
+                        if (states.contains(MaterialState.hovered)) {
+                          return Theme.of(context).hoverColor.withOpacity(0.35);
+                        }
+                        return i.isEven
+                            ? Theme.of(context)
+                                .colorScheme
+                                .surface
+                                .withOpacity(0.0)
+                            : Theme.of(context)
+                                .colorScheme
+                                .surfaceVariant
+                                .withOpacity(0.14);
+                      }),
+                      onSelectChanged: (_) => _openDetails(context, role, uid),
+                      cells: [
+                        DataCell(
+                          MouseRegion(
+                            cursor: SystemMouseCursors.click,
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 12,
+                                  child: Text(
+                                    name.isNotEmpty
+                                        ? name.substring(0, 1).toUpperCase()
+                                        : '?',
+                                    style: const TextStyle(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 10),
+                                Flexible(
+                                  child: Text(
+                                    name,
+                                    overflow: TextOverflow.ellipsis,
+                                    maxLines: 1,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        DataCell(
+                          Tooltip(
+                            message: email,
+                            child: Text(
+                              email,
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                              style: const TextStyle(
+                                fontFeatures: [FontFeature.tabularFigures()],
+                              ),
+                            ),
+                          ),
+                        ),
+                        DataCell(_RoleChip(role: role)),
+                        DataCell(_StatusChip(status: status)),
+                      ],
+                    );
+                  }).toList(),
                 ),
-            ],
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildContactCell(Map<String, dynamic> userData) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(userData['email']?.toString() ?? '-', 
-             style: const TextStyle(fontSize: 12)),
-        Text(userData['phone']?.toString() ?? '-', 
-             style: const TextStyle(fontSize: 12)),
-      ],
-    );
-  }
-
-  Widget _buildStatusBadge(String status) {
-    Color color;
-    String displayText = status.substring(0, 1).toUpperCase() + status.substring(1);
-    
-    switch (status.toLowerCase()) {
-      case 'active':
-        color = Colors.green;
-        break;
-      case 'pending':
-        color = Colors.orange;
-        break;
-      case 'blocked':
-        color = Colors.red;
-        break;
-      default:
-        color = Colors.grey;
-    }
-    
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
-      ),
-      child: Text(
-        displayText,
-        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w500),
-      ),
-    );
-  }
-
-  Widget _buildActionButtons(QueryDocumentSnapshot doc) {
-    final userData = doc.data() as Map<String, dynamic>;
-    final status = userData['status']?.toString() ?? 'active';
-    final isInstructor = userData['role'] == 'instructor';
-    
-    return Wrap(
-      spacing: 4,
-      children: [
-        _buildActionButton('View', Icons.visibility, 
-                          () => _handleUserAction('view', doc)),
-        if (isInstructor)
-          _buildActionButton('Pay', Icons.payment, 
-                            () => _handleUserAction('pay', doc)),
-        _buildActionButton(
-          status == 'blocked' ? 'Unblock' : 'Block',
-          status == 'blocked' ? Icons.lock_open : Icons.lock,
-          () => _handleUserAction('toggle_block', doc),
-          color: status == 'blocked' ? Colors.green : Colors.orange,
-        ),
-        _buildActionButton('Delete', Icons.delete, 
-                          () => _handleUserAction('delete', doc), 
-                          color: Colors.red),
-      ],
-    );
-  }
-
-  Widget _buildActionButton(String label, IconData icon, VoidCallback onPressed, {Color? color}) {
-    return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 16),
-      label: Text(label, style: const TextStyle(fontSize: 12)),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: color != null ? Colors.white : null,
-        minimumSize: const Size(0, 32),
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-      ),
-    );
-  }
-
-  Widget _buildErrorWidget(String error) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.error_outline, size: 48, color: Colors.red),
-          const SizedBox(height: 16),
-          Text('Error loading users', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Text(error, textAlign: TextAlign.center),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildEmptyWidget() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.people_outline, size: 64, color: Colors.grey.shade400),
-          const SizedBox(height: 16),
-          Text('No users found', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          const Text('Try adjusting your search or filters'),
-        ],
-      ),
-    );
-  }
-
-  // Helper Methods
-  Query _buildFirestoreQuery() {
-    Query query = FirebaseFirestore.instance.collection('users');
-    
-    if (_roleFilter != 'all') {
-      query = query.where('role', isEqualTo: _roleFilter);
-    }
-    
-    if (_statusFilter != 'all') {
-      query = query.where('status', isEqualTo: _statusFilter);
-    }
-    
-    // Only add orderBy when no filters to avoid composite index issues
-    if (_roleFilter == 'all' && _statusFilter == 'all') {
-      query = query.orderBy('name');
-    }
-    
-    return query;
-  }
-
-  List<QueryDocumentSnapshot> _filterUsers(List<QueryDocumentSnapshot> docs) {
-    final searchQuery = _searchController.text.trim().toLowerCase();
-    
-    var filtered = docs.where((doc) {
-      if (searchQuery.isEmpty) return true;
-      
-      final data = doc.data() as Map<String, dynamic>;
-      final searchableText = [
-        data['name'],
-        data['email'], 
-        data['phone']
-      ].where((field) => field != null).join(' ').toLowerCase();
-      
-      return searchableText.contains(searchQuery);
-    }).toList();
-
-    // Sort client-side when filters are applied
-    if (_roleFilter != 'all' || _statusFilter != 'all') {
-      filtered.sort((a, b) {
-        final aData = a.data() as Map<String, dynamic>;
-        final bData = b.data() as Map<String, dynamic>;
-        final aName = aData['name']?.toString().toLowerCase() ?? '';
-        final bName = bData['name']?.toString().toLowerCase() ?? '';
-        return aName.compareTo(bName);
-      });
-    }
-
-    return filtered;
-  }
-
-  Future<Map<String, Map<String, dynamic>>> _loadUserProfiles(List<QueryDocumentSnapshot> users) async {
-    final uids = users
-        .map((doc) => (doc.data() as Map)['uid']?.toString())
-        .where((uid) => uid != null && uid.isNotEmpty)
-        .cast<String>()
-        .toList();
-
-    if (uids.isEmpty) return {};
-
-    final Map<String, Map<String, dynamic>> profiles = {};
-    
-    // Process in chunks of 10 (Firestore whereIn limit)
-    for (int i = 0; i < uids.length; i += 10) {
-      final chunk = uids.sublist(i, (i + 10).clamp(0, uids.length));
-      
-      final snapshot = await FirebaseFirestore.instance
-          .collection('user_profiles')
-          .where('uid', whereIn: chunk)
-          .get();
-      
-      for (final doc in snapshot.docs) {
-        final data = doc.data();
-        final uid = data['uid']?.toString();
-        if (uid != null && uid.isNotEmpty) {
-          profiles[uid] = data;
-        }
-      }
-    }
-    
-    return profiles;
-  }
-
-  void _setRoleFilter(String role) {
-    setState(() => _roleFilter = role);
-  }
-
-  void _setStatusFilter(String status) {
-    setState(() => _statusFilter = status);
-  }
-
-  Future<void> _handleUserAction(String action, QueryDocumentSnapshot doc) async {
-    final userData = doc.data() as Map<String, dynamic>;
-    
-    switch (action) {
-      case 'view':
-        await _showUserProfile(userData);
-        break;
-      case 'pay':
-        await _showPaySalaryDialog(doc.id, userData);
-        break;
-      case 'toggle_block':
-        await _toggleUserStatus(doc.id, userData);
-        break;
-      case 'delete':
-        await _deleteUser(doc.id);
-        break;
-    }
-  }
-
-  Future<void> _showUserProfile(Map<String, dynamic> userData) async {
-    // Load user profile
-    final uid = userData['uid']?.toString();
-    Map<String, dynamic> profile = {};
-    
-    if (uid != null && uid.isNotEmpty) {
-      final profileDoc = await FirebaseFirestore.instance
-          .collection('user_profiles')
-          .where('uid', isEqualTo: uid)
-          .limit(1)
-          .get();
-      
-      if (profileDoc.docs.isNotEmpty) {
-        profile = profileDoc.docs.first.data();
-      }
-    }
-
-    if (!mounted) return;
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(userData['name']?.toString() ?? 'User Profile'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (profile['photo_url']?.toString().isNotEmpty ?? false)
-                CircleAvatar(
-                  radius: 40,
-                  backgroundImage: NetworkImage(profile['photo_url']),
-                ),
-              const SizedBox(height: 16),
-              _buildProfileField('Name', userData['name']),
-              _buildProfileField('Email', userData['email']),
-              _buildProfileField('Phone', userData['phone']),
-              _buildProfileField('Role', userData['role']),
-              _buildProfileField('Status', userData['status']),
-              const Divider(),
-              _buildProfileField('Date of Birth', profile['dob']),
-              _buildProfileField('Address', profile['address_line1']),
-              _buildProfileField('Address 2', profile['address_line2']),
-              _buildProfileField('Zipcode', profile['zipcode']),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Close'),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildProfileField(String label, dynamic value) {
-    final displayValue = value?.toString().isNotEmpty == true ? value.toString() : '-';
-    
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          SizedBox(
-            width: 100,
-            child: Text(
-              '$label:',
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-          Expanded(child: Text(displayValue)),
-        ],
-      ),
-    );
-  }
-
-  Future<void> _showPaySalaryDialog(String instructorId, Map<String, dynamic> instructor) async {
-    final amountController = TextEditingController();
-    final noteController = TextEditingController();
-
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Pay Salary - ${instructor['name'] ?? 'Instructor'}'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            TextField(
-              controller: amountController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                labelText: 'Amount (₹)',
-                border: OutlineInputBorder(),
               ),
             ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: noteController,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Note (optional)',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
+          ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final amount = double.tryParse(amountController.text.trim()) ?? 0;
-              
-              if (amount <= 0) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please enter a valid amount')),
-                );
-                return;
-              }
-
-              await FirebaseFirestore.instance.collection('payouts').add({
-                'instructor_id': instructorId,
-                'instructor_name': instructor['name'],
-                'amount': amount,
-                'note': noteController.text.trim(),
-                'created_at': FieldValue.serverTimestamp(),
-                'status': 'paid',
-              });
-
-              if (mounted) {
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Salary payment recorded successfully')),
-                );
-              }
-            },
-            child: const Text('Pay'),
-          ),
-        ],
       ),
     );
-  }
-
-  Future<void> _toggleUserStatus(String userId, Map<String, dynamic> userData) async {
-    final currentStatus = userData['status']?.toString() ?? 'active';
-    final newStatus = currentStatus == 'blocked' ? 'active' : 'blocked';
-    
-    try {
-      await FirebaseFirestore.instance.collection('users').doc(userId).update({
-        'status': newStatus,
-        'updated_at': FieldValue.serverTimestamp(),
-      });
-      
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('User ${newStatus == 'blocked' ? 'blocked' : 'unblocked'} successfully')),
-        );
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error updating user status: $e')),
-        );
-      }
-    }
-  }
-
-  Future<void> _deleteUser(String userId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Delete User'),
-        content: const Text('Are you sure you want to permanently delete this user? This action cannot be undone.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-            child: const Text('Delete', style: TextStyle(color: Colors.white)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      try {
-        await FirebaseFirestore.instance.collection('users').doc(userId).delete();
-        
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('User deleted successfully')),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error deleting user: $e')),
-          );
-        }
-      }
-    }
   }
 }
 
-// Simplified User Card for Mobile View
-class _UserCard extends StatelessWidget {
-  final QueryDocumentSnapshot user;
-  final Map<String, dynamic> profile;
-  final Function(String) onAction;
+// ──────────────────────────────────────────────────────────────────────────────
+/* MOBILE: List view with tiles */
 
-  const _UserCard({
-    required this.user,
-    required this.profile,
-    required this.onAction,
+class _UsersListMobile extends StatelessWidget {
+  final List<QueryDocumentSnapshot> docs;
+  const _UsersListMobile({required this.docs});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListView.separated(
+      padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+      itemCount: docs.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (context, i) {
+        final doc = docs[i];
+        final m = doc.data() as Map<String, dynamic>;
+        final name = (m['name'] ?? 'Unknown').toString();
+        final email = (m['email'] ?? '-').toString();
+        final role = (m['role'] ?? '-').toString();
+        final status = (m['status'] ?? 'active').toString();
+        final uid = (m['uid']?.toString().isNotEmpty ?? false)
+            ? m['uid'].toString()
+            : doc.id;
+
+        return Card(
+          elevation: 0,
+          child: ListTile(
+            onTap: () => _openDetails(context, role, uid),
+            leading: CircleAvatar(
+              child: Text(
+                name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?',
+              ),
+            ),
+            title: Text(
+              name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            subtitle: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    email,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontFeatures: [FontFeature.tabularFigures()],
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Row(
+                    children: [
+                      _RoleChip(role: role),
+                      const SizedBox(width: 8),
+                      _StatusChip(status: status),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            trailing: const Icon(Icons.chevron_right),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Shared navigation helper → pushes your EXTERNAL details pages
+
+void _openDetails(BuildContext context, String role, String uid) {
+  // Accept a few common aliases just in case.
+  final r = (role).toLowerCase().trim();
+  final isInstructor =
+      r == 'instructor' || r == 'teacher' || r == 'tutor' || r == 'faculty';
+
+  Navigator.of(context).push(
+    PageRouteBuilder(
+      pageBuilder: (_, __, ___) => isInstructor
+          ? const inst.InstructorDetailsPage()
+          : const details.StudentDetailsPage(),
+      // Both pages should read args via ModalRoute.of(context)!.settings.arguments
+      settings: RouteSettings(arguments: {'uid': uid}),
+      transitionsBuilder: (_, anim, __, child) {
+        final slide =
+            Tween<Offset>(begin: const Offset(0, 0.02), end: Offset.zero).animate(anim);
+        return FadeTransition(
+          opacity: anim,
+          child: SlideTransition(position: slide, child: child),
+        );
+      },
+    ),
+  );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Filters bar (overflow-proof & mobile-optimized)
+
+class _FiltersBar extends StatelessWidget {
+  final String roleValue;
+  final String statusValue;
+  final TextEditingController controller;
+  final bool compact;
+
+  final VoidCallback onCompactToggle;
+  final VoidCallback onSearchChanged;
+  final VoidCallback onReset;
+  final ValueChanged<String?> onRoleChanged;
+  final ValueChanged<String?> onStatusChanged;
+
+  const _FiltersBar({
+    required this.roleValue,
+    required this.statusValue,
+    required this.controller,
+    required this.compact,
+    required this.onCompactToggle,
+    required this.onSearchChanged,
+    required this.onReset,
+    required this.onRoleChanged,
+    required this.onStatusChanged,
+    super.key,
   });
 
   @override
   Widget build(BuildContext context) {
-    final userData = user.data() as Map<String, dynamic>;
-    final status = userData['status']?.toString() ?? 'active';
-    final isInstructor = userData['role'] == 'instructor';
-    final photoUrl = profile['photo_url']?.toString() ?? '';
-    final name = userData['name']?.toString() ?? 'Unknown';
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final width = MediaQuery.sizeOf(context).width;
+    final isUltraNarrow = width < 420;   // phones portrait
+    final isNarrow = width < 560;        // small devices
 
-    return Card(
-      elevation: 2,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                CircleAvatar(
-                  radius: 24,
-                  backgroundImage: photoUrl.isNotEmpty ? NetworkImage(photoUrl) : null,
-                  child: photoUrl.isEmpty ? Text(name.substring(0, 1).toUpperCase()) : null,
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        name,
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
-                      ),
-                      Text(
-                        userData['email']?.toString() ?? '-',
-                        style: TextStyle(color: Colors.grey.shade600),
-                      ),
-                      if (userData['phone']?.toString().isNotEmpty ?? false)
-                        Text(
-                          userData['phone'].toString(),
-                          style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
-                        ),
-                    ],
+    return Container(
+      color: isDark
+          ? theme.colorScheme.surface
+          : theme.colorScheme.surfaceVariant.withOpacity(0.25),
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Search + actions
+          Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: controller,
+                  onChanged: (_) => onSearchChanged(),
+                  decoration: InputDecoration(
+                    isDense: true,
+                    prefixIcon: const Icon(Icons.search, size: 20),
+                    hintText: 'Search by name, email, phone…',
+                    suffixIcon: controller.text.isEmpty
+                        ? null
+                        : IconButton(
+                            tooltip: 'Clear',
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              controller.clear();
+                              onSearchChanged();
+                            },
+                          ),
+                    border:
+                        OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   ),
                 ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    RoleBadge(role: userData['role'] ?? ''),
-                    const SizedBox(height: 4),
-                    _buildStatusBadge(status),
+              ),
+              const SizedBox(width: 8),
+              Tooltip(
+                message: compact ? 'Comfortable rows' : 'Compact rows',
+                child: IconButton(
+                  onPressed: onCompactToggle,
+                  icon: Icon(compact
+                      ? Icons.format_line_spacing
+                      : Icons.density_medium),
+                ),
+              ),
+              if (!isNarrow) ...[
+                const SizedBox(width: 4),
+                Tooltip(
+                  message: 'Reset filters',
+                  child: TextButton.icon(
+                    onPressed: onReset,
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Reset'),
+                  ),
+                ),
+              ],
+            ],
+          ),
+
+          const SizedBox(height: 12),
+
+          // Wrap lets items flow to next line on narrow screens
+          Wrap(
+            spacing: 12,
+            runSpacing: 10,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: isUltraNarrow ? width - 32 : 220,
+                  maxWidth: isNarrow ? width - 32 : 360,
+                ),
+                child: DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  value: roleValue,
+                  decoration: InputDecoration(
+                    labelText: 'Role',
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    border:
+                        OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'all', child: Text('All')),
+                    DropdownMenuItem(value: 'student', child: Text('Students')),
+                    DropdownMenuItem(value: 'instructor', child: Text('Instructors')),
                   ],
+                  onChanged: onRoleChanged,
                 ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _buildActionButton('View', () => onAction('view')),
-                if (isInstructor)
-                  _buildActionButton('Pay Salary', () => onAction('pay')),
-                _buildActionButton(
-                  status == 'blocked' ? 'Unblock' : 'Block',
-                  () => onAction('toggle_block'),
-                  color: status == 'blocked' ? Colors.green : Colors.orange,
+              ),
+              ConstrainedBox(
+                constraints: BoxConstraints(
+                  minWidth: isUltraNarrow ? width - 32 : 220,
+                  maxWidth: isNarrow ? width - 32 : 360,
                 ),
-                _buildActionButton(
-                  'Delete',
-                  () => onAction('delete'),
-                  color: Colors.red,
+                child: DropdownButtonFormField<String>(
+                  isExpanded: true,
+                  value: statusValue,
+                  decoration: InputDecoration(
+                    labelText: 'Status',
+                    isDense: true,
+                    contentPadding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    border:
+                        OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  items: const [
+                    DropdownMenuItem(value: 'all', child: Text('All')),
+                    DropdownMenuItem(value: 'active', child: Text('Active')),
+                    DropdownMenuItem(value: 'pending', child: Text('Pending')),
+                    DropdownMenuItem(value: 'blocked', child: Text('Blocked')),
+                  ],
+                  onChanged: onStatusChanged,
                 ),
-              ],
-            ),
-          ],
+              ),
+              const _StatusLegend(),
+              if (isNarrow)
+                OutlinedButton.icon(
+                  onPressed: onReset,
+                  icon: const Icon(Icons.refresh),
+                  label: const Text('Reset'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Small UI helpers
+
+class _TableTheme extends StatelessWidget {
+  final Widget child;
+  const _TableTheme({required this.child});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DataTableTheme(
+      data: DataTableThemeData(
+        headingTextStyle: theme.textTheme.titleSmall?.copyWith(
+          fontWeight: FontWeight.w700,
+          color: theme.colorScheme.onSurface,
         ),
+        headingRowColor:
+            MaterialStatePropertyAll(theme.colorScheme.surfaceVariant.withOpacity(0.4)),
+        dataTextStyle: theme.textTheme.bodyMedium,
+        horizontalMargin: 16,
+      ),
+      child: child,
+    );
+  }
+}
+
+class _HeaderLabel extends StatelessWidget {
+  final String text;
+  const _HeaderLabel(this.text);
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        Text(text),
+        const SizedBox(width: 6),
+        Icon(Icons.swap_vert_rounded, size: 16, color: Colors.grey.shade500),
+      ],
+    );
+  }
+}
+
+class _StatusLegend extends StatelessWidget {
+  const _StatusLegend({super.key});
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 6,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: const [
+        _LegendDot(color: Colors.green, label: 'Active'),
+        _LegendDot(color: Colors.orange, label: 'Pending'),
+        _LegendDot(color: Colors.red, label: 'Blocked'),
+      ],
+    );
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  final Color color;
+  final String label;
+  const _LegendDot({required this.color, required this.label});
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 6),
+        Text(label, style: TextStyle(color: Colors.grey.shade700)),
+      ],
+    );
+  }
+}
+
+class _InfoCard extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String? subtitle;
+  final String? ctaText;
+  final VoidCallback? onTap;
+
+  const _InfoCard({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    this.subtitle,
+    this.ctaText,
+    this.onTap,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      margin: const EdgeInsets.all(16),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          Icon(icon, size: 42, color: iconColor),
+          const SizedBox(height: 12),
+          Text(title, style: Theme.of(context).textTheme.titleMedium),
+          if (subtitle != null) ...[
+            const SizedBox(height: 6),
+            Text(subtitle!, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade700)),
+          ],
+          if (ctaText != null && onTap != null) ...[
+            const SizedBox(height: 12),
+            OutlinedButton(onPressed: onTap, child: Text(ctaText!)),
+          ],
+        ]),
       ),
     );
   }
+}
 
-  Widget _buildStatusBadge(String status) {
-    Color color;
-    switch (status.toLowerCase()) {
-      case 'active':
-        color = Colors.green;
-        break;
-      case 'pending':
-        color = Colors.orange;
-        break;
-      case 'blocked':
-        color = Colors.red;
-        break;
-      default:
-        color = Colors.grey;
-    }
-    
+class _EmptyState extends StatelessWidget {
+  final String title;
+  final String subtitle;
+  final VoidCallback onClear;
+
+  const _EmptyState({
+    required this.title,
+    required this.subtitle,
+    required this.onClear,
+    super.key,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: _InfoCard(
+        icon: Icons.inbox_outlined,
+        iconColor: Colors.grey.shade500,
+        title: title,
+        subtitle: subtitle,
+        ctaText: 'Clear filters',
+        onTap: onClear,
+      ),
+    );
+  }
+}
+
+class _RoleChip extends StatelessWidget {
+  final String role;
+  const _RoleChip({required this.role});
+
+  @override
+  Widget build(BuildContext context) {
+    final r = role.toLowerCase();
+    final isStudent = r == 'student';
+    final color = isStudent ? Colors.blue : Colors.deepPurple;
+
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.1),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.3)),
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.25)),
       ),
-      child: Text(
-        status.substring(0, 1).toUpperCase() + status.substring(1),
-        style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w500),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(isStudent ? Icons.school : Icons.workspace_premium, size: 14, color: color),
+          const SizedBox(width: 6),
+          Text(
+            r.isEmpty ? '-' : r[0].toUpperCase() + r.substring(1),
+            style: TextStyle(fontSize: 12, color: color, fontWeight: FontWeight.w600),
+          ),
+        ],
       ),
     );
   }
+}
 
-  Widget _buildActionButton(String label, VoidCallback onPressed, {Color? color}) {
-    return ElevatedButton(
-      onPressed: onPressed,
-      style: ElevatedButton.styleFrom(
-        backgroundColor: color,
-        foregroundColor: color != null ? Colors.white : null,
-        minimumSize: const Size(0, 32),
-        padding: const EdgeInsets.symmetric(horizontal: 12),
+class _StatusChip extends StatelessWidget {
+  final String status;
+  const _StatusChip({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final s = status.toLowerCase();
+    Color c;
+    IconData icon;
+    switch (s) {
+      case 'active':
+        c = Colors.green; icon = Icons.check_circle; break;
+      case 'pending':
+        c = Colors.orange; icon = Icons.hourglass_bottom; break;
+      case 'blocked':
+        c = Colors.red; icon = Icons.block; break;
+      default:
+        c = Colors.grey; icon = Icons.help_outline;
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: c.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: c.withOpacity(0.25)),
       ),
-      child: Text(label, style: const TextStyle(fontSize: 12)),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: c),
+          const SizedBox(width: 6),
+          Text(
+            s.isEmpty ? '-' : s[0].toUpperCase() + s.substring(1),
+            style: TextStyle(fontSize: 12, color: c, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
     );
   }
 }
