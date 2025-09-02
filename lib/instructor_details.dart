@@ -35,7 +35,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
   final _searchCtrl = TextEditingController();
   String _q = '';
   bool _busyDelete = false;
-  bool _busyApprove = false; // NEW: busy flag for approve
+  bool _busyApprove = false; // approve busy
+  bool _busyBlock = false;   // NEW: block busy
 
   // Cloudinary (same as my_uploads.dart)
   static const String _cloudName = 'dxeunc4vd';
@@ -321,6 +322,56 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
     }
   }
 
+  // NEW: Block an active instructor
+  Future<void> _blockUser() async {
+    if (_uid == null || _busyBlock) return;
+
+    final confirm = await showDialog<bool>(
+          context: context,
+          builder: (ctx) => AlertDialog(
+            title: const Text('Block instructor?'),
+            content: const Text(
+              'This will set the instructor’s status to BLOCKED and restrict access. '
+              'You can unblock later from the user management screen.',
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Block'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirm) return;
+
+    try {
+      setState(() => _busyBlock = true);
+      await _db.collection('users').doc(_uid!).update({'status': 'blocked'});
+      setState(() => _status = 'blocked');
+
+      await _sendUserNotification(
+        targetUid: _uid!,
+        title: 'Account Blocked',
+        message: 'Your instructor account has been blocked. Please contact support.',
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Instructor has been blocked')),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Failed to block user: $e')));
+      }
+    } finally {
+      if (mounted) setState(() => _busyBlock = false);
+    }
+  }
+
   // ───────────────────────────── UI ─────────────────────────────
 
   @override
@@ -354,7 +405,7 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
                           ),
                           const SizedBox(height: 12),
 
-                          // NEW: pending banner + Approve User button
+                          // Pending → Approve
                           if (_status.toLowerCase() == 'pending')
                             Container(
                               padding: const EdgeInsets.all(14),
@@ -381,6 +432,43 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
                                     label: Text(_busyApprove ? 'Approving…' : 'Approve User'),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: const Color(0xFF2E7D32),
+                                      foregroundColor: Colors.white,
+                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+
+                          // ACTIVE → Block (NEW)
+                          if (_status.toLowerCase() == 'active')
+                            Container(
+                              margin: const EdgeInsets.only(top: 0),
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: Colors.red.shade50,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: Colors.red.shade200),
+                              ),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.verified_user_outlined, color: Color(0xFFB71C1C)),
+                                  const SizedBox(width: 10),
+                                  const Expanded(
+                                    child: Text('This instructor is active. You can block access if needed.'),
+                                  ),
+                                  ElevatedButton.icon(
+                                    onPressed: _busyBlock ? null : _blockUser,
+                                    icon: _busyBlock
+                                        ? const SizedBox(
+                                            width: 16, height: 16,
+                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                          )
+                                        : const Icon(Icons.block),
+                                    label: Text(_busyBlock ? 'Blocking…' : 'Block User'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: const Color(0xFFD32F2F),
                                       foregroundColor: Colors.white,
                                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),

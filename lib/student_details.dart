@@ -43,7 +43,8 @@ class StudentDetailsPage extends StatelessWidget {
   }
 
   static String _shortId(String uid) {
-    final head = uid.length >= 6 ? uid.substring(0, 6).toUpperCase() : uid.toUpperCase();
+    final head =
+        uid.length >= 6 ? uid.substring(0, 6).toUpperCase() : uid.toUpperCase();
     return 'STU$head';
   }
 }
@@ -71,7 +72,11 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
   // ── Streams ────────────────────────────────────────────────────────────────
   Stream<DocumentSnapshot<Map<String, dynamic>>> _userDocStream() async* {
     final fs = FirebaseFirestore.instance;
-    final q = await fs.collection('users').where('uid', isEqualTo: widget.uid).limit(1).get();
+    final q = await fs
+        .collection('users')
+        .where('uid', isEqualTo: widget.uid)
+        .limit(1)
+        .get();
     if (q.docs.isNotEmpty) {
       _userDocId = q.docs.first.id;
       yield* fs.collection('users').doc(_userDocId).snapshots();
@@ -129,7 +134,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     await FirebaseFirestore.instance.collection('notifications').add({
       'title': title,
       'message': message,
-      'segments': [segment],      // optional legacy segment
+      'segments': [segment], // optional legacy segment
       'target_uids': [targetUid], // direct target
       'action_url': actionUrl,
       'created_at': FieldValue.serverTimestamp(),
@@ -142,7 +147,11 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     final fs = FirebaseFirestore.instance;
     final batch = fs.batch();
     batch.update(fs.collection('users').doc(_userDocId), {'status': 'active'});
-    final prof = await fs.collection('user_profiles').where('uid', isEqualTo: widget.uid).limit(1).get();
+    final prof = await fs
+        .collection('user_profiles')
+        .where('uid', isEqualTo: widget.uid)
+        .limit(1)
+        .get();
     if (prof.docs.isNotEmpty) {
       batch.update(prof.docs.first.reference, {
         'onboarding_status': 'kyc_approved',
@@ -159,7 +168,8 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     );
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('KYC approved')));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('KYC approved')));
   }
 
   Future<void> _rejectKyc() async {
@@ -167,7 +177,11 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     final fs = FirebaseFirestore.instance;
     final batch = fs.batch();
     batch.update(fs.collection('users').doc(_userDocId), {'status': 'pending'});
-    final prof = await fs.collection('user_profiles').where('uid', isEqualTo: widget.uid).limit(1).get();
+    final prof = await fs
+        .collection('user_profiles')
+        .where('uid', isEqualTo: widget.uid)
+        .limit(1)
+        .get();
     if (prof.docs.isNotEmpty) {
       batch.update(prof.docs.first.reference, {
         'onboarding_status': 'kyc_rejected',
@@ -184,7 +198,37 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     );
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('KYC rejected')));
+    ScaffoldMessenger.of(context)
+        .showSnackBar(const SnackBar(content: Text('KYC rejected')));
+  }
+
+  // NEW: Block user when status is active
+  Future<void> _blockUser() async {
+    if (_userDocId == null) return;
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_userDocId)
+          .update({'status': 'blocked'});
+
+      // Optional: notify the user about blocking
+      await _sendUserNotification(
+        targetUid: widget.uid,
+        title: 'Account Blocked',
+        message:
+            'Your account has been blocked by the admin. Please contact support for assistance.',
+      );
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Student has been blocked')),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Failed to block user: $e')),
+      );
+    }
   }
 
   // ── UI ─────────────────────────────────────────────────────────────────────
@@ -210,6 +254,8 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
             final status = (u['status'] ?? 'active').toString();
             final kyc = (p['onboarding_status'] ?? 'pending').toString();
 
+            final isActive = status.toLowerCase() == 'active';
+
             final dobStr = formatTimestampDate(p['dob']);
             final address1 = (p['address_line1'] ?? '-').toString();
             final address2 = (p['address_line2'] ?? '').toString();
@@ -227,7 +273,8 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                     if (docsSnap.hasError) {
                       return Padding(
                         padding: const EdgeInsets.all(16),
-                        child: _emptyRow(context, 'Could not load documents. ${docsSnap.error}'),
+                        child: _emptyRow(
+                            context, 'Could not load documents. ${docsSnap.error}'),
                       );
                     }
 
@@ -260,11 +307,16 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                   children: [
                                     CircleAvatar(
                                       radius: 28,
-                                      backgroundImage: photo.isNotEmpty ? NetworkImage(photo) : null,
+                                      backgroundImage:
+                                          photo.isNotEmpty ? NetworkImage(photo) : null,
                                       child: photo.isEmpty
                                           ? Text(
-                                              name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?',
-                                              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+                                              name.isNotEmpty
+                                                  ? name.substring(0, 1).toUpperCase()
+                                                  : '?',
+                                              style: const TextStyle(
+                                                  fontSize: 20,
+                                                  fontWeight: FontWeight.w600),
                                             )
                                           : null,
                                     ),
@@ -275,7 +327,10 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                         children: [
                                           Text(
                                             name,
-                                            style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .titleMedium
+                                                ?.copyWith(
                                                   color: cs.onSurface,
                                                   fontWeight: FontWeight.w700,
                                                 ),
@@ -283,7 +338,10 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                           const SizedBox(height: 2),
                                           Text(
                                             'Joined: $joined',
-                                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodySmall
+                                                ?.copyWith(
                                                   color: cs.onSurfaceVariant,
                                                 ),
                                           ),
@@ -291,17 +349,25 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                           Row(
                                             children: [
                                               Text('Status:',
-                                                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                                  style: Theme.of(context)
+                                                      .textTheme
+                                                      .bodyMedium
+                                                      ?.copyWith(
                                                         fontWeight: FontWeight.w600,
                                                         color: cs.onSurface,
                                                       )),
                                               const SizedBox(width: 8),
-                                              _badge(text: 'Active', color: _okGreen, isOn: status.toLowerCase() == 'active'),
+                                              _badge(
+                                                text: 'Active',
+                                                color: _okGreen,
+                                                isOn: status.toLowerCase() == 'active',
+                                              ),
                                               const SizedBox(width: 8),
                                               _badge(
                                                 text: _prettyKyc(kyc),
                                                 color: _warnAmber,
-                                                isOn: !kyc.toLowerCase().contains('approved'),
+                                                isOn:
+                                                    !kyc.toLowerCase().contains('approved'),
                                                 altColors: _kycColors(kyc),
                                               ),
                                             ],
@@ -333,7 +399,8 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                             context: context,
                             title: 'Personal Information',
                             children: [
-                              _iconRow(context, Icons.cake_outlined, 'Date of Birth', dobStr),
+                              _iconRow(
+                                  context, Icons.cake_outlined, 'Date of Birth', dobStr),
                               const SizedBox(height: 12),
                               _iconRow(
                                 context,
@@ -343,7 +410,9 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                   address1,
                                   if (address2.isNotEmpty) address2,
                                   if (zipcode.isNotEmpty) zipcode,
-                                ].where((s) => s.trim().isNotEmpty).join(', '),
+                                ]
+                                    .where((s) => s.trim().isNotEmpty)
+                                    .join(', '),
                               ),
                               const SizedBox(height: 12),
                               Row(
@@ -356,7 +425,10 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text('Plan',
-                                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                            style: Theme.of(context)
+                                                .textTheme
+                                                .bodyMedium
+                                                ?.copyWith(
                                                   fontWeight: FontWeight.w600,
                                                   color: cs.onSurface,
                                                 )),
@@ -381,7 +453,10 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                   children: [
                                     Expanded(
                                       child: Text('KYC Documents',
-                                          style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .titleSmall
+                                              ?.copyWith(
                                                 fontWeight: FontWeight.w600,
                                                 color: cs.onSurface,
                                               )),
@@ -396,12 +471,14 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                   Column(
                                     children: docs.map((d) {
                                       final m = d.data();
-                                      final typeRaw = (m['type'] ?? 'Document').toString();
+                                      final typeRaw =
+                                          (m['type'] ?? 'Document').toString();
                                       final docName = _prettyDocType(typeRaw);
                                       final uploadedAt = _fmtDate(m['created_at']);
-                                      final status = _prettyDocStatus((m['status'] ?? 'pending').toString());
+                                      final status = _prettyDocStatus(
+                                          (m['status'] ?? 'pending').toString());
                                       final frontUrl = (m['front'] ?? '').toString();
-                                      final backUrl  = (m['back']  ?? '').toString();
+                                      final backUrl = (m['back'] ?? '').toString();
                                       return _docImagesTile(
                                         context: context,
                                         title: docName,
@@ -426,7 +503,10 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                               children: [
                                 Text(
                                   'Other Documents',
-                                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                  style: Theme.of(context)
+                                      .textTheme
+                                      .titleSmall
+                                      ?.copyWith(
                                         fontWeight: FontWeight.w600,
                                         color: cs.onSurface,
                                       ),
@@ -434,28 +514,38 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                 const SizedBox(height: 12),
                                 _UploadsSearchField(
                                   controller: _uploadsSearchCtrl,
-                                  onChanged: (v) => setState(() => _uploadsQ = v.trim().toLowerCase()),
+                                  onChanged: (v) =>
+                                      setState(() => _uploadsQ = v.trim().toLowerCase()),
                                 ),
                                 const SizedBox(height: 10),
-                                StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+                                StreamBuilder<
+                                    List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
                                   stream: _uploadsStream(),
                                   builder: (context, upSnap) {
-                                    if (upSnap.connectionState == ConnectionState.waiting) {
+                                    if (upSnap.connectionState ==
+                                        ConnectionState.waiting) {
                                       return const Padding(
                                         padding: EdgeInsets.all(16),
-                                        child: Center(child: CircularProgressIndicator()),
+                                        child:
+                                            Center(child: CircularProgressIndicator()),
                                       );
                                     }
                                     if (upSnap.hasError) {
-                                      return _emptyRow(context, 'Could not load uploads. ${upSnap.error}');
+                                      return _emptyRow(context,
+                                          'Could not load uploads. ${upSnap.error}');
                                     }
 
                                     final all = upSnap.data ?? const [];
-                                    final sorted = [...all]..sort((a, b) {
+                                    final sorted = [...all]
+                                      ..sort((a, b) {
                                         final ta = a.data()['created_at'];
                                         final tb = b.data()['created_at'];
-                                        final da = (ta is Timestamp) ? ta.toDate() : DateTime.fromMillisecondsSinceEpoch(0);
-                                        final db = (tb is Timestamp) ? tb.toDate() : DateTime.fromMillisecondsSinceEpoch(0);
+                                        final da = (ta is Timestamp)
+                                            ? ta.toDate()
+                                            : DateTime.fromMillisecondsSinceEpoch(0);
+                                        final db = (tb is Timestamp)
+                                            ? tb.toDate()
+                                            : DateTime.fromMillisecondsSinceEpoch(0);
                                         return db.compareTo(da);
                                       });
 
@@ -463,41 +553,61 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                     final filtered = sorted.where((d) {
                                       if (q.isEmpty) return true;
                                       final m = d.data();
-                                      final name = (m['document_name'] ?? '').toString().toLowerCase();
-                                      final file = (m['file_name'] ?? '').toString().toLowerCase();
-                                      final remarks = (m['remarks'] ?? '').toString().toLowerCase();
-                                      return name.contains(q) || file.contains(q) || remarks.contains(q);
+                                      final name = (m['document_name'] ?? '')
+                                          .toString()
+                                          .toLowerCase();
+                                      final file = (m['file_name'] ?? '')
+                                          .toString()
+                                          .toLowerCase();
+                                      final remarks = (m['remarks'] ?? '')
+                                          .toString()
+                                          .toLowerCase();
+                                      return name.contains(q) ||
+                                          file.contains(q) ||
+                                          remarks.contains(q);
                                     }).toList();
 
                                     return Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
                                         Text(
                                           '${all.length} document${all.length == 1 ? '' : 's'} uploaded',
-                                          style: const TextStyle(color: Colors.black54, fontSize: 12),
+                                          style: const TextStyle(
+                                              color: Colors.black54, fontSize: 12),
                                         ),
                                         const SizedBox(height: 8),
                                         if (filtered.isEmpty)
                                           _emptyRow(context, 'No uploads found')
                                         else
                                           ListView.separated(
-                                            physics: const NeverScrollableScrollPhysics(),
+                                            physics:
+                                                const NeverScrollableScrollPhysics(),
                                             shrinkWrap: true,
                                             itemCount: filtered.length,
-                                            separatorBuilder: (_, __) => const SizedBox(height: 10),
+                                            separatorBuilder: (_, __) =>
+                                                const SizedBox(height: 10),
                                             itemBuilder: (context, i) {
                                               final d = filtered[i];
                                               final m = d.data();
 
-                                              final url = (m['cloudinary_url'] ?? '').toString();
+                                              final url =
+                                                  (m['cloudinary_url'] ?? '')
+                                                      .toString();
                                               return _UploadItem(
-                                                name: (m['document_name'] ?? '-').toString(),
-                                                fileName: (m['file_name'] ?? '').toString(),
+                                                name: (m['document_name'] ?? '-')
+                                                    .toString(),
+                                                fileName:
+                                                    (m['file_name'] ?? '').toString(),
                                                 createdAt: m['created_at'],
-                                                sizeBytes: ((m['file_size'] as num?) ?? 0).toInt(),
-                                                remarks: (m['remarks'] ?? '').toString(),
+                                                sizeBytes:
+                                                    ((m['file_size'] as num?) ?? 0)
+                                                        .toInt(),
+                                                remarks:
+                                                    (m['remarks'] ?? '').toString(),
                                                 onView: () => _openUrl(url),
-                                                onDownload: () => _openUrl(url, download: true),
+                                                onDownload: () =>
+                                                    _openUrl(url, download: true),
                                               );
                                             },
                                           ),
@@ -511,33 +621,58 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                           const SizedBox(height: 16),
 
                           // Footer actions
-                          Row(
-                            children: [
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  icon: const Icon(Icons.check_circle_outline),
-                                  label: const Text('Approve KYC'),
-                                  onPressed: _approveKyc,
-                                  style: ElevatedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                                  ),
+                          if (isActive)
+                            // Show ONLY when status is active
+                            ElevatedButton.icon(
+                              icon: const Icon(Icons.block),
+                              label: const Text('Block Student'),
+                              onPressed: _blockUser,
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _dangerRed,
+                                foregroundColor: Colors.white,
+                                padding:
+                                    const EdgeInsets.symmetric(vertical: 14),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(12),
                                 ),
                               ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: ElevatedButton.icon(
-                                  icon: const Icon(Icons.cancel_outlined),
-                                  label: const Text('Reject KYC'),
-                                  onPressed: _rejectKyc,
-                                  style: ElevatedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(vertical: 14),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                            )
+                          else
+                            Row(
+                              children: [
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    icon: const Icon(
+                                        Icons.check_circle_outline),
+                                    label: const Text('Approve KYC'),
+                                    onPressed: _approveKyc,
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 14),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
                                   ),
                                 ),
-                              ),
-                            ],
-                          ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    icon:
+                                        const Icon(Icons.cancel_outlined),
+                                    label: const Text('Reject KYC'),
+                                    onPressed: _rejectKyc,
+                                    style: ElevatedButton.styleFrom(
+                                      padding: const EdgeInsets.symmetric(
+                                          vertical: 14),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
                         ],
                       ),
                     );
@@ -557,22 +692,29 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     if (v is DateTime) return v;
     if (v is Map && (v['seconds'] != null)) {
       final s = int.tryParse(v['seconds'].toString());
-      if (s != null) return DateTime.fromMillisecondsSinceEpoch(s * 1000, isUtc: true).toLocal();
+      if (s != null) {
+        return DateTime.fromMillisecondsSinceEpoch(s * 1000, isUtc: true)
+            .toLocal();
+      }
     }
     return null;
   }
 
-  Widget _sectionCard({required BuildContext context, required String title, required List<Widget> children}) {
+  Widget _sectionCard(
+      {required BuildContext context,
+      required String title,
+      required List<Widget> children}) {
     final cs = Theme.of(context).colorScheme;
     return _card(
       context: context,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: cs.onSurface,
-          )),
+          Text(title,
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface,
+                  )),
           const SizedBox(height: 12),
           ...children,
         ],
@@ -590,7 +732,8 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     );
   }
 
-  Widget _iconRow(BuildContext context, IconData icon, String label, String value) {
+  Widget _iconRow(
+      BuildContext context, IconData icon, String label, String value) {
     final cs = Theme.of(context).colorScheme;
     final tt = Theme.of(context).textTheme;
     return Row(
@@ -602,7 +745,9 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: tt.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: cs.onSurface)),
+              Text(label,
+                  style: tt.bodyMedium
+                      ?.copyWith(fontWeight: FontWeight.w600, color: cs.onSurface)),
               const SizedBox(height: 4),
               Text(value, style: tt.bodyMedium?.copyWith(color: cs.onSurface)),
             ],
@@ -621,7 +766,9 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: cs.primary.withOpacity(0.25)),
       ),
-      child: Text(text, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.primary)),
+      child: Text(text,
+          style: TextStyle(
+              fontSize: 12, fontWeight: FontWeight.w600, color: cs.primary)),
     );
   }
 
@@ -660,7 +807,11 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: colors[1]),
       ),
-      child: Text(text, style: TextStyle(fontSize: 12, color: colors[0] == _warnAmber ? cs.primary : colors[0], fontWeight: FontWeight.w700)),
+      child: Text(text,
+          style: TextStyle(
+              fontSize: 12,
+              color: colors[0] == _warnAmber ? cs.primary : colors[0],
+              fontWeight: FontWeight.w700)),
     );
   }
 
@@ -691,14 +842,17 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-            fontWeight: FontWeight.w600,
-            color: cs.onSurface,
-          )),
+          Text(title,
+              style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: cs.onSurface,
+                  )),
           const SizedBox(height: 4),
-          Text(meta, style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: cs.onSurfaceVariant,
-          )),
+          Text(meta,
+              style: Theme.of(context)
+                  .textTheme
+                  .bodySmall
+                  ?.copyWith(color: cs.onSurfaceVariant)),
           const SizedBox(height: 10),
           Row(
             children: [
@@ -706,7 +860,9 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
               if (frontUrl.isNotEmpty && backUrl.isNotEmpty) const SizedBox(width: 10),
               if (backUrl.isNotEmpty) _imageThumb(context, backUrl, 'Back'),
               if (frontUrl.isEmpty && backUrl.isEmpty)
-                Expanded(child: Text('No files attached', style: TextStyle(color: cs.onSurfaceVariant))),
+                Expanded(
+                    child: Text('No files attached',
+                        style: TextStyle(color: cs.onSurfaceVariant))),
             ],
           ),
         ],
@@ -734,7 +890,8 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                 height: 76,
                 color: cs.surfaceVariant,
                 alignment: Alignment.center,
-                child: Icon(Icons.broken_image_outlined, color: cs.onSurfaceVariant),
+                child: Icon(Icons.broken_image_outlined,
+                    color: cs.onSurfaceVariant),
               ),
             ),
           ),
@@ -762,22 +919,29 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                 if (front.isNotEmpty) ...[
                   const Text('Front', style: TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
-                  ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(front, fit: BoxFit.contain)),
+                  ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(front, fit: BoxFit.contain)),
                   const SizedBox(height: 12),
                 ],
                 if (back.isNotEmpty) ...[
                   const Text('Back', style: TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
-                  ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(back, fit: BoxFit.contain)),
+                  ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: Image.network(back, fit: BoxFit.contain)),
                 ],
                 if (front.isEmpty && back.isEmpty)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 24),
-                    child: Text('No preview available', textAlign: TextAlign.center),
+                    child:
+                        Text('No preview available', textAlign: TextAlign.center),
                   ),
                 Align(
                   alignment: Alignment.centerRight,
-                  child: TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
+                  child: TextButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Close')),
                 ),
               ],
             ),
@@ -819,7 +983,8 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
   static const _warnAmber = Color(0xFFF59E0B);
 
   String _prettyDocType(String raw) {
-    final parts = raw.trim().split(RegExp(r'[_\-\s]+')).where((e) => e.isNotEmpty);
+    final parts =
+        raw.trim().split(RegExp(r'[_\-\s]+')).where((e) => e.isNotEmpty);
     String cap(String s) => s[0].toUpperCase() + s.substring(1).toLowerCase();
     return parts.map(cap).join(' ');
   }
@@ -836,7 +1001,8 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     if (v is Map && v['seconds'] != null) {
       final s = int.tryParse(v['seconds'].toString());
       if (s != null) {
-        final d = DateTime.fromMillisecondsSinceEpoch(s * 1000, isUtc: true).toLocal();
+        final d = DateTime.fromMillisecondsSinceEpoch(s * 1000, isUtc: true)
+            .toLocal();
         return '${_dd(d.day)}/${_dd(d.month)}/${d.year}';
       }
     }
@@ -847,14 +1013,17 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
       final m = RegExp(r'seconds\s*[:=]\s*(\d+)').firstMatch(s);
       if (m != null) {
         final sec = int.parse(m.group(1)!);
-        final d = DateTime.fromMillisecondsSinceEpoch(sec * 1000, isUtc: true).toLocal();
+        final d =
+            DateTime.fromMillisecondsSinceEpoch(sec * 1000, isUtc: true)
+                .toLocal();
         return '${_dd(d.day)}/${_dd(d.month)}/${d.year}';
       }
       if (RegExp(r'^\d+$').hasMatch(s)) {
         final n = int.parse(s);
         final d = (n >= 1000000000000)
             ? DateTime.fromMillisecondsSinceEpoch(n, isUtc: true).toLocal()
-            : DateTime.fromMillisecondsSinceEpoch(n * 1000, isUtc: true).toLocal();
+            : DateTime.fromMillisecondsSinceEpoch(n * 1000, isUtc: true)
+                .toLocal();
         return '${_dd(d.day)}/${_dd(d.month)}/${d.year}';
       }
     }
@@ -862,7 +1031,8 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
       final n = v.toInt();
       final d = (n >= 1000000000000)
           ? DateTime.fromMillisecondsSinceEpoch(n, isUtc: true).toLocal()
-          : DateTime.fromMillisecondsSinceEpoch(n * 1000, isUtc: true).toLocal();
+          : DateTime.fromMillisecondsSinceEpoch(n * 1000, isUtc: true)
+              .toLocal();
       return '${_dd(d.day)}/${_dd(d.month)}/${d.year}';
     }
     return '-';
@@ -898,7 +1068,8 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
 class _UploadsSearchField extends StatelessWidget {
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
-  const _UploadsSearchField({required this.controller, required this.onChanged});
+  const _UploadsSearchField(
+      {required this.controller, required this.onChanged});
 
   @override
   Widget build(BuildContext context) {
@@ -909,7 +1080,8 @@ class _UploadsSearchField extends StatelessWidget {
         hintText: 'Search documents...',
         prefixIcon: const Icon(Icons.search),
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         filled: true,
         fillColor: Colors.white,
         border: OutlineInputBorder(
@@ -954,7 +1126,8 @@ class _UploadItem extends StatelessWidget {
     return Card(
       elevation: 0,
       color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -969,24 +1142,35 @@ class _UploadItem extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   padding: const EdgeInsets.all(8),
-                  child: Icon(icon, size: 20, color: const Color(0xFF3559FF)),
+                  child: Icon(icon,
+                      size: 20, color: const Color(0xFF3559FF)),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                    crossAxisAlignment:
+                        CrossAxisAlignment.start,
                     children: [
-                      Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                      Text(name,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 14)),
                       const SizedBox(height: 2),
-                      Text(fileName, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                      Text(fileName,
+                          style: const TextStyle(
+                              color: Colors.black54, fontSize: 12)),
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          const Icon(Icons.calendar_today, size: 14, color: Colors.black54),
+                          const Icon(Icons.calendar_today,
+                              size: 14, color: Colors.black54),
                           const SizedBox(width: 6),
-                          Text(date, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                          Text(date,
+                              style: const TextStyle(
+                                  color: Colors.black54, fontSize: 12)),
                           const SizedBox(width: 14),
-                          Text(size, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                          Text(size,
+                              style: const TextStyle(
+                                  color: Colors.black54, fontSize: 12)),
                         ],
                       ),
                     ],
@@ -1002,12 +1186,19 @@ class _UploadItem extends StatelessWidget {
                   color: const Color(0xFFF6F8FE),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 10, vertical: 10),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Remarks: ', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87)),
-                    Expanded(child: Text(remarks, style: const TextStyle(color: Colors.black87, height: 1.2))),
+                    const Text('Remarks: ',
+                        style: TextStyle(
+                            fontWeight: FontWeight.w600,
+                            color: Colors.black87)),
+                    Expanded(
+                        child: Text(remarks,
+                            style: const TextStyle(
+                                color: Colors.black87, height: 1.2))),
                   ],
                 ),
               ),
@@ -1059,9 +1250,22 @@ class _UploadItem extends StatelessWidget {
     if (ts is Timestamp) dt = ts.toDate();
     if (ts is DateTime) dt = ts;
     dt ??= DateTime.now();
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
-    }
+  }
 
   static String _fmtSize(int bytes) {
     if (bytes <= 0) return '0 B';
