@@ -4,17 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:smart_drive/attendance.dart';
+import 'package:smart_drive/instructor_settings.dart';
+import 'package:smart_drive/students_list_page.dart';
+import 'package:smart_drive/upload_document_page.dart'; // NEW
 import 'package:url_launcher/url_launcher.dart';
-
-
-
-/// ─────────────────────────────────────────────────────────────────────────────
-/// Firestore assumptions (same as earlier work):
-/// - users: { role: "student"|"instructor", status: "active"|"pending", name, email }
-/// - slots: { instructorId, studentId, startAt: Timestamp, status: "confirmed"|"pending", skill/note? }
-/// - notifications: { title, message, action_url?, segments: ["all"|"students"|"instructors"|"active"|"pending"], created_at, scheduled_at? }
-/// - users/{uid}/notif_reads/{notifId}: { readAt }
-/// ─────────────────────────────────────────────────────────────────────────────
+import 'package:smart_drive/instructor_slots.dart';
 
 class InstructorDashboardPage extends StatelessWidget {
   const InstructorDashboardPage({super.key});
@@ -40,9 +34,12 @@ class _DashboardBodyState extends State<_DashboardBody> {
   final _db = FirebaseFirestore.instance;
 
   User? get _user => _auth.currentUser;
-  String _status = 'active'; // from users doc
+  String _status = 'active';
   Map<String, dynamic> _me = {};
   bool _loading = true;
+
+  // local, per-session dismiss for the warning banner
+  bool _dismissedSetupWarning = false;
 
   @override
   void initState() {
@@ -73,6 +70,11 @@ class _DashboardBodyState extends State<_DashboardBody> {
     return _db.collection('users').doc(uid).snapshots();
   }
 
+  // NEW: live profile doc stream for completeness checks
+  Stream<DocumentSnapshot<Map<String, dynamic>>> _profileDoc(String uid) {
+    return _db.collection('instructor_profiles').doc(uid).snapshots();
+  }
+
   Stream<int> _activeStudentsCount() {
     return _db
         .collection('users')
@@ -100,225 +102,304 @@ class _DashboardBodyState extends State<_DashboardBody> {
     return d.data();
   }
 
+  // ───────────── Completeness checks (tweak rules if needed) ─────────────
+  bool _isPersonalComplete(Map<String, dynamic> usersDoc, Map<String, dynamic> profDoc) {
+    final name = (usersDoc['name'] ?? '').toString().trim();
+    final phone = (usersDoc['phone'] ?? '').toString().trim();
+    final addr = (profDoc['address'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final street = (addr['street'] ?? '').toString().trim();
+    final city = (addr['city'] ?? '').toString().trim();
+    // Require: name + phone + at least street & city
+    return name.isNotEmpty && phone.isNotEmpty && street.isNotEmpty && city.isNotEmpty;
+  }
+
+  bool _isPaymentComplete(Map<String, dynamic> profDoc) {
+    final payment = (profDoc['payment'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final method = (payment['method'] ?? '').toString();
+    if (method == 'upi') {
+      final upi = (payment['upi'] as Map?)?.cast<String, dynamic>() ?? const {};
+      final id = (upi['id'] ?? '').toString().trim();
+      return id.isNotEmpty;
+    }
+    // treat anything else as bank
+    final bank = (payment['bank'] as Map?)?.cast<String, dynamic>() ?? const {};
+    final bankName = (bank['bankName'] ?? '').toString().trim();
+    final accountHolder = (bank['accountHolder'] ?? '').toString().trim();
+    final accountNumber = (bank['accountNumber'] ?? '').toString().trim();
+    final routingNumber = (bank['routingNumber'] ?? '').toString().trim();
+    return bankName.isNotEmpty &&
+        accountHolder.isNotEmpty &&
+        accountNumber.isNotEmpty &&
+        routingNumber.isNotEmpty;
+  }
+
   @override
   Widget build(BuildContext context) {
     final uid = _user?.uid;
-    if (_loading) {
-      return const Center(child: CircularProgressIndicator());
-    }
-    if (uid == null) {
-      return const Center(child: Text('Not signed in'));
-    }
+    if (_loading) return const Center(child: CircularProgressIndicator());
+    if (uid == null) return const Center(child: Text('Not signed in'));
 
     return StreamBuilder(
       stream: _meDoc(uid),
       builder: (context, snap) {
-        final m = snap.data?.data() ?? _me; // fallback to loaded data
+        final m = snap.data?.data() ?? _me;
         final name = (m['name'] ?? 'Instructor').toString();
         final email = (m['email'] ?? '').toString();
         final active = (m['status'] ?? 'active').toString().toLowerCase() == 'active';
         final role = 'instructor';
 
-        return CustomScrollView(
-          slivers: [
-            SliverAppBar(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.black,
-              pinned: true,
-              elevation: 0,
-              title: const Text('Instructor Dashboard'),
-              actions: [
-                // Notification bell (same logic as StudentDashboard)
-                _InstructorBell(uid: uid, role: role, userStatus: _status),
-                IconButton(
-                  icon: const Icon(Icons.settings_outlined),
-                  onPressed: _openSettings,
-                ),
-                const SizedBox(width: 8),
-              ],
-            ),
+        // Wrap the rest in a second stream for the profile doc
+        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+          stream: _profileDoc(uid),
+          builder: (context, profSnap) {
+            final prof = profSnap.data?.data() ?? <String, dynamic>{};
 
-            // Profile header
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                child: _ProfileHeader(
-                  initials: _initials(name),
-                  name: name,
-                  email: email,
-                  active: active,
-                ),
-              ),
-            ),
+            final personalOk = _isPersonalComplete(m, prof);
+            final paymentOk = _isPaymentComplete(prof);
+            final needsSetup = !(personalOk && paymentOk) && !_dismissedSetupWarning;
 
-            // Metric cards
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
-                        stream: _todaySlots(),
-                        builder: (context, s) {
-                          final slots = s.data ?? const [];
-                          final cap = (m['maxDailySlots'] ?? 0) as int;
-                          final value = cap > 0 ? '${slots.length}/$cap' : '${slots.length}';
-                          return _MetricCard(
-                            icon: Icons.event_available,
-                            iconBg: const Color(0xFFE9F0FF),
-                            title: "Today's Slots",
-                            value: value,
-                          );
-                        },
+            return CustomScrollView(
+              slivers: [
+                SliverAppBar(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  pinned: true,
+                  elevation: 0,
+                  title: const Text('Instructor Dashboard'),
+                  actions: [
+                    _InstructorBell(uid: uid, role: role, userStatus: _status),
+                    IconButton(
+                      icon: const Icon(Icons.settings_outlined),
+                      onPressed: _openSettings,
+                    ),
+                    const SizedBox(width: 8),
+                  ],
+                ),
+
+                // Profile header
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                    child: _ProfileHeader(
+                      initials: _initials(name),
+                      name: name,
+                      email: email,
+                      active: active,
+                    ),
+                  ),
+                ),
+
+                // NEW: Setup warning banner
+                if (needsSetup)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      child: _WarningCard(
+                        personalOk: personalOk,
+                        paymentOk: paymentOk,
+                        onFixNow: _openSettings,
+                        onDismiss: () => setState(() => _dismissedSetupWarning = true),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: StreamBuilder<int>(
-                        stream: _activeStudentsCount(),
-                        builder: (context, s) {
-                          final total = s.data ?? 0;
-                          return _MetricCard(
-                            icon: Icons.groups_2_outlined,
-                            iconBg: const Color(0xFFEAF7F0),
-                            title: 'Active Students',
-                            value: '$total',
-                          );
-                        },
-                      ),
+                  ),
+
+                // Metric cards
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: StreamBuilder<
+                              List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+                            stream: _todaySlots(),
+                            builder: (context, s) {
+                              final slots = s.data ?? const [];
+                              final cap = (m['maxDailySlots'] ?? 0) as int;
+                              final value =
+                                  cap > 0 ? '${slots.length}/$cap' : '${slots.length}';
+                              return _MetricCard(
+                                icon: Icons.event_available,
+                                iconBg: const Color(0xFFE9F0FF),
+                                title: "Today's Slots",
+                                value: value,
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: StreamBuilder<int>(
+                            stream: _activeStudentsCount(),
+                            builder: (context, s) {
+                              final total = s.data ?? 0;
+                              return _MetricCard(
+                                icon: Icons.groups_2_outlined,
+                                iconBg: const Color(0xFFEAF7F0),
+                                title: 'Active Students',
+                                value: '$total',
+                              );
+                            },
+                          ),
+                        ),
+                      ],
                     ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
 
-            // Action tiles
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                child: Column(
-                  children: [
-                    _ActionTile(
-                      icon: Icons.event_note,
-                      iconColor: Colors.purple,
-                      title: 'Manage Slots',
-                      subtitle: 'Schedule and organize driving sessions',
-                      onTap: _openManageSlots,
+                // Action tiles
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Column(
+                      children: [
+                        _ActionTile(
+                          icon: Icons.event_note,
+                          iconColor: Colors.purple,
+                          title: 'Manage Slots',
+                          subtitle: 'Manage scheduled sessions and availability',
+                          onTap: _openManageSlots,
+                        ),
+                        const SizedBox(height: 12),
+                        _ActionTile(
+                          icon: Icons.check_circle,
+                          iconColor: const Color(0xFF2E7D32),
+                          title: 'Mark Attendance',
+                          subtitle: 'Record student attendance and completion',
+                          onTap: _openMarkAttendance,
+                        ),
+                        const SizedBox(height: 12),
+                        _ActionTile(
+                          icon: Icons.trending_up,
+                          iconColor: const Color(0xFF1565C0),
+                          title: 'View Student Progress',
+                          subtitle: 'Track learning milestones and skills',
+                          onTap: _openStudentProgress,
+                        ),
+                        const SizedBox(height: 12),
+                        // NEW Upload Documents card
+                        _ActionTile(
+                          icon: Icons.upload_file_rounded,
+                          iconColor: const Color(0xFF2D5BFF),
+                          title: 'Upload Documents',
+                          subtitle: 'Share study materials and files with students',
+                          onTap: _openUploadDocuments,
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 12),
-                    _ActionTile(
-                      icon: Icons.check_circle,
-                      iconColor: const Color(0xFF2E7D32),
-                      title: 'Mark Attendance',
-                      subtitle: 'Record student attendance and completion',
-                      onTap: _openMarkAttendance,
-                    ),
-                    const SizedBox(height: 12),
-                    _ActionTile(
-                      icon: Icons.trending_up,
-                      iconColor: const Color(0xFF1565C0),
-                      title: 'View Student Progress',
-                      subtitle: 'Track learning milestones and skills',
-                      onTap: _openStudentProgress,
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ),
 
-            // Today's schedule
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                child: Row(
-                  children: const [
-                    Icon(Icons.access_time, size: 18, color: Colors.black87),
-                    SizedBox(width: 8),
-                    Text("Today's Schedule",
-                        style: TextStyle(
-                          fontWeight: FontWeight.w600,
-                          fontSize: 16,
-                          color: Colors.black87,
-                        )),
-                  ],
+                // Today's schedule
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: Row(
+                      children: const [
+                        Icon(Icons.access_time, size: 18, color: Colors.black87),
+                        SizedBox(width: 8),
+                        Text("Today's Schedule",
+                            style: TextStyle(
+                              fontWeight: FontWeight.w600,
+                              fontSize: 16,
+                              color: Colors.black87,
+                            )),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
-            ),
 
-            StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
-              stream: _todaySlots(),
-              builder: (context, s) {
-                final slots = s.data ?? const [];
-                if (s.connectionState == ConnectionState.waiting) {
-                  return const SliverToBoxAdapter(
-                    child: Padding(
-                      padding: EdgeInsets.all(24),
-                      child: Center(child: CircularProgressIndicator()),
-                    ),
-                  );
-                }
-                if (slots.isEmpty) {
-                  return const SliverToBoxAdapter(
-                    child: Padding(
-                      padding: EdgeInsets.fromLTRB(16, 8, 16, 32),
-                      child: _EmptyCard(message: 'No sessions scheduled for today.'),
-                    ),
-                  );
-                }
-                return SliverList.separated(
-                  itemCount: slots.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 8),
-                  itemBuilder: (context, i) {
-                    final d = slots[i].data();
-                    final ts = (d['startAt'] as Timestamp).toDate();
-                    final status = (d['status'] ?? 'confirmed') as String;
-                    final studentId = (d['studentId'] ?? '') as String;
-                    final skill = (d['skill'] ?? d['note'] ?? '') as String;
+                StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+                  stream: _todaySlots(),
+                  builder: (context, s) {
+                    final slots = s.data ?? const [];
+                    if (s.connectionState == ConnectionState.waiting) {
+                      return const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.all(24),
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
+                      );
+                    }
+                    if (slots.isEmpty) {
+                      return const SliverToBoxAdapter(
+                        child: Padding(
+                          padding: EdgeInsets.fromLTRB(16, 8, 16, 32),
+                          child: _EmptyCard(message: 'No sessions scheduled for today.'),
+                        ),
+                      );
+                    }
+                    return SliverList.separated(
+                      itemCount: slots.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, i) {
+                        final d = slots[i].data();
+                        final ts = (d['startAt'] as Timestamp).toDate();
+                        final status = (d['status'] ?? 'confirmed') as String;
+                        final studentId = (d['studentId'] ?? '') as String;
+                        final skill = (d['skill'] ?? d['note'] ?? '') as String;
 
-                    return FutureBuilder<Map<String, dynamic>?>(
-                      future: _studentById(studentId),
-                      builder: (context, s2) {
-                        final studentName =
-                            (s2.data?['name'] ?? 'Student').toString();
-                        return _ScheduleTile(
-                          time: _fmtTime(ts),
-                          name: studentName,
-                          subtitle: skill,
-                          status: status,
+                        return FutureBuilder<Map<String, dynamic>?>(
+                          future: _studentById(studentId),
+                          builder: (context, s2) {
+                            final studentName =
+                                (s2.data?['name'] ?? 'Student').toString();
+                            return _ScheduleTile(
+                              time: _fmtTime(ts),
+                              name: studentName,
+                              subtitle: skill,
+                              status: status,
+                            );
+                          },
                         );
                       },
                     );
                   },
-                );
-              },
-            ),
+                ),
 
-            const SliverToBoxAdapter(child: SizedBox(height: 24)),
-          ],
+                const SliverToBoxAdapter(child: SizedBox(height: 24)),
+              ],
+            );
+          },
         );
       },
     );
   }
 
   // Navigation hooks
-  void _openManageSlots() {
-    // Navigator.pushNamed(context, '/manageSlots');
+  void _openUploadDocuments() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const UploadDocumentPage()),
+    );
   }
 
-void _openMarkAttendance() {
-  Navigator.push(
-    context,
-    MaterialPageRoute(builder: (_) => const AttendencePage()),
-  );
-}
+  void _openManageSlots() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const InstructorSlotsBlock()),
+    );
+  }
+
+  void _openMarkAttendance() {
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const AttendencePage()),
+    );
+  }
 
   void _openStudentProgress() {
-    // Navigator.pushNamed(context, '/studentProgress');
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const StudentsListPage()),
+    );
   }
 
   void _openSettings() {
-    // Navigator.pushNamed(context, '/settings');
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => const InstructorSettingsPage()),
+    );
   }
 }
 
@@ -384,6 +465,87 @@ class _ProfileHeader extends StatelessWidget {
                   ),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// NEW: prominent warning card
+class _WarningCard extends StatelessWidget {
+  final bool personalOk;
+  final bool paymentOk;
+  final VoidCallback onFixNow;
+  final VoidCallback onDismiss;
+
+  const _WarningCard({
+    required this.personalOk,
+    required this.paymentOk,
+    required this.onFixNow,
+    required this.onDismiss,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final needPersonal = !personalOk;
+    final needPayment = !paymentOk;
+
+    return Card(
+      elevation: 0,
+      color: Colors.orange.shade50,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Color(0xFFF57C00)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Action needed before payouts',
+                    style: TextStyle(fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    [
+                      if (needPersonal) 'Complete your Personal Information',
+                      if (needPayment) 'Set up your Payment Preference',
+                    ].join(' • '),
+                    style: TextStyle(color: Colors.orange.shade900),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Payouts will not be processed until setup is complete.',
+                    style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      ElevatedButton.icon(
+                        onPressed: onFixNow,
+                        icon: const Icon(Icons.settings),
+                        label: const Text('Open Settings'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFF57C00),
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      TextButton.icon(
+                        onPressed: onDismiss,
+                        icon: const Icon(Icons.close),
+                        label: const Text('Dismiss'),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ],
         ),
@@ -616,7 +778,7 @@ class _EmptyCard extends StatelessWidget {
   }
 }
 
-/// ───────────────────── Notification bell (same logic as StudentDashboard) ───
+/// ───────────────────── Notification bell (enhanced like StudentDashboard) ───
 
 class _InstructorBell extends StatelessWidget {
   final String uid;
@@ -629,14 +791,36 @@ class _InstructorBell extends StatelessWidget {
     required this.userStatus,
   });
 
-  bool _isTargeted(List segs) {
-    final S = segs.map((e) => e.toString().toLowerCase()).toSet();
-    if (S.contains('all')) return true;
-    if (S.contains('students') && role == 'student') return true;
-    if (S.contains('instructors') && role == 'instructor') return true;
-    if (S.contains('active') && userStatus == 'active') return true;
-    if (S.contains('pending') && userStatus == 'pending') return true;
-    return false;
+  bool _isTargeted(Map<String, dynamic> m) {
+    // segments (legacy)
+    final List segs = (m['segments'] as List?) ?? const ['all'];
+    final Set<String> S = segs.map((e) => e.toString().toLowerCase()).toSet();
+
+    // direct target_uids
+    final List targets = (m['target_uids'] as List?) ?? const [];
+    final bool direct = targets.map((e) => e.toString()).contains(uid);
+
+    // time window gating
+    DateTime? _asDt(dynamic v) {
+      if (v == null) return null;
+      if (v is Timestamp) return v.toDate();
+      if (v is DateTime) return v;
+      return null;
+    }
+    final now = DateTime.now();
+    final scheduledAt = _asDt(m['scheduled_at']) ?? _asDt(m['created_at']);
+    final expiresAt   = _asDt(m['expires_at']);
+    final withinTime  = (scheduledAt == null || !scheduledAt.isAfter(now)) &&
+                        (expiresAt == null   ||  expiresAt.isAfter(now));
+
+    final bool segmentHit =
+        S.contains('all') ||
+        (S.contains('students') && role == 'student') ||
+        (S.contains('instructors') && role == 'instructor') ||
+        (S.contains('active') && userStatus == 'active') ||
+        (S.contains('pending') && userStatus == 'pending');
+
+    return withinTime && (direct || segmentHit);
   }
 
   @override
@@ -667,8 +851,7 @@ class _InstructorBell extends StatelessWidget {
             if (notifSnap.hasData) {
               for (final d in notifSnap.data!.docs) {
                 final m = (d.data() as Map).cast<String, dynamic>();
-                final segs = (m['segments'] as List?) ?? const ['all'];
-                if (_isTargeted(segs)) targeted.add(d);
+                if (_isTargeted(m)) targeted.add(d);
               }
             }
             final unreadCount = targeted.where((d) => !readIds.contains(d.id)).length;

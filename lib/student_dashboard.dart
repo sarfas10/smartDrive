@@ -497,14 +497,36 @@ class NotificationBell extends StatelessWidget {
     required this.anchorKey,
   });
 
-  bool _isTargeted(List segs) {
-    final S = segs.map((e) => e.toString().toLowerCase()).toSet();
-    if (S.contains('all')) return true;
-    if (S.contains('students') && role == 'student') return true;
-    if (S.contains('instructors') && role == 'instructor') return true;
-    if (S.contains('active') && userStatus == 'active') return true;
-    if (S.contains('pending') && userStatus == 'pending') return true;
-    return false;
+  bool _isTargeted(Map<String, dynamic> m) {
+    // ---- legacy segments fallback
+    final List segs = (m['segments'] as List?) ?? const ['all'];
+    final Set<String> S = segs.map((e) => e.toString().toLowerCase()).toSet();
+
+    // ---- direct targeted UIDs
+    final List targets = (m['target_uids'] as List?) ?? const [];
+    final bool direct = targets.map((e) => e.toString()).contains(uid);
+
+    // ---- optional time window
+    DateTime? _asDt(dynamic v) {
+      if (v == null) return null;
+      if (v is Timestamp) return v.toDate();
+      if (v is DateTime) return v;
+      return null;
+    }
+    final now = DateTime.now();
+    final scheduledAt = _asDt(m['scheduled_at']) ?? _asDt(m['created_at']);
+    final expiresAt   = _asDt(m['expires_at']);
+    final withinTime  = (scheduledAt == null || !scheduledAt.isAfter(now)) &&
+                        (expiresAt == null   ||  expiresAt.isAfter(now));
+
+    final bool segmentHit =
+        S.contains('all') ||
+        (S.contains('students') && role == 'student') ||
+        (S.contains('instructors') && role == 'instructor') ||
+        (S.contains('active') && userStatus == 'active') ||
+        (S.contains('pending') && userStatus == 'pending');
+
+    return withinTime && (direct || segmentHit);
   }
 
   @override
@@ -534,8 +556,7 @@ class NotificationBell extends StatelessWidget {
             if (notifSnap.hasData) {
               for (final d in notifSnap.data!.docs) {
                 final m = (d.data() as Map).cast<String, dynamic>();
-                final segs = (m['segments'] as List?) ?? const ['all'];
-                if (_isTargeted(segs)) targeted.add(d);
+                if (_isTargeted(m)) targeted.add(d);
               }
             }
             final unreadCount = targeted.where((d) => !readIds.contains(d.id)).length;
@@ -587,7 +608,7 @@ class NotificationBell extends StatelessWidget {
       Offset.zero & overlay.size,
     );
 
-    // --- FIX: wrap content with fixed width + bounded height so IntrinsicWidth can lay it out
+    // concrete width + bounded height for menu
     final double menuWidth = math.min(MediaQuery.of(context).size.width * 0.92, 340);
 
     await showMenu(
@@ -598,9 +619,9 @@ class NotificationBell extends StatelessWidget {
           enabled: false,
           padding: EdgeInsets.zero,
           child: SizedBox(
-            width: menuWidth, // <- concrete width
+            width: menuWidth,
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 380), // <- bounded height
+              constraints: const BoxConstraints(maxHeight: 380),
               child: Material(
                 color: Theme.of(context).colorScheme.surface,
                 child: _NotificationsList(

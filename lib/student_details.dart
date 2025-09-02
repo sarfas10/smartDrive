@@ -1,6 +1,7 @@
 // student_details.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:url_launcher/url_launcher.dart'; // for view/download + opening links
 
 class StudentDetailsPage extends StatelessWidget {
   const StudentDetailsPage({super.key});
@@ -57,6 +58,16 @@ class _StudentDetailsBody extends StatefulWidget {
 class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
   String? _userDocId;
 
+  // search for Other Documents
+  final _uploadsSearchCtrl = TextEditingController();
+  String _uploadsQ = '';
+
+  @override
+  void dispose() {
+    _uploadsSearchCtrl.dispose();
+    super.dispose();
+  }
+
   // ── Streams ────────────────────────────────────────────────────────────────
   Stream<DocumentSnapshot<Map<String, dynamic>>> _userDocStream() async* {
     final fs = FirebaseFirestore.instance;
@@ -98,6 +109,33 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
         .map((s) => s.docs);
   }
 
+  /// Read "Other Documents" from `user_uploads` (same as instructor details)
+  Stream<List<QueryDocumentSnapshot<Map<String, dynamic>>>> _uploadsStream() {
+    return FirebaseFirestore.instance
+        .collection('user_uploads')
+        .where('uid', isEqualTo: widget.uid)
+        .snapshots()
+        .map((s) => s.docs);
+  }
+
+  // ── Direct notification helper ─────────────────────────────────────────────
+  Future<void> _sendUserNotification({
+    required String targetUid,
+    required String title,
+    required String message,
+    String segment = 'students', // keeps compatibility with segment filter
+    String? actionUrl,
+  }) async {
+    await FirebaseFirestore.instance.collection('notifications').add({
+      'title': title,
+      'message': message,
+      'segments': [segment],      // optional legacy segment
+      'target_uids': [targetUid], // direct target
+      'action_url': actionUrl,
+      'created_at': FieldValue.serverTimestamp(),
+    });
+  }
+
   // ── Actions ────────────────────────────────────────────────────────────────
   Future<void> _approveKyc() async {
     if (_userDocId == null) return;
@@ -112,6 +150,14 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
       });
     }
     await batch.commit();
+
+    // 🔔 notify the user
+    await _sendUserNotification(
+      targetUid: widget.uid,
+      title: 'KYC Approved',
+      message: 'Your KYC has been approved. You now have full access.',
+    );
+
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('KYC approved')));
   }
@@ -129,6 +175,14 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
       });
     }
     await batch.commit();
+
+    // 🔔 notify the user
+    await _sendUserNotification(
+      targetUid: widget.uid,
+      title: 'KYC Rejected',
+      message: 'Your KYC was rejected. Please fix the issues and resubmit.',
+    );
+
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('KYC rejected')));
   }
@@ -317,7 +371,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                           ),
                           const SizedBox(height: 16),
 
-                          // Documents
+                          // KYC Documents
                           _card(
                             context: context,
                             child: Column(
@@ -357,6 +411,100 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                       );
                                     }).toList(),
                                   ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(height: 16),
+
+                          // ──────────────────────────────────────────────
+                          // Other Documents (from user_uploads)
+                          // ──────────────────────────────────────────────
+                          _card(
+                            context: context,
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Other Documents',
+                                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        color: cs.onSurface,
+                                      ),
+                                ),
+                                const SizedBox(height: 12),
+                                _UploadsSearchField(
+                                  controller: _uploadsSearchCtrl,
+                                  onChanged: (v) => setState(() => _uploadsQ = v.trim().toLowerCase()),
+                                ),
+                                const SizedBox(height: 10),
+                                StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+                                  stream: _uploadsStream(),
+                                  builder: (context, upSnap) {
+                                    if (upSnap.connectionState == ConnectionState.waiting) {
+                                      return const Padding(
+                                        padding: EdgeInsets.all(16),
+                                        child: Center(child: CircularProgressIndicator()),
+                                      );
+                                    }
+                                    if (upSnap.hasError) {
+                                      return _emptyRow(context, 'Could not load uploads. ${upSnap.error}');
+                                    }
+
+                                    final all = upSnap.data ?? const [];
+                                    final sorted = [...all]..sort((a, b) {
+                                        final ta = a.data()['created_at'];
+                                        final tb = b.data()['created_at'];
+                                        final da = (ta is Timestamp) ? ta.toDate() : DateTime.fromMillisecondsSinceEpoch(0);
+                                        final db = (tb is Timestamp) ? tb.toDate() : DateTime.fromMillisecondsSinceEpoch(0);
+                                        return db.compareTo(da);
+                                      });
+
+                                    final q = _uploadsQ;
+                                    final filtered = sorted.where((d) {
+                                      if (q.isEmpty) return true;
+                                      final m = d.data();
+                                      final name = (m['document_name'] ?? '').toString().toLowerCase();
+                                      final file = (m['file_name'] ?? '').toString().toLowerCase();
+                                      final remarks = (m['remarks'] ?? '').toString().toLowerCase();
+                                      return name.contains(q) || file.contains(q) || remarks.contains(q);
+                                    }).toList();
+
+                                    return Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          '${all.length} document${all.length == 1 ? '' : 's'} uploaded',
+                                          style: const TextStyle(color: Colors.black54, fontSize: 12),
+                                        ),
+                                        const SizedBox(height: 8),
+                                        if (filtered.isEmpty)
+                                          _emptyRow(context, 'No uploads found')
+                                        else
+                                          ListView.separated(
+                                            physics: const NeverScrollableScrollPhysics(),
+                                            shrinkWrap: true,
+                                            itemCount: filtered.length,
+                                            separatorBuilder: (_, __) => const SizedBox(height: 10),
+                                            itemBuilder: (context, i) {
+                                              final d = filtered[i];
+                                              final m = d.data();
+
+                                              final url = (m['cloudinary_url'] ?? '').toString();
+                                              return _UploadItem(
+                                                name: (m['document_name'] ?? '-').toString(),
+                                                fileName: (m['file_name'] ?? '').toString(),
+                                                createdAt: m['created_at'],
+                                                sizeBytes: ((m['file_size'] as num?) ?? 0).toInt(),
+                                                remarks: (m['remarks'] ?? '').toString(),
+                                                onView: () => _openUrl(url),
+                                                onDownload: () => _openUrl(url, download: true),
+                                              );
+                                            },
+                                          ),
+                                      ],
+                                    );
+                                  },
+                                ),
                               ],
                             ),
                           ),
@@ -639,6 +787,13 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     );
   }
 
+  Future<void> _openUrl(String url, {bool download = false}) async {
+    if (url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    await launchUrl(uri, mode: LaunchMode.externalApplication);
+  }
+
   Widget _emptyRow(BuildContext context, String text) {
     final cs = Theme.of(context).colorScheme;
     return Container(
@@ -734,4 +889,191 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
   }
 
   Widget _error(String msg) => Center(child: Text(msg));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// "Other Documents" pieces
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _UploadsSearchField extends StatelessWidget {
+  final TextEditingController controller;
+  final ValueChanged<String> onChanged;
+  const _UploadsSearchField({required this.controller, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return TextField(
+      controller: controller,
+      onChanged: onChanged,
+      decoration: InputDecoration(
+        hintText: 'Search documents...',
+        prefixIcon: const Icon(Icons.search),
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        filled: true,
+        fillColor: Colors.white,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: Colors.grey.shade300),
+        ),
+      ),
+    );
+  }
+}
+
+class _UploadItem extends StatelessWidget {
+  final String name;
+  final String fileName;
+  final dynamic createdAt; // Timestamp or DateTime
+  final int sizeBytes;
+  final String remarks;
+  final VoidCallback onView;
+  final VoidCallback onDownload;
+
+  const _UploadItem({
+    required this.name,
+    required this.fileName,
+    required this.createdAt,
+    required this.sizeBytes,
+    required this.remarks,
+    required this.onView,
+    required this.onDownload,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final ext = _ext(fileName);
+    final icon = _fileIcon(ext);
+    final date = _fmtDate(createdAt);
+    final size = _fmtSize(sizeBytes);
+
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFEFF3FF),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  padding: const EdgeInsets.all(8),
+                  child: Icon(icon, size: 20, color: const Color(0xFF3559FF)),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                      const SizedBox(height: 2),
+                      Text(fileName, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: [
+                          const Icon(Icons.calendar_today, size: 14, color: Colors.black54),
+                          const SizedBox(width: 6),
+                          Text(date, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                          const SizedBox(width: 14),
+                          Text(size, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            if (remarks.isNotEmpty)
+              Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFF6F8FE),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('Remarks: ', style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87)),
+                    Expanded(child: Text(remarks, style: const TextStyle(color: Colors.black87, height: 1.2))),
+                  ],
+                ),
+              ),
+            const SizedBox(height: 10),
+            Row(
+              children: [
+                TextButton.icon(
+                  onPressed: onView,
+                  icon: const Icon(Icons.visibility_outlined, size: 18),
+                  label: const Text('View'),
+                ),
+                const SizedBox(width: 8),
+                TextButton.icon(
+                  onPressed: onDownload,
+                  icon: const Icon(Icons.download_rounded, size: 18),
+                  label: const Text('Download'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _ext(String name) {
+    final i = name.lastIndexOf('.');
+    return i == -1 ? '' : name.substring(i + 1).toLowerCase();
+  }
+
+  static IconData _fileIcon(String ext) {
+    switch (ext) {
+      case 'pdf':
+        return Icons.picture_as_pdf_outlined;
+      case 'doc':
+      case 'docx':
+        return Icons.description_outlined;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+        return Icons.image_outlined;
+      default:
+        return Icons.insert_drive_file_outlined;
+    }
+  }
+
+  static String _fmtDate(dynamic ts) {
+    DateTime? dt;
+    if (ts is Timestamp) dt = ts.toDate();
+    if (ts is DateTime) dt = ts;
+    dt ??= DateTime.now();
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
+    }
+
+  static String _fmtSize(int bytes) {
+    if (bytes <= 0) return '0 B';
+    const k = 1024.0;
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    var i = 0;
+    var v = bytes.toDouble();
+    while (v >= k && i < units.length - 1) {
+      v /= k;
+      i++;
+    }
+    final s = (i <= 1) ? v.toStringAsFixed(0) : v.toStringAsFixed(1);
+    return '$s ${units[i]}';
+  }
 }
