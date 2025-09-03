@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:smart_drive/booking.dart';
+import 'package:smart_drive/my_bookings.dart'; // ← NEW: navigate target
 
 class UserSlotBooking extends StatefulWidget {
   const UserSlotBooking({super.key});
@@ -19,6 +20,12 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
 
   // Horizontal date scroller (infinite-forward feel)
   final ScrollController _dateScroll = ScrollController();
+
+  // ── NEW: bookings batching + cache ─────────────────────────────────────────
+  // Cache booked maps per selected date key (yyyy-mm-dd)
+  final Map<String, Map<String, bool>> _bookedCacheByDay = {};
+  bool _bookedLoading = false;
+  String get _dayKey => DateFormat('yyyy-MM-dd').format(selectedDate);
 
   @override
   void dispose() {
@@ -74,6 +81,14 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                 fontSize: _scale(sw, 16, 18, 20) * ts,
               ),
             ),
+
+            // ── NEW: "My Bookings" action button ─────────────────────────────
+            actions: [
+              Padding(
+                padding: EdgeInsets.only(right: _scale(sw, 8, 12, 16)),
+                child: _MyBookingsActionButton(sw: sw, ts: ts),
+              ),
+            ],
           ),
         ],
         body: Column(
@@ -92,7 +107,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     );
   }
 
-  // ————————————————— UI: Date selector (sequential + horizontal scroll with snapping) —————————————————
+  // ————————————————— UI: Date selector —————————————————
   Widget _buildDateSelector(BuildContext context) {
     return LayoutBuilder(builder: (context, constraints) {
       final media = MediaQuery.of(context);
@@ -104,7 +119,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
       final barPaddingV = _scale(sw, 10, 12, 14);
       final barHeight = _scale(sw, 64, 70, 82);
 
-      // Visual sizing for cards (we size nicely but dates are pure +1 day sequence)
+      // Visual sizing for cards
       final gap = _scale(sw, 6, 8, 10);
       final minCard = _scale(sw, 60, 68, 76);
       final desired = _scale(sw, 72, 80, 92);
@@ -124,7 +139,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
       final monSize = _scale(sw, 9, 10, 11) * ts;
 
       DateTime dateForIndex(int index) {
-        // First = today (midnight), then strictly +index days
+        // First = today (midnight), then +index days
         final todayMid = _atMidnight(DateTime.now());
         return _atMidnight(todayMid.add(Duration(days: index)));
       }
@@ -150,8 +165,9 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
               setState(() {
                 selectedDate = date;
                 selectedSlotId = null;
+                // Optional: force refresh for a date instead of using cache
+                // _bookedCacheByDay.remove(_dayKey);
               });
-              // Center-ish the tapped item
               _scrollToIndex(index);
             },
             child: Container(
@@ -263,15 +279,12 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
         final docs =
             List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? const []);
 
-        // Build a booked map for all the slots visible on the selected date
         return FutureBuilder<Map<String, bool>>(
-          future: _fetchBookedMap(docs),
+          future: _fetchBookedMapBatched(docs),
           builder: (context, bookedSnap) {
-            if (bookedSnap.connectionState == ConnectionState.waiting) {
-              return const Center(child: CircularProgressIndicator());
-            }
+            final bookedMap =
+                bookedSnap.data ?? _bookedCacheByDay[_dayKey] ?? <String, bool>{};
 
-            final bookedMap = bookedSnap.data ?? <String, bool>{};
             if (docs.isEmpty) {
               return _buildEmptyState(context);
             }
@@ -293,63 +306,100 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
             final outerMargin = _scale(sw, 12, 20, 28);
             final headerPad = _scale(sw, 10, 12, 14);
 
-            return Container(
-              margin: EdgeInsets.all(outerMargin),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                boxShadow: const [
-                  BoxShadow(
-                    color: Colors.black12,
-                    blurRadius: 3,
-                    offset: Offset(0, 1),
-                  ),
-                ],
-              ),
-              child: Column(
-                children: [
-                  // Header
-                  Container(
-                    padding: EdgeInsets.all(headerPad),
-                    decoration: const BoxDecoration(
-                      color: Color(0xFFF8F9FA),
-                      borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(8),
-                        topRight: Radius.circular(8),
+            return Stack(
+              children: [
+                Container(
+                  margin: EdgeInsets.all(outerMargin),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: const [
+                      BoxShadow(
+                        color: Colors.black12,
+                        blurRadius: 3,
+                        offset: Offset(0, 1),
                       ),
-                      border:
-                          Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
-                    ),
-                    child: Row(
-                      children: [
-                        Text('🎯',
-                            style: TextStyle(
-                                fontSize: _scale(sw, 14, 16, 18))),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            'Available slots for ${DateFormat('EEEE, d MMM').format(selectedDate)} - Select your preferred time',
-                            style: TextStyle(
-                              fontSize: _scale(sw, 12, 13, 14),
-                              color: const Color(0xFF6B7280),
-                            ),
+                    ],
+                  ),
+                  child: Column(
+                    children: [
+                      // Header
+                      Container(
+                        padding: EdgeInsets.all(headerPad),
+                        decoration: const BoxDecoration(
+                          color: Color(0xFFF8F9FA),
+                          borderRadius: BorderRadius.only(
+                            topLeft: Radius.circular(8),
+                            topRight: Radius.circular(8),
+                          ),
+                          border: Border(
+                            bottom: BorderSide(color: Color(0xFFE5E7EB)),
                           ),
                         ),
-                      ],
-                    ),
-                  ),
+                        child: Row(
+                          children: [
+                            Text('🎯',
+                                style: TextStyle(
+                                    fontSize: _scale(sw, 14, 16, 18))),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                'Available slots for ${DateFormat('EEEE, d MMM').format(selectedDate)} - Select your preferred time',
+                                style: TextStyle(
+                                  fontSize: _scale(sw, 12, 13, 14),
+                                  color: const Color(0xFF6B7280),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
 
-                  // Slots
-                  Expanded(
-                    child: ListView(
-                      children: grouped.entries
-                          .map((e) =>
-                              _buildTimeSlotGroup(context, e.key, e.value, bookedMap))
-                          .toList(),
+                      // Slots
+                      Expanded(
+                        child: ListView(
+                          children: grouped.entries
+                              .map((e) => _buildTimeSlotGroup(
+                                    context,
+                                    e.key,
+                                    e.value,
+                                    bookedMap,
+                                  ))
+                              .toList(),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Subtle top-right progress while booked map resolves (first time)
+                if (_bookedLoading &&
+                    (bookedSnap.connectionState ==
+                        ConnectionState.waiting))
+                  Positioned(
+                    right: 16,
+                    top: 16,
+                    child: DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: const [
+                          BoxShadow(color: Colors.black12, blurRadius: 6)
+                        ],
+                        border: Border.all(color: Color(0xFFE5E7EB)),
+                      ),
+                      child: const Padding(
+                        padding:
+                            EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        child: SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
+                      ),
                     ),
                   ),
-                ],
-              ),
+              ],
             );
           },
         );
@@ -357,23 +407,63 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     );
   }
 
-  /// Returns a map of slotId -> isBooked (status == "booked")
-  Future<Map<String, bool>> _fetchBookedMap(List<QueryDocumentSnapshot> docs) async {
-    final Map<String, bool> booked = {};
-    for (final doc in docs) {
-      final data = doc.data() as Map<String, dynamic>;
-      final slotId = (data['slot_id'] ?? doc.id).toString();
-
-      final q = await FirebaseFirestore.instance
-          .collection('bookings')
-          .where('slot_id', isEqualTo: slotId)
-          .where('status', isEqualTo: 'booked') // only "booked"
-          .limit(1)
-          .get();
-
-      booked[slotId] = q.docs.isNotEmpty;
+  /// NEW: Batched fetch of bookings for the given slots using whereIn (<=30 per chunk).
+  /// Returns map<slot_id, isBooked> and caches per day.
+  Future<Map<String, bool>> _fetchBookedMapBatched(
+      List<QueryDocumentSnapshot> docs) async {
+    // If cached for this day, return immediately.
+    if (_bookedCacheByDay.containsKey(_dayKey)) {
+      return _bookedCacheByDay[_dayKey]!;
     }
-    return booked;
+
+    // Build list of slotIds present in the UI for the selected day.
+    final List<String> slotIds = [];
+    for (final d in docs) {
+      final data = d.data() as Map<String, dynamic>;
+      final sid = (data['slot_id'] ?? d.id).toString();
+      slotIds.add(sid);
+    }
+    if (slotIds.isEmpty) {
+      _bookedCacheByDay[_dayKey] = const {};
+      return const {};
+    }
+
+    if (mounted) setState(() => _bookedLoading = true);
+    try {
+      // Chunk into groups of up to 30 (Firestore whereIn limit).
+      const int chunkSize = 30;
+      final List<List<String>> chunks = [];
+      for (var i = 0; i < slotIds.length; i += chunkSize) {
+        chunks.add(slotIds.sublist(
+            i, i + chunkSize > slotIds.length ? slotIds.length : i + chunkSize));
+      }
+
+      final Map<String, bool> booked = {};
+      for (final chunk in chunks) {
+        final snap = await FirebaseFirestore.instance
+            .collection('bookings')
+            .where('slot_id', whereIn: chunk)
+            .where('status', whereIn: ['booked', 'confirmed'])
+            .get();
+
+        for (final b in snap.docs) {
+          final bd = b.data();
+          final sid = (bd['slot_id'] ?? '').toString();
+          if (sid.isNotEmpty) booked[sid] = true;
+        }
+      }
+
+      // Mark all others as not booked.
+      for (final sid in slotIds) {
+        booked.putIfAbsent(sid, () => false);
+      }
+
+      // Cache result for this day key.
+      _bookedCacheByDay[_dayKey] = booked;
+      return booked;
+    } finally {
+      if (mounted) setState(() => _bookedLoading = false);
+    }
   }
 
   Widget _buildEmptyState(BuildContext context) {
@@ -432,11 +522,11 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
 
   // ————————————————— Group section —————————————————
   Widget _buildTimeSlotGroup(
-      BuildContext context,
-      String period,
-      List<QueryDocumentSnapshot> slots,
-      Map<String, bool> bookedMap,
-      ) {
+    BuildContext context,
+    String period,
+    List<QueryDocumentSnapshot> slots,
+    Map<String, bool> bookedMap,
+  ) {
     final sw = MediaQuery.of(context).size.width;
     final titleSize = _scale(sw, 13, 14, 16);
     final groupPad = _scale(sw, 12, 16, 20);
@@ -506,11 +596,11 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
 
   // ————————————————— Slot card (handles "Expired" + "Booked") —————————————————
   Widget _buildSlotCard(
-      BuildContext context,
-      QueryDocumentSnapshot slot,
-      double cardWidth,
-      bool isBooked, // NEW
-      ) {
+    BuildContext context,
+    QueryDocumentSnapshot slot,
+    double cardWidth,
+    bool isBooked,
+  ) {
     final sw = MediaQuery.of(context).size.width;
     final ts = MediaQuery.of(context).textScaleFactor.clamp(0.9, 1.2);
     final data = slot.data() as Map<String, dynamic>;
@@ -543,14 +633,11 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     final costSize = _scale(sw, 14, 16, 18) * ts;
 
     final borderColor = disabled
-        ? const Color(0xFFD1D5DB) // gray-300
-        : (isSelected
-            ? const Color(0xFF10B981)
-            : const Color(0xFFE5E7EB));
+        ? const Color(0xFFD1D5DB)
+        : (isSelected ? const Color(0xFF10B981) : const Color(0xFFE5E7EB));
 
-    final bgColor = disabled
-        ? const Color(0xFFF9FAFB) // gray-50
-        : (isSelected ? const Color(0xFF10B981) : Colors.white);
+    final bgColor =
+        disabled ? const Color(0xFFF9FAFB) : (isSelected ? const Color(0xFF10B981) : Colors.white);
 
     final shadow = disabled
         ? null
@@ -604,7 +691,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                       horizontal: badgePadH, vertical: badgePadV),
                   decoration: BoxDecoration(
                     color: disabled
-                        ? const Color(0xFFF3F4F6) // muted badge
+                        ? const Color(0xFFF3F4F6)
                         : (isSelected
                             ? Colors.white.withOpacity(0.2)
                             : const Color(0xFFEFF6FF)),
@@ -995,5 +1082,41 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
     final end = _parseEndTime(slotTime);
     if (end.year == 1970) return false; // on parse failure, do not mark expired
     return end.isBefore(now) || end.isAtSameMomentAs(now);
+  }
+}
+
+/// Small, responsive action button component for app bar
+class _MyBookingsActionButton extends StatelessWidget {
+  final double sw;
+  final double ts;
+  const _MyBookingsActionButton({required this.sw, required this.ts});
+
+  @override
+  Widget build(BuildContext context) {
+    final compact = sw < 380;
+    final iconSize = _UserSlotBookingState._scale(sw, 16, 18, 20);
+    final fontSize = _UserSlotBookingState._scale(sw, 12, 13, 14) * ts;
+
+    return TextButton.icon(
+      onPressed: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => const MyBookingsPage(), // ← ensure this exists
+          ),
+        );
+      },
+      style: TextButton.styleFrom(
+        foregroundColor: Colors.white,
+        padding: EdgeInsets.symmetric(
+          horizontal: _UserSlotBookingState._scale(sw, 8, 10, 12),
+          vertical: _UserSlotBookingState._scale(sw, 6, 8, 10),
+        ),
+      ),
+      icon: Icon(Icons.calendar_month, size: iconSize, color: Colors.white),
+      label: compact
+          ? const SizedBox.shrink()
+          : Text('My Bookings', style: TextStyle(fontSize: fontSize, color: Colors.white)),
+    );
   }
 }

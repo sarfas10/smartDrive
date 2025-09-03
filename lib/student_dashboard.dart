@@ -1,3 +1,4 @@
+// student_dashboard.dart
 import 'dart:math';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -12,7 +13,9 @@ import 'package:smart_drive/onboarding_forms.dart';
 import 'package:smart_drive/user_materials_page.dart';
 import 'package:smart_drive/user_settings.dart';
 import 'package:smart_drive/user_slot_booking.dart';
+import 'package:smart_drive/upload_document_page.dart';
 
+/// ───────────────────── Background grain painter ─────────────────────
 class _GrainPainter extends CustomPainter {
   final double opacity;
   _GrainPainter({this.opacity = 0.06});
@@ -43,6 +46,7 @@ class _GrainPainter extends CustomPainter {
   bool shouldRepaint(covariant _GrainPainter oldDelegate) => oldDelegate.opacity != opacity;
 }
 
+/// ───────────────────────────────── Student Dashboard ────────────────────────────────
 class StudentDashboard extends StatefulWidget {
   const StudentDashboard({super.key});
   @override
@@ -56,6 +60,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
   String userStatus = '';
   Map<String, dynamic> userData = {};
   bool isLoading = true;
+
+  // anchor for bell menu
+  final GlobalKey _bellAnchorKey = GlobalKey();
 
   @override
   void initState() {
@@ -135,53 +142,282 @@ class _StudentDashboardState extends State<StudentDashboard> {
     }
   }
 
+  // photo stream from user_profiles/{uid}.photo_url
+  Stream<String?> _photoUrlStream(String uid) {
+    return _firestore
+        .collection('user_profiles')
+        .doc(uid)
+        .snapshots()
+        .map((snap) => (snap.data()?['photo_url'] as String?)?.trim())
+        .distinct();
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (isLoading) {
+      return const Scaffold(
+        backgroundColor: Color(0xFFF6F7FB),
+        body: SafeArea(child: Center(child: CircularProgressIndicator())),
+      );
+    }
+
+    final uid = _auth.currentUser?.uid;
+    final role = (userData['role'] ?? 'student').toString();
+
     return Scaffold(
-      body: Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topLeft, end: Alignment.bottomRight,
-            colors: [Color(0xFF667eea), Color(0xFF764ba2), Color(0xFF89f7fe)],
-            stops: [0.0, 0.5, 1.0],
-          ),
-        ),
-        child: SafeArea(
-          child: isLoading
-              ? const Center(child: CircularProgressIndicator(color: Colors.white))
-              : SingleChildScrollView(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildHeader(),
-                      const SizedBox(height: 20),
-                      if (userStatus == 'pending') _buildPendingBanner(),
-                      const SizedBox(height: 20),
-                      _buildQuickStats(),
-                      const SizedBox(height: 24),
-                      _buildMainFeatures(),
-                      const SizedBox(height: 24),
-                      _buildSecondaryFeatures(),
-                    ],
+      backgroundColor: const Color(0xFFF6F7FB),
+      body: SafeArea(
+        child: CustomScrollView(
+          slivers: [
+            // ── Pinned top bar
+            SliverAppBar(
+              backgroundColor: Colors.white,
+              foregroundColor: Colors.black,
+              pinned: true,
+              elevation: 0,
+              title: const Text('Student Dashboard'),
+              actions: [
+                if (uid != null)
+                  NotificationBell(
+                    uid: uid,
+                    role: role.toLowerCase(),
+                    userStatus: userStatus.toLowerCase(),
+                    anchorKey: _bellAnchorKey,
                   ),
+                // transparent icon to hold anchor key
+                IconButton(
+                  key: _bellAnchorKey,
+                  icon: const Icon(Icons.notifications_none_rounded, color: Colors.transparent),
+                  onPressed: () {},
                 ),
+                IconButton(
+                  icon: const Icon(Icons.settings_outlined),
+                  onPressed: _navigateToSettings,
+                ),
+                const SizedBox(width: 8),
+              ],
+            ),
+
+            // ── Keep the original gradient name card with Cloudinary photo
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Builder(
+                  builder: (_) {
+                    if (uid == null) {
+                      return _NameCard(
+                        name: (userData['name'] ?? 'Student').toString(),
+                        email: (userData['email'] ?? '').toString(),
+                        role: role,
+                        photoUrl: null,
+                      );
+                    }
+                    return StreamBuilder<String?>(
+                      stream: _photoUrlStream(uid),
+                      builder: (context, snap) {
+                        final photoUrl = snap.data;
+                        return _NameCard(
+                          name: (userData['name'] ?? 'Student').toString(),
+                          email: (userData['email'] ?? '').toString(),
+                          role: role,
+                          photoUrl: photoUrl,
+                        );
+                      },
+                    );
+                  },
+                ),
+              ),
+            ),
+
+            // ── Onboarding banner if pending
+            if (userStatus == 'pending')
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: _PendingBanner(onComplete: _navigateToOnboarding),
+                ),
+              ),
+
+            // ── Primary navigation options (Quick Actions)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _SectionTitle('Quick Actions'),
+                    const SizedBox(height: 12),
+
+                    // Row 1
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _PrimaryTile(
+                            icon: Icons.calendar_month,
+                            color: Colors.orange,
+                            title: 'Book Slot',
+                            onTap: _navigateToSlotBooking,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _PrimaryTile(
+                            icon: Icons.access_time, // primary
+                            color: const Color(0xFF00695C),
+                            title: 'Attendance Tracker',
+                            onTap: _navigateToAttendance,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Row 2
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _PrimaryTile(
+                            icon: Icons.menu_book,
+                            color: const Color(0xFF1565C0),
+                            title: 'Study Materials',
+                            onTap: _navigateToStudyMaterials,
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _PrimaryTile(
+                            icon: Icons.quiz,
+                            color: const Color(0xFF6A1B9A),
+                            title: 'Mock Tests',
+                            onTap: _navigateToMockTests,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            // ── More options
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const _SectionTitle('More Options'),
+                    const SizedBox(height: 12),
+
+                    _ActionTile(
+                      icon: Icons.upload_file_rounded,
+                      iconColor: const Color(0xFF2D5BFF),
+                      title: 'Upload Documents',
+                      subtitle: 'Add or manage KYC and other files',
+                      onTap: _navigateToUploadDocuments,
+                    ),
+                    const SizedBox(height: 12),
+                    _ActionTile(
+                      icon: Icons.download_rounded,
+                      iconColor: const Color(0xFF455A64),
+                      title: 'Downloadables',
+                      subtitle: 'Forms, PDFs, guides & resources',
+                      onTap: _navigateToDownloadables,
+                    ),
+                    const SizedBox(height: 12),
+                    _ActionTile(
+                      icon: Icons.receipt,
+                      iconColor: const Color(0xFF5D4037),
+                      title: 'Invoice History',
+                      subtitle: 'See your payment receipts and invoices',
+                      onTap: _navigateToInvoices,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SliverToBoxAdapter(child: SizedBox(height: 24)),
+          ],
         ),
       ),
     );
   }
 
-  // =========================
-  // HEADER WITH NOTIFICATION BELL
-  // =========================
-  final GlobalKey _bellAnchorKey = GlobalKey(); // dedicated anchor for bell icon
+  // ── Navigation hooks
+  void _navigateToOnboarding() {
+    Navigator.push(context, MaterialPageRoute(builder: (context) => OnboardingForm()));
+  }
 
-  Widget _buildHeader() {
-    final name = (userData['name'] ?? 'Student').toString();
-    final role = (userData['role'] ?? 'student').toString();
-    final email = (userData['email'] ?? '').toString();
-    final uid = _auth.currentUser?.uid;
+  void _navigateToSlotBooking() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSlotBooking()));
+  }
 
+  void _navigateToStudyMaterials() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserMaterialsPage()));
+  }
+
+  void _navigateToMockTests() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const MockTestsListPage()));
+  }
+
+  void _navigateToUploadDocuments() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const UploadDocumentPage()));
+  }
+
+  void _navigateToAttendance() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserAttendancePage()));
+  }
+
+  void _navigateToInvoices() {
+    debugPrint('Navigate to Invoices');
+  }
+
+  void _navigateToDownloadables() {
+    // TODO: Wire to your page if available:
+    // Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadablesPage()));
+    debugPrint('Navigate to Downloadables');
+  }
+
+  void _navigateToSettings() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => UserSettingsScreen()));
+  }
+}
+
+/// ──────────────────── UI pieces ────────────────────
+
+class _SectionTitle extends StatelessWidget {
+  final String text;
+  const _SectionTitle(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: [
+        const Icon(Icons.tune_rounded, size: 18, color: Colors.black87),
+        const SizedBox(width: 8),
+        Text(
+          text,
+          style: const TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 16,
+            color: Colors.black87,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _NameCard extends StatelessWidget {
+  final String name;
+  final String email;
+  final String role;
+  final String? photoUrl;
+  const _NameCard({required this.name, required this.email, required this.role, this.photoUrl});
+
+  @override
+  Widget build(BuildContext context) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(20),
       child: Container(
@@ -207,39 +443,11 @@ class _StudentDashboardState extends State<StudentDashboard> {
                 border: Border.all(color: Colors.white.withOpacity(0.08), width: 0.6),
               ),
             ),
-            // Top-right: settings + notification
-            Positioned(
-              top: 6,
-              right: 6,
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.settings_outlined, color: Colors.white, size: 26),
-                    splashRadius: 22,
-                    onPressed: _navigateToSettings,
-                  ),
-                  if (uid != null)
-                    NotificationBell(
-                      uid: uid,
-                      role: role.toLowerCase(),
-                      userStatus: userStatus.toLowerCase(),
-                      anchorKey: _bellAnchorKey, // pass anchor only
-                    ),
-                ],
-              ),
-            ),
-
-            // Left block: avatar + text
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    radius: 36,
-                    backgroundColor: Colors.white.withOpacity(0.14),
-                    child: const Icon(Icons.person, color: Colors.white, size: 38),
-                  ),
+                  _Avatar(photoUrl: photoUrl),
                   const SizedBox(width: 16),
                   Expanded(
                     child: Column(
@@ -282,206 +490,188 @@ class _StudentDashboardState extends State<StudentDashboard> {
       ),
     );
   }
+}
 
-  Widget _buildPendingBanner() {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Colors.orange.withOpacity(0.8), Colors.red.withOpacity(0.8)],
-          begin: Alignment.centerLeft, end: Alignment.centerRight,
-        ),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.white.withOpacity(0.3)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.warning_amber, color: Colors.white, size: 24),
-          const SizedBox(width: 12),
-          const Expanded(
-            child: Text(
-              'Please complete your profile onboarding to access all features',
-              style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
-            ),
-          ),
-          TextButton(
-            onPressed: _navigateToOnboarding,
-            child: const Text('Complete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-          ),
-        ],
-      ),
-    );
-  }
+class _Avatar extends StatelessWidget {
+  final String? photoUrl;
+  const _Avatar({this.photoUrl});
 
-  Widget _buildQuickStats() {
-    return Row(
-      children: [
-        Expanded(child: _buildStatCard('Attendance', '85%', Icons.calendar_today, Colors.green)),
-        const SizedBox(width: 12),
-        Expanded(child: _buildStatCard('Lessons', '12/20', Icons.drive_eta, Colors.blue)),
-        const SizedBox(width: 12),
-        Expanded(child: _buildStatCard('Tests', '8/10', Icons.quiz, Colors.purple)),
-      ],
-    );
-  }
-
-  Widget _buildStatCard(String title, String value, IconData icon, Color color) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: _glassmorphismDecoration(),
-      child: Column(
-        children: [
-          Icon(icon, color: color, size: 28),
-          const SizedBox(height: 8),
-          Text(value, style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-          Text(title, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMainFeatures() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('Quick Actions', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 16),
-        Row(
-          children: [
-            Expanded(child: _buildFeatureCard('Book Slot', Icons.calendar_month, Colors.orange, _navigateToSlotBooking)),
-            const SizedBox(width: 12),
-            Expanded(child: _buildFeatureCard('Payments', Icons.payment, Colors.green, _navigateToPayments)),
-          ],
-        ),
-        const SizedBox(height: 12),
-        Row(
-          children: [
-            Expanded(child: _buildFeatureCard('Study Materials', Icons.menu_book, Colors.blue, _navigateToStudyMaterials)),
-            const SizedBox(width: 12),
-            Expanded(child: _buildFeatureCard('Mock Tests', Icons.quiz, Colors.purple, _navigateToMockTests)),
-          ],
-        ),
-      ],
-    );
-  }
-
-  Widget _buildSecondaryFeatures() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('More Features', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold)),
-        const SizedBox(height: 16),
-        _buildListFeature('Profile Settings', Icons.person, 'Manage your personal information and documents', _navigateToProfile),
-        const SizedBox(height: 12),
-        _buildListFeature('Attendance Tracker', Icons.access_time, 'View your attendance history and statistics', _navigateToAttendance),
-        const SizedBox(height: 12),
-        _buildListFeature('Invoice History', Icons.receipt, 'View all your payment receipts and invoices', _navigateToInvoices),
-      ],
-    );
-  }
-
-  Widget _buildFeatureCard(String title, IconData icon, Color color, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(20),
-        decoration: _glassmorphismDecoration(),
-        child: Column(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: color.withOpacity(0.2), shape: BoxShape.circle,
-                border: Border.all(color: color.withOpacity(0.3)),
-              ),
-              child: Icon(icon, color: color, size: 30),
-            ),
-            const SizedBox(height: 12),
-            Text(
-              title, textAlign: TextAlign.center,
-              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
-            ),
-          ],
+  @override
+  Widget build(BuildContext context) {
+    final bg = Colors.white.withOpacity(0.14);
+    if (photoUrl == null || photoUrl!.isEmpty) {
+      return CircleAvatar(
+        radius: 36,
+        backgroundColor: bg,
+        child: const Icon(Icons.person, color: Colors.white, size: 38),
+      );
+    }
+    return CircleAvatar(
+      radius: 36,
+      backgroundColor: bg,
+      child: ClipOval(
+        child: Image.network(
+          photoUrl!,
+          width: 72,
+          height: 72,
+          fit: BoxFit.cover,
+          errorBuilder: (_, __, ___) => const Icon(Icons.person, color: Colors.white, size: 38),
+          frameBuilder: (context, child, frame, wasSyncLoaded) {
+            if (wasSyncLoaded) return child;
+            return AnimatedOpacity(
+              opacity: frame == null ? 0 : 1,
+              duration: const Duration(milliseconds: 250),
+              child: child,
+            );
+          },
         ),
       ),
     );
   }
+}
 
-  Widget _buildListFeature(String title, IconData icon, String subtitle, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
+class _PendingBanner extends StatelessWidget {
+  final VoidCallback onComplete;
+  const _PendingBanner({required this.onComplete});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Colors.orange.shade50,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: Padding(
         padding: const EdgeInsets.all(16),
-        decoration: _glassmorphismDecoration(),
         child: Row(
           children: [
-            Container(
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(color: Colors.white.withOpacity(0.2), shape: BoxShape.circle),
-              child: Icon(icon, color: Colors.white, size: 24),
+            const Icon(Icons.warning_amber, color: Color(0xFFF57C00), size: 24),
+            const SizedBox(width: 12),
+            const Expanded(
+              child: Text(
+                'Please complete your profile onboarding to access all features',
+                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
+              ),
             ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600)),
-                Text(subtitle, style: const TextStyle(color: Colors.white70, fontSize: 12)),
-              ]),
+            ElevatedButton(
+              onPressed: onComplete,
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF57C00), foregroundColor: Colors.white),
+              child: const Text('Complete'),
             ),
-            const Icon(Icons.arrow_forward_ios, color: Colors.white70, size: 16),
           ],
         ),
       ),
     );
   }
+}
 
-  BoxDecoration _glassmorphismDecoration() {
-    return BoxDecoration(
-      gradient: LinearGradient(
-        begin: Alignment.topLeft, end: Alignment.bottomRight,
-        colors: [Colors.white.withOpacity(0.2), Colors.white.withOpacity(0.1)],
+/// Primary big tiles (two per row)
+class _PrimaryTile extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final VoidCallback onTap;
+
+  const _PrimaryTile({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Card(
+        elevation: 0,
+        color: Colors.white,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+          child: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Icon(icon, color: color, size: 28),
+              ),
+              const SizedBox(height: 12),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
+              ),
+            ],
+          ),
+        ),
       ),
-      borderRadius: BorderRadius.circular(16),
-      border: Border.all(color: Colors.white.withOpacity(0.3), width: 1),
-      boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.1), blurRadius: 10, offset: const Offset(0, 5))],
     );
   }
+}
 
-  // Navigation
-  void _navigateToOnboarding() {
-    Navigator.push(context, MaterialPageRoute(builder: (context) => OnboardingForm()));
-  }
+class _ActionTile extends StatelessWidget {
+  final IconData icon;
+  final Color iconColor;
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
 
-  void _navigateToSlotBooking() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSlotBooking()));
-  }
+  const _ActionTile({
+    required this.icon,
+    required this.iconColor,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
 
-  void _navigateToPayments() { debugPrint('Navigate to Payments'); }
-
-  void _navigateToStudyMaterials() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserMaterialsPage()));
-  }
-
-  void _navigateToMockTests() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const MockTestsListPage()));
-  }
-
-  void _navigateToProfile() { debugPrint('Navigate to Profile'); }
-
-  void _navigateToAttendance() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserAttendancePage()));
-  }
-
-  void _navigateToInvoices() { debugPrint('Navigate to Invoices'); }
-
-  void _navigateToNotifications() { debugPrint('Navigate to Notifications'); }
-
-  void _navigateToSettings() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => UserSettingsScreen()));
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(14),
+          child: Row(
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  color: iconColor.withOpacity(0.08),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                padding: const EdgeInsets.all(10),
+                child: Icon(icon, color: iconColor),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                    const SizedBox(height: 4),
+                    Text(subtitle, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_right_rounded, color: Colors.black38),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
 /// ===============================
-/// Notification bell + dropdown
+/// Notification bell (ported from your code)
 /// ===============================
 class NotificationBell extends StatelessWidget {
   final String uid;
@@ -498,15 +688,12 @@ class NotificationBell extends StatelessWidget {
   });
 
   bool _isTargeted(Map<String, dynamic> m) {
-    // ---- legacy segments fallback
     final List segs = (m['segments'] as List?) ?? const ['all'];
     final Set<String> S = segs.map((e) => e.toString().toLowerCase()).toSet();
 
-    // ---- direct targeted UIDs
     final List targets = (m['target_uids'] as List?) ?? const [];
     final bool direct = targets.map((e) => e.toString()).contains(uid);
 
-    // ---- optional time window
     DateTime? _asDt(dynamic v) {
       if (v == null) return null;
       if (v is Timestamp) return v.toDate();
@@ -533,10 +720,8 @@ class NotificationBell extends StatelessWidget {
   Widget build(BuildContext context) {
     final fs = FirebaseFirestore.instance;
 
-    // Reads set stream
     final readsStream = fs.collection('users').doc(uid).collection('notif_reads').snapshots();
 
-    // Notifications stream (latest first)
     final notifsQuery = fs
         .collection('notifications')
         .orderBy('created_at', descending: true)
@@ -561,10 +746,30 @@ class NotificationBell extends StatelessWidget {
             }
             final unreadCount = targeted.where((d) => !readIds.contains(d.id)).length;
 
-            return _BellButton(
-              unread: unreadCount > 0,
-              anchorKey: anchorKey,
-              onOpen: () => _openMenu(context, targeted, readIds),
+            return Stack(
+              clipBehavior: Clip.none,
+              children: [
+                IconButton(
+                  icon: const Icon(Icons.notifications_none_rounded),
+                  onPressed: () => _openMenu(context, anchorKey, targeted, readIds),
+                ),
+                if (unreadCount > 0)
+                  Positioned(
+                    right: 6,
+                    top: 6,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD32F2F),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        unreadCount > 99 ? '99+' : '$unreadCount',
+                        style: const TextStyle(color: Colors.white, fontSize: 10),
+                      ),
+                    ),
+                  ),
+              ],
             );
           },
         );
@@ -574,14 +779,14 @@ class NotificationBell extends StatelessWidget {
 
   Future<void> _openMenu(
     BuildContext context,
+    GlobalKey anchorKey,
     List<QueryDocumentSnapshot> targeted,
     Set<String> readIds,
   ) async {
-    // Resolve overlay and anchor (use rootOverlay for reliability on mobile)
     final RenderBox? box = anchorKey.currentContext?.findRenderObject() as RenderBox?;
     final RenderBox? overlay = Overlay.of(context, rootOverlay: true)?.context.findRenderObject() as RenderBox?;
     if (box == null || overlay == null) {
-      // Fallback: bottom sheet (also shows "No notifications")
+      // fallback
       await showModalBottomSheet(
         context: context,
         builder: (_) => _NotificationsList(
@@ -608,7 +813,6 @@ class NotificationBell extends StatelessWidget {
       Offset.zero & overlay.size,
     );
 
-    // concrete width + bounded height for menu
     final double menuWidth = math.min(MediaQuery.of(context).size.width * 0.92, 340);
 
     await showMenu(
@@ -767,46 +971,6 @@ class _NotificationsList extends StatelessWidget {
           ),
         );
       },
-    );
-  }
-}
-
-class _BellButton extends StatelessWidget {
-  final bool unread;
-  final GlobalKey anchorKey;
-  final VoidCallback onOpen;
-
-  const _BellButton({
-    required this.unread,
-    required this.anchorKey,
-    required this.onOpen,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      clipBehavior: Clip.none,
-      children: [
-        IconButton(
-          key: anchorKey, // anchor key ONLY on the icon
-          icon: const Icon(Icons.notifications_none_rounded, color: Colors.white, size: 26),
-          splashRadius: 22,
-          onPressed: onOpen,
-        ),
-        if (unread)
-          Positioned(
-            right: 8,
-            top: 8,
-            child: Container(
-              width: 10,
-              height: 10,
-              decoration: const BoxDecoration(
-                color: Colors.redAccent,
-                shape: BoxShape.circle,
-              ),
-            ),
-          ),
-      ],
     );
   }
 }
