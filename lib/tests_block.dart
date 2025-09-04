@@ -663,13 +663,13 @@ class _PoolRow extends StatelessWidget {
 // Always-3-dots menu (both wide & narrow) — white background
 class _RowActions extends StatelessWidget {
   final VoidCallback onQuestions; // kept for compatibility (not shown)
-  final VoidCallback onAttempts;
+  final VoidCallback onAttempts;  // kept for compatibility (unused)
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _RowActions({
     required this.onQuestions,
-    required this.onAttempts,
+    required this.onAttempts, // unused now
     required this.onEdit,
     required this.onDelete,
   });
@@ -677,10 +677,6 @@ class _RowActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final menuItems = <PopupMenuEntry<String>>[
-      const PopupMenuItem(
-        value: 'attempts',
-        child: _MenuRow('Attempts', Icons.assessment_outlined),
-      ),
       const PopupMenuItem(
         value: 'edit',
         child: _MenuRow('Edit', Icons.edit),
@@ -693,9 +689,6 @@ class _RowActions extends StatelessWidget {
 
     void handleSelect(String v) {
       switch (v) {
-        case 'attempts':
-          onAttempts();
-          break;
         case 'edit':
           onEdit();
           break;
@@ -725,6 +718,7 @@ class _RowActions extends StatelessWidget {
     );
   }
 }
+
 
 class _MenuRow extends StatelessWidget {
   final String label;

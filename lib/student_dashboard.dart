@@ -78,7 +78,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
         if (doc.exists) {
           setState(() {
             userData = doc.data() as Map<String, dynamic>;
-            userStatus = userData['status'] ?? 'pending';
+            userStatus = (userData['status'] ?? 'pending').toString();
             isLoading = false;
           });
           await _ensurePlanRollOver(user.uid);
@@ -152,6 +152,15 @@ class _StudentDashboardState extends State<StudentDashboard> {
         .distinct();
   }
 
+  void _showAccessBlockedSnack() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Your account isn’t active yet. Complete onboarding to use Quick Actions.'),
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
@@ -163,6 +172,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
     final uid = _auth.currentUser?.uid;
     final role = (userData['role'] ?? 'student').toString();
+    final bool isActive = userStatus.toLowerCase() == 'active';
 
     return Scaffold(
       backgroundColor: const Color(0xFFF6F7FB),
@@ -198,7 +208,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
               ],
             ),
 
-            // ── Keep the original gradient name card with Cloudinary photo
+            // ── Gradient name card with Cloudinary photo
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -229,16 +239,19 @@ class _StudentDashboardState extends State<StudentDashboard> {
               ),
             ),
 
-            // ── Onboarding banner if pending
-            if (userStatus == 'pending')
+            // ── Onboarding banner if pending (or any non-active status)
+            // When active, keep a small spacer so Quick Actions stay properly positioned
+            if (!isActive)
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                   child: _PendingBanner(onComplete: _navigateToOnboarding),
                 ),
-              ),
+              )
+            else
+              const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-            // ── Primary navigation options (Quick Actions)
+            // ── Primary navigation options (Quick Actions) — RESTRICTED when not active
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -256,16 +269,22 @@ class _StudentDashboardState extends State<StudentDashboard> {
                             icon: Icons.calendar_month,
                             color: Colors.orange,
                             title: 'Book Slot',
+                            enabled: isActive,
+                            disabledNote: 'Activate to book slots',
                             onTap: _navigateToSlotBooking,
+                            onTapDisabled: _showAccessBlockedSnack,
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: _PrimaryTile(
-                            icon: Icons.access_time, // primary
+                            icon: Icons.access_time,
                             color: const Color(0xFF00695C),
                             title: 'Attendance Tracker',
+                            enabled: isActive,
+                            disabledNote: 'Activate to track attendance',
                             onTap: _navigateToAttendance,
+                            onTapDisabled: _showAccessBlockedSnack,
                           ),
                         ),
                       ],
@@ -280,7 +299,10 @@ class _StudentDashboardState extends State<StudentDashboard> {
                             icon: Icons.menu_book,
                             color: const Color(0xFF1565C0),
                             title: 'Study Materials',
+                            enabled: isActive,
+                            disabledNote: 'Activate to view materials',
                             onTap: _navigateToStudyMaterials,
+                            onTapDisabled: _showAccessBlockedSnack,
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -289,7 +311,10 @@ class _StudentDashboardState extends State<StudentDashboard> {
                             icon: Icons.quiz,
                             color: const Color(0xFF6A1B9A),
                             title: 'Mock Tests',
+                            enabled: isActive,
+                            disabledNote: 'Activate to attempt tests',
                             onTap: _navigateToMockTests,
+                            onTapDisabled: _showAccessBlockedSnack,
                           ),
                         ),
                       ],
@@ -299,7 +324,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
               ),
             ),
 
-            // ── More options
+            // ── More options (kept accessible)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -571,24 +596,36 @@ class _PrimaryTile extends StatelessWidget {
   final String title;
   final VoidCallback onTap;
 
+  // Access control + UX
+  final bool enabled;
+  final String? disabledNote;
+  final VoidCallback? onTapDisabled;
+
   const _PrimaryTile({
     required this.icon,
     required this.color,
     required this.title,
     required this.onTap,
+    this.enabled = true,
+    this.disabledNote,
+    this.onTapDisabled,
   });
+
+  static const double _kTileHeight = 150;      // <- fixed height for consistency
+  static const double _kNoteHeight = 30;       // <- reserved space for note (2 lines approx)
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Card(
-        elevation: 0,
-        color: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    final card = Card(
+      elevation: 0,
+      color: Colors.white,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      child: SizedBox(
+        height: _kTileHeight, // enforce consistent tile height
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.start,
             children: [
               Container(
                 padding: const EdgeInsets.all(14),
@@ -606,10 +643,77 @@ class _PrimaryTile extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
               ),
+              const SizedBox(height: 6),
+              // Always reserve space for the note; fade it out when enabled
+              SizedBox(
+                height: _kNoteHeight,
+                child: AnimatedOpacity(
+                  opacity: (!enabled && (disabledNote?.isNotEmpty ?? false)) ? 1.0 : 0.0,
+                  duration: const Duration(milliseconds: 180),
+                  child: Align(
+                    alignment: Alignment.topCenter,
+                    child: Text(
+                      (disabledNote?.isNotEmpty ?? false) ? disabledNote! : ' ', // keep space
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 11, color: Colors.black54),
+                    ),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
       ),
+    );
+
+    return Stack(
+      children: [
+        // Tap handling
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(16),
+            onTap: enabled ? onTap : (onTapDisabled ?? () {}),
+            child: card,
+          ),
+        ),
+        // Lock overlay
+        if (!enabled)
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Container(
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(16),
+                  color: Colors.white.withOpacity(0.55),
+                ),
+              ),
+            ),
+          ),
+        if (!enabled)
+          Positioned(
+            right: 10,
+            top: 10,
+            child: Tooltip(
+              message: 'Locked — complete onboarding',
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.black.withOpacity(0.75),
+                  borderRadius: BorderRadius.circular(999),
+                ),
+                child: const Row(
+                  children: [
+                    Icon(Icons.lock_rounded, size: 14, color: Colors.white),
+                    SizedBox(width: 4),
+                    Text('Locked', style: TextStyle(fontSize: 11, color: Colors.white)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 }
@@ -671,7 +775,7 @@ class _ActionTile extends StatelessWidget {
 }
 
 /// ===============================
-/// Notification bell (ported from your code)
+/// Notification bell
 /// ===============================
 class NotificationBell extends StatelessWidget {
   final String uid;
@@ -720,8 +824,14 @@ class NotificationBell extends StatelessWidget {
   Widget build(BuildContext context) {
     final fs = FirebaseFirestore.instance;
 
-    final readsStream = fs.collection('users').doc(uid).collection('notif_reads').snapshots();
+    // Reads (to know which are read + when)
+    final readsStream = fs
+        .collection('users')
+        .doc(uid)
+        .collection('notif_reads')
+        .snapshots();
 
+    // Latest notifications
     final notifsQuery = fs
         .collection('notifications')
         .orderBy('created_at', descending: true)
@@ -731,9 +841,19 @@ class NotificationBell extends StatelessWidget {
     return StreamBuilder<QuerySnapshot>(
       stream: readsStream,
       builder: (context, readsSnap) {
-        final readIds = <String>{
-          if (readsSnap.hasData) ...readsSnap.data!.docs.map((d) => d.id),
+        // Map of notifId -> readAt timestamp
+        final Map<String, DateTime?> readAtMap = {
+          if (readsSnap.hasData)
+            for (final d in readsSnap.data!.docs)
+              d.id: (() {
+                final m = (d.data() as Map).cast<String, dynamic>();
+                final v = m['readAt'];
+                if (v is Timestamp) return v.toDate();
+                if (v is DateTime) return v;
+                return null;
+              })(),
         };
+
         return StreamBuilder<QuerySnapshot>(
           stream: notifsQuery,
           builder: (context, notifSnap) {
@@ -744,14 +864,31 @@ class NotificationBell extends StatelessWidget {
                 if (_isTargeted(m)) targeted.add(d);
               }
             }
-            final unreadCount = targeted.where((d) => !readIds.contains(d.id)).length;
+
+            // Hide read notifications after 7 days from readAt
+            final now = DateTime.now();
+            final sevenDays = const Duration(days: 7);
+
+            final List<QueryDocumentSnapshot> visible = targeted.where((d) {
+              final readAt = readAtMap[d.id];
+              if (readAt == null) return true; // unread → always show
+              return now.difference(readAt) <= sevenDays; // keep if read ≤ 7d
+            }).toList();
+
+            final int unreadCount =
+                visible.where((d) => !readAtMap.containsKey(d.id)).length;
 
             return Stack(
               clipBehavior: Clip.none,
               children: [
                 IconButton(
                   icon: const Icon(Icons.notifications_none_rounded),
-                  onPressed: () => _openMenu(context, anchorKey, targeted, readIds),
+                  onPressed: () => _openMenu(
+                    context,
+                    anchorKey,
+                    visible,                     // pass only visible notifs
+                    readAtMap.keys.toSet(),      // for "isRead" checks
+                  ),
                 ),
                 if (unreadCount > 0)
                   Positioned(

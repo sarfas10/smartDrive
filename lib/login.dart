@@ -1,37 +1,39 @@
 import 'dart:math' as math;
 import 'dart:ui' as ui;
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+
 import 'services/session_service.dart';
 import 'messaging_setup.dart';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-
-import 'package:smart_drive/admin_dashboard.dart';
-import 'package:smart_drive/instructor_dashboard.dart';
-import 'package:smart_drive/student_dashboard.dart';
-import 'package:smart_drive/reusables/branding.dart';
-
+import 'student_dashboard.dart';
+import 'instructor_dashboard.dart';
+import 'admin_dashboard.dart';
 import 'register.dart';
 
+import 'package:smart_drive/reusables/branding.dart';
+
 class LoginScreen extends StatefulWidget {
-  const LoginScreen({super.key});
+  final bool skipBootCheck;
+  const LoginScreen({super.key, this.skipBootCheck = false});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
 }
 
-class _LoginScreenState extends State<LoginScreen>
-    with TickerProviderStateMixin {
-  // Background gradient animation
+class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin {
+  // Background + content animations
   late final AnimationController _bgController;
-
-  // Card/content animations
   late final AnimationController _cardController;
   late final Animation<double> _scaleIn;
   late final Animation<Offset> _slideUp;
   late final Animation<double> _fadeIn;
+
+  // Boot gating
+  bool _booting = true; // tiny splash on Login (disabled when skipBootCheck = true)
 
   bool obscurePassword = true;
   bool rememberMe = false;
@@ -41,7 +43,6 @@ class _LoginScreenState extends State<LoginScreen>
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
 
-  // Focus nodes for better keyboard handling
   final _emailFocusNode = FocusNode();
   final _passwordFocusNode = FocusNode();
 
@@ -51,36 +52,34 @@ class _LoginScreenState extends State<LoginScreen>
   void initState() {
     super.initState();
 
-    _bgController = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 18),
-    )..repeat();
+    _bgController = AnimationController(vsync: this, duration: const Duration(seconds: 18))..repeat();
+    _cardController = AnimationController(vsync: this, duration: const Duration(milliseconds: 600));
 
-    _cardController = AnimationController(
-      duration: const Duration(milliseconds: 600),
-      vsync: this,
-    );
-
-    _scaleIn = CurvedAnimation(
-      parent: _cardController,
-      curve: Curves.easeOutBack,
-    );
-
-    _slideUp = Tween<Offset>(
-      begin: const Offset(0, 0.2),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _cardController,
-      curve: Curves.easeOutCubic,
-    ));
-
-    _fadeIn = CurvedAnimation(
-      parent: _cardController,
-      curve: Curves.easeOut,
-    );
+    _scaleIn = CurvedAnimation(parent: _cardController, curve: Curves.easeOutBack);
+    _slideUp = Tween<Offset>(begin: const Offset(0, 0.2), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _cardController, curve: Curves.easeOutCubic));
+    _fadeIn = CurvedAnimation(parent: _cardController, curve: Curves.easeOut);
 
     _cardController.forward();
-    _restoreRemembered();
+
+    // If router already decided, skip tiny splash here.
+    if (widget.skipBootCheck) {
+      _booting = false;
+      _restoreRemembered();
+    } else {
+      _initBoot();
+    }
+  }
+
+  Future<void> _initBoot() async {
+    try {
+      await _restoreRemembered();
+      await _tryAutoRedirect();
+    } catch (e) {
+      debugPrint('Login boot error: $e');
+    } finally {
+      if (mounted) setState(() => _booting = false);
+    }
   }
 
   Future<void> _restoreRemembered() async {
@@ -93,6 +92,20 @@ class _LoginScreenState extends State<LoginScreen>
         _emailController.text = savedEmail!;
       });
     }
+  }
+
+  Future<void> _tryAutoRedirect() async {
+    final sp = await SharedPreferences.getInstance();
+    final remembered = sp.getBool('sd_remember_me') ?? false;
+    if (!remembered) return;
+
+    final session = await SessionService().read();
+    final uid = session.userId;
+    final role = (session.role ?? '').trim().toLowerCase();
+    if (uid == null || role.isEmpty) return;
+
+    if (!mounted) return;
+    await _goToRole(role);
   }
 
   @override
@@ -114,27 +127,22 @@ class _LoginScreenState extends State<LoginScreen>
       _showToast('Please enter your email', isError: true);
       return false;
     }
-
     if (!email.contains('@') || !email.contains('.')) {
       _showToast('Please enter a valid email address', isError: true);
       return false;
     }
-
     if (password.isEmpty) {
       _showToast('Please enter your password', isError: true);
       return false;
     }
-
     return true;
   }
 
   Future<void> _handleLogin() async {
-    // Dismiss keyboard
     _emailFocusNode.unfocus();
     _passwordFocusNode.unfocus();
-    
-    if (!_validateInputs()) return;
 
+    if (!_validateInputs()) return;
     setState(() => _isLoading = true);
 
     try {
@@ -142,29 +150,24 @@ class _LoginScreenState extends State<LoginScreen>
         email: _emailController.text.trim(),
         password: _passwordController.text,
       );
-
       final user = userCred.user;
       if (user == null) {
         _showToast('Could not sign in. Please try again.', isError: true);
         return;
       }
 
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(user.uid)
-          .get();
-
+      final doc =
+          await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
       if (!doc.exists) {
         _showToast('Profile not found. Contact support.', isError: true);
         return;
       }
 
       final data = doc.data();
-final rawRole = (data?['role'] ?? '').toString().trim().toLowerCase();
-// default to 'active' if you don't store a status
-final rawStatus = (data?['status'] ?? 'active').toString().trim().toLowerCase();
+      final rawRole = (data?['role'] ?? '').toString().trim().toLowerCase();
+      final rawStatus = (data?['status'] ?? 'active').toString().trim().toLowerCase();
 
-
+      // Remember-me prefs
       final prefs = await SharedPreferences.getInstance();
       if (rememberMe) {
         await prefs.setString('sd_saved_email', _emailController.text.trim());
@@ -174,47 +177,19 @@ final rawStatus = (data?['status'] ?? 'active').toString().trim().toLowerCase();
         await prefs.setBool('sd_remember_me', false);
       }
 
-      if (!mounted) return;
+      // Save session + subscribe to FCM topics
+      try {
+        await SessionService().save(
+          userId: user.uid,
+          role: rawRole,
+          status: rawStatus,
+        );
+        await subscribeUserSegments(role: rawRole, status: rawStatus);
+      } catch (e) {
+        debugPrint('Session/FCM error: $e'); // non-fatal
+      }
 
-      Widget next;
-switch (rawRole) {
-  case 'student':
-    next = StudentDashboard();
-    break;
-  case 'instructor':
-  case 'intsrtuctor': // handle typo
-    next =  InstructorDashboardPage();
-    break;
-  case 'admin':
-    next = const AdminDashboard();
-    break;
-  default:
-    _showToast('Unknown role "$rawRole". Contact support.', isError: true);
-    return;
-}
-
-// ⭐ Save session + subscribe to FCM topics
-try {
-  await SessionService().save(
-    userId: user.uid,
-    role: rawRole,
-    status: rawStatus,
-  );
-  await subscribeUserSegments(role: rawRole, status: rawStatus);
-} catch (e) {
-  // Non-fatal: continue to dashboard even if this fails
-  debugPrint('Topic/Session error: $e');
-}
-
-
-
-
-      await Navigator.of(context).pushReplacement(PageRouteBuilder(
-        pageBuilder: (_, __, ___) => next,
-        transitionsBuilder: (_, animation, __, child) =>
-            FadeTransition(opacity: animation, child: child),
-        transitionDuration: const Duration(milliseconds: 220),
-      ));
+      await _goToRole(rawRole);
     } on FirebaseAuthException catch (e) {
       _showToast(_mapAuthError(e), isError: true);
     } catch (_) {
@@ -222,6 +197,33 @@ try {
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  Future<void> _goToRole(String role) async {
+    late final Widget next;
+    switch (role) {
+      case 'student':
+        next = StudentDashboard();
+        break;
+      case 'instructor':
+      case 'intsrtuctor':
+        next = InstructorDashboardPage();
+        break;
+      case 'admin':
+        next = const AdminDashboard();
+        break;
+      default:
+        _showToast('Unknown role "$role". Contact support.', isError: true);
+        return;
+    }
+
+    if (!mounted) return;
+    await Navigator.of(context).pushReplacement(PageRouteBuilder(
+      pageBuilder: (_, __, ___) => next,
+      transitionsBuilder: (_, animation, __, child) =>
+          FadeTransition(opacity: animation, child: child),
+      transitionDuration: const Duration(milliseconds: 220),
+    ));
   }
 
   String _mapAuthError(FirebaseAuthException e) {
@@ -243,37 +245,6 @@ try {
     }
   }
 
-  void _navigateToRegister() {
-    _emailFocusNode.unfocus();
-    _passwordFocusNode.unfocus();
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (context) => const RegisterScreen()),
-    );
-  }
-
-  void _showToast(String message, {bool isError = false}) {
-    final overlay = Overlay.of(context);
-    late OverlayEntry overlayEntry;
-    
-    overlayEntry = OverlayEntry(
-      builder: (context) => _ToastWidget(
-        message: message,
-        isError: isError,
-        onDismiss: () => overlayEntry.remove(),
-      ),
-    );
-    
-    overlay.insert(overlayEntry);
-    
-    // Auto dismiss after 3 seconds
-    Future.delayed(const Duration(seconds: 3), () {
-      if (overlayEntry.mounted) {
-        overlayEntry.remove();
-      }
-    });
-  }
-
   Future<void> _sendResetLink() async {
     final email = _emailController.text.trim();
     if (email.isEmpty || !email.contains('@')) {
@@ -290,10 +261,20 @@ try {
     }
   }
 
+  void _navigateToRegister() {
+    _emailFocusNode.unfocus();
+    _passwordFocusNode.unfocus();
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (context) => const RegisterScreen()),
+    );
+  }
+
+  // ===================== UI =====================
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Prevent the body from resizing when keyboard appears
       resizeToAvoidBottomInset: false,
       body: Stack(
         fit: StackFit.expand,
@@ -305,61 +286,61 @@ try {
                 gradient: RadialGradient(
                   center: Alignment.center,
                   radius: 1.2,
-                  colors: [
-                    Colors.transparent,
-                    Colors.black.withValues(alpha: 0.05),
-                  ],
+                  colors: [Colors.transparent, Colors.black.withOpacity(0.05)],
                   stops: const [0.7, 1.0],
                 ),
               ),
             ),
           ),
-          // Use Positioned instead of SafeArea for better control
-          Positioned(
-            top: MediaQuery.of(context).padding.top,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: SingleChildScrollView(
-              // Add keyboard padding manually
-              padding: EdgeInsets.only(
-                left: 24.0,
-                right: 24.0,
-                top: 24.0,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 24.0,
-              ),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight: MediaQuery.of(context).size.height - 
-                             MediaQuery.of(context).padding.vertical - 48,
+
+          // Tiny login boot splash (disabled when skipBootCheck = true)
+          if (_booting)
+            const Center(child: CircularProgressIndicator()),
+
+          if (!_booting)
+            Positioned(
+              top: MediaQuery.of(context).padding.top,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              child: SingleChildScrollView(
+                padding: EdgeInsets.only(
+                  left: 24.0,
+                  right: 24.0,
+                  top: 24.0,
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 24.0,
                 ),
-                child: FadeTransition(
-                  opacity: _fadeIn,
-                  child: SlideTransition(
-                    position: _slideUp,
-                    child: ScaleTransition(
-                      scale: _scaleIn,
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          _buildLogo(),
-                          const SizedBox(height: 28),
-                          _buildLoginCard(),
-                        ],
+                child: ConstrainedBox(
+                  constraints: BoxConstraints(
+                    minHeight: MediaQuery.of(context).size.height -
+                        MediaQuery.of(context).padding.vertical - 48,
+                  ),
+                  child: FadeTransition(
+                    opacity: _fadeIn,
+                    child: SlideTransition(
+                      position: _slideUp,
+                      child: ScaleTransition(
+                        scale: _scaleIn,
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            _buildLogo(),
+                            const SizedBox(height: 28),
+                            _buildLoginCard(),
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
             ),
-          ),
+
           if (_isLoading)
             IgnorePointer(
               ignoring: true,
               child: DecoratedBox(
-                decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.25),
-                ),
+                decoration: BoxDecoration(color: Colors.black.withOpacity(0.25)),
                 child: const Center(child: CircularProgressIndicator()),
               ),
             ),
@@ -368,7 +349,6 @@ try {
     );
   }
 
-  // === BRANDING ===
   Widget _buildLogo() {
     return Column(
       children: const [
@@ -393,11 +373,11 @@ try {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.18),
+        color: Colors.white.withOpacity(0.18),
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.10),
+            color: Colors.black.withOpacity(0.10),
             blurRadius: 18,
             offset: const Offset(0, 10),
           ),
@@ -422,7 +402,6 @@ try {
               ),
               const SizedBox(height: 20),
 
-              // Email field
               _buildTextField(
                 controller: _emailController,
                 focusNode: _emailFocusNode,
@@ -434,12 +413,12 @@ try {
               ),
               const SizedBox(height: 16),
 
-              // Password field
               _buildPasswordField(),
               const SizedBox(height: 16),
 
               _buildRememberMeRow(),
               const SizedBox(height: 18),
+
               _buildLoginButton(),
               const SizedBox(height: 10),
               _buildRegisterButton(),
@@ -462,9 +441,9 @@ try {
     return Container(
       height: 48,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.10),
+        color: Colors.white.withOpacity(0.10),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.20), width: 1),
+        border: Border.all(color: Colors.white.withOpacity(0.20), width: 1),
       ),
       child: TextField(
         controller: controller,
@@ -473,25 +452,14 @@ try {
         textInputAction: textInputAction,
         autocorrect: false,
         enableSuggestions: false,
-        textAlign: TextAlign.left, // Left align text
-        style: const TextStyle(
-          color: Colors.white, 
-          fontSize: 14,
-          decorationThickness: 0,
-        ),
+        textAlign: TextAlign.left,
+        style: const TextStyle(color: Colors.white, fontSize: 14, decorationThickness: 0),
         cursorColor: Colors.white,
         cursorWidth: 2,
         decoration: InputDecoration(
           hintText: hint,
-          hintStyle: TextStyle(
-            color: Colors.white.withValues(alpha: 0.72),
-            fontSize: 14,
-          ),
-          prefixIcon: Icon(
-            icon, 
-            color: Colors.white.withValues(alpha: 0.72), 
-            size: 18
-          ),
+          hintStyle: TextStyle(color: Colors.white.withOpacity(0.72), fontSize: 14),
+          prefixIcon: Icon(icon, color: Colors.white.withOpacity(0.72), size: 18),
           border: InputBorder.none,
           contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         ),
@@ -504,9 +472,9 @@ try {
     return Container(
       height: 48,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.10),
+        color: Colors.white.withOpacity(0.10),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.20), width: 1),
+        border: Border.all(color: Colors.white.withOpacity(0.20), width: 1),
       ),
       child: TextField(
         controller: _passwordController,
@@ -515,32 +483,21 @@ try {
         autocorrect: false,
         enableSuggestions: false,
         textInputAction: TextInputAction.done,
-        textAlign: TextAlign.left, // Left align text
+        textAlign: TextAlign.left,
         onSubmitted: (_) => _handleLogin(),
-        style: const TextStyle(
-          color: Colors.white, 
-          fontSize: 14,
-          decorationThickness: 0,
-        ),
+        style: const TextStyle(color: Colors.white, fontSize: 14, decorationThickness: 0),
         cursorColor: Colors.white,
         cursorWidth: 2,
         decoration: InputDecoration(
           hintText: 'Password',
-          hintStyle: TextStyle(
-            color: Colors.white.withValues(alpha: 0.72), 
-            fontSize: 14
-          ),
-          prefixIcon: Icon(
-            Icons.lock_outline,
-            color: Colors.white.withValues(alpha: 0.72),
-            size: 18,
-          ),
+          hintStyle: TextStyle(color: Colors.white.withOpacity(0.72), fontSize: 14),
+          prefixIcon: Icon(Icons.lock_outline, color: Colors.white.withOpacity(0.72), size: 18),
           suffixIcon: IconButton(
             splashRadius: 18,
             icon: Icon(
               obscurePassword ? Icons.visibility_off : Icons.visibility,
               size: 18,
-              color: Colors.white.withValues(alpha: 0.72),
+              color: Colors.white.withOpacity(0.72),
             ),
             onPressed: () => setState(() => obscurePassword = !obscurePassword),
           ),
@@ -559,9 +516,9 @@ try {
           onChanged: (value) => setState(() => rememberMe = value ?? false),
           fillColor: MaterialStateProperty.resolveWith((states) {
             if (states.contains(MaterialState.selected)) {
-              return Colors.white.withValues(alpha: 0.95);
+              return Colors.white.withOpacity(0.95);
             }
-            return Colors.white.withValues(alpha: 0.8);
+            return Colors.white.withOpacity(0.8);
           }),
           checkColor: const Color(0xFF6366F1),
           materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -569,24 +526,15 @@ try {
         ),
         Text(
           'Remember me',
-          style: TextStyle(
-            color: Colors.white.withValues(alpha: 0.85),
-            fontSize: 13,
-          ),
+          style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13),
         ),
         const Spacer(),
         TextButton(
-          style: TextButton.styleFrom(
-            foregroundColor: Colors.white,
-          ),
+          style: TextButton.styleFrom(foregroundColor: Colors.white),
           onPressed: _sendResetLink,
           child: const Text(
             'Forgot Password?',
-            style: TextStyle(
-              fontSize: 13,
-              fontWeight: FontWeight.w600,
-              decoration: TextDecoration.underline,
-            ),
+            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, decoration: TextDecoration.underline),
           ),
         ),
       ],
@@ -599,43 +547,30 @@ try {
       child: ElevatedButton(
         onPressed: _isLoading ? null : _handleLogin,
         style: ElevatedButton.styleFrom(
-          backgroundColor: Colors.white.withValues(alpha: 0.95),
+          backgroundColor: Colors.white.withOpacity(0.95),
           foregroundColor: const Color(0xFF6366F1),
           elevation: 8,
-          shadowColor: Colors.black.withValues(alpha: 0.30),
+          shadowColor: Colors.black.withOpacity(0.30),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
         ),
         child: AnimatedSwitcher(
           duration: const Duration(milliseconds: 200),
-          transitionBuilder: (child, anim) =>
-              FadeTransition(opacity: anim, child: child),
+          transitionBuilder: (child, anim) => FadeTransition(opacity: anim, child: child),
           child: _isLoading
               ? Row(
                   key: const ValueKey('loading'),
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: const [
-                    SizedBox(
-                      height: 20,
-                      width: 20,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    ),
+                    SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)),
                     SizedBox(width: 10),
-                    Text(
-                      'Signing you in…',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+                    Text('Signing you in…', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                   ],
                 )
               : Row(
                   key: const ValueKey('signin'),
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: const [
-                    Text(
-                      'Sign In',
-                      style:
-                          TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                    ),
+                    Text('Sign In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                     SizedBox(width: 6),
                     Icon(Icons.arrow_forward_rounded, size: 18),
                   ],
@@ -650,144 +585,37 @@ try {
       onPressed: _navigateToRegister,
       child: RichText(
         text: TextSpan(
-          style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 13),
+          style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13),
           children: const [
             TextSpan(text: "Don't have an account? "),
-            TextSpan(
-              text: 'Sign Up',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
+            TextSpan(text: 'Sign Up', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ],
         ),
       ),
     );
   }
-}
 
-// Custom Toast Widget
-class _ToastWidget extends StatefulWidget {
-  final String message;
-  final bool isError;
-  final VoidCallback onDismiss;
+  // ----- Toast -----
+  void _showToast(String message, {bool isError = false}) {
+    final overlay = Overlay.of(context);
+    late OverlayEntry overlayEntry;
 
-  const _ToastWidget({
-    required this.message,
-    required this.isError,
-    required this.onDismiss,
-  });
-
-  @override
-  State<_ToastWidget> createState() => _ToastWidgetState();
-}
-
-class _ToastWidgetState extends State<_ToastWidget>
-    with SingleTickerProviderStateMixin {
-  late AnimationController _controller;
-  late Animation<Offset> _slideAnimation;
-  late Animation<double> _fadeAnimation;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = AnimationController(
-      duration: const Duration(milliseconds: 300),
-      vsync: this,
-    );
-
-    _slideAnimation = Tween<Offset>(
-      begin: const Offset(0, -1),
-      end: Offset.zero,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOutCubic,
-    ));
-
-    _fadeAnimation = Tween<double>(
-      begin: 0,
-      end: 1,
-    ).animate(CurvedAnimation(
-      parent: _controller,
-      curve: Curves.easeOut,
-    ));
-
-    _controller.forward();
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  void _dismiss() async {
-    await _controller.reverse();
-    widget.onDismiss();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Positioned(
-      top: MediaQuery.of(context).padding.top + 16,
-      left: 16,
-      right: 16,
-      child: FadeTransition(
-        opacity: _fadeAnimation,
-        child: SlideTransition(
-          position: _slideAnimation,
-          child: Material(
-            color: Colors.transparent,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                color: widget.isError 
-                    ? Colors.red.shade600.withValues(alpha: 0.95)
-                    : Colors.green.shade600.withValues(alpha: 0.95),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.15),
-                    blurRadius: 8,
-                    offset: const Offset(0, 4),
-                  ),
-                ],
-              ),
-              child: Row(
-                children: [
-                  Icon(
-                    widget.isError ? Icons.error_outline : Icons.check_circle_outline,
-                    color: Colors.white,
-                    size: 20,
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      widget.message,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  GestureDetector(
-                    onTap: _dismiss,
-                    child: const Icon(
-                      Icons.close,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
+    overlayEntry = OverlayEntry(
+      builder: (context) => _ToastWidget(
+        message: message,
+        isError: isError,
+        onDismiss: () => overlayEntry.remove(),
       ),
     );
+
+    overlay.insert(overlayEntry);
+    Future.delayed(const Duration(seconds: 3), () {
+      if (overlayEntry.mounted) overlayEntry.remove();
+    });
   }
 }
 
-/// ===== Lightweight animated background =====
+// ===== Lightweight animated background (same as your prior) =====
 class _AnimatedBackground extends StatelessWidget {
   const _AnimatedBackground();
 
@@ -812,8 +640,7 @@ class _BlobGradientState extends State<_BlobGradient>
   @override
   void initState() {
     super.initState();
-    _ctrl = AnimationController(vsync: this, duration: widget.animDuration)
-      ..repeat();
+    _ctrl = AnimationController(vsync: this, duration: widget.animDuration)..repeat();
   }
 
   @override
@@ -838,76 +665,56 @@ class _BlobGradientState extends State<_BlobGradient>
 
 class _BlobGradientPainter extends CustomPainter {
   final Animation<double> animation;
-
   _BlobGradientPainter({required this.animation}) : super(repaint: animation);
 
   double _wave(double t, {double amp = 0.25, double phase = 0}) {
     return 0.5 + amp * math.sin(2 * math.pi * (t + phase));
-  }
+    }
 
   @override
   void paint(Canvas canvas, Size size) {
     final time = animation.value;
 
-    // Base dark backdrop
     final basePaint = Paint()..color = const Color(0xFF0B1020);
     canvas.drawRect(Offset.zero & size, basePaint);
 
-    // Drift centers
-    final c1 = Offset(
-      _wave(time, amp: 0.30, phase: 0.00) * size.width,
-      _wave(time, amp: 0.22, phase: 0.15) * size.height,
-    );
-    final c2 = Offset(
-      _wave(time, amp: 0.28, phase: 0.35) * size.width,
-      _wave(time, amp: 0.24, phase: 0.55) * size.height,
-    );
-    final c3 = Offset(
-      _wave(time, amp: 0.26, phase: 0.65) * size.width,
-      _wave(time, amp: 0.20, phase: 0.85) * size.height,
-    );
-    final c4 = Offset(
-      _wave(time, amp: 0.32, phase: 0.20) * size.width,
-      _wave(time, amp: 0.18, phase: 0.40) * size.height,
-    );
+    final c1 = Offset(_wave(time, amp: 0.30, phase: 0.00) * size.width,
+        _wave(time, amp: 0.22, phase: 0.15) * size.height);
+    final c2 = Offset(_wave(time, amp: 0.28, phase: 0.35) * size.width,
+        _wave(time, amp: 0.24, phase: 0.55) * size.height);
+    final c3 = Offset(_wave(time, amp: 0.26, phase: 0.65) * size.width,
+        _wave(time, amp: 0.20, phase: 0.85) * size.height);
+    final c4 = Offset(_wave(time, amp: 0.32, phase: 0.20) * size.width,
+        _wave(time, amp: 0.18, phase: 0.40) * size.height);
 
-    // Radii
     final r = size.shortestSide;
-    final r1 = r * 0.75;
-    final r2 = r * 0.70;
-    final r3 = r * 0.65;
-    final r4 = r * 0.80;
+    final r1 = r * 0.75, r2 = r * 0.70, r3 = r * 0.65, r4 = r * 0.80;
 
-    // Blobs
     final paint1 = Paint()
       ..shader = ui.Gradient.radial(
-        c1,
-        r1,
-        [const Color(0xFF6D28D9).withValues(alpha: 0.65), const Color(0x006D28D9)],
+        c1, r1,
+        [const Color(0xFF6D28D9).withOpacity(0.65), const Color(0x006D28D9)],
         const [0.0, 1.0],
       )
       ..blendMode = BlendMode.plus;
     final paint2 = Paint()
       ..shader = ui.Gradient.radial(
-        c2,
-        r2,
-        [const Color(0xFF2563EB).withValues(alpha: 0.60), const Color(0x002563EB)],
+        c2, r2,
+        [const Color(0xFF2563EB).withOpacity(0.60), const Color(0x002563EB)],
         const [0.0, 1.0],
       )
       ..blendMode = BlendMode.plus;
     final paint3 = Paint()
       ..shader = ui.Gradient.radial(
-        c3,
-        r3,
-        [const Color(0xFFF43F5E).withValues(alpha: 0.55), const Color(0x00F43F5E)],
+        c3, r3,
+        [const Color(0xFFF43F5E).withOpacity(0.55), const Color(0x00F43F5E)],
         const [0.0, 1.0],
       )
       ..blendMode = BlendMode.plus;
     final paint4 = Paint()
       ..shader = ui.Gradient.radial(
-        c4,
-        r4,
-        [const Color(0xFF06B6D4).withValues(alpha: 0.55), const Color(0x0006B6D4)],
+        c4, r4,
+        [const Color(0xFF06B6D4).withOpacity(0.55), const Color(0x0006B6D4)],
         const [0.0, 1.0],
       )
       ..blendMode = BlendMode.plus;
@@ -917,12 +724,10 @@ class _BlobGradientPainter extends CustomPainter {
     canvas.drawCircle(c3, r3, paint3);
     canvas.drawCircle(c4, r4, paint4);
 
-    // Subtle top glow
     final highlight = Paint()
       ..shader = ui.Gradient.linear(
-        const Offset(0, 0),
-        Offset(0, size.height),
-        [Colors.white.withValues(alpha: 0.05), Colors.transparent],
+        const Offset(0, 0), Offset(0, size.height),
+        [Colors.white.withOpacity(0.05), Colors.transparent],
         const [0.0, 1.0],
       )
       ..blendMode = BlendMode.plus;
@@ -932,4 +737,101 @@ class _BlobGradientPainter extends CustomPainter {
   @override
   bool shouldRepaint(covariant _BlobGradientPainter oldDelegate) =>
       oldDelegate.animation != animation;
+}
+
+// ----- Toast -----
+class _ToastWidget extends StatefulWidget {
+  final String message;
+  final bool isError;
+  final VoidCallback onDismiss;
+
+  const _ToastWidget({
+    required this.message,
+    required this.isError,
+    required this.onDismiss,
+  });
+
+  @override
+  State<_ToastWidget> createState() => _ToastWidgetState();
+}
+
+class _ToastWidgetState extends State<_ToastWidget>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _controller;
+  late Animation<Offset> _slide;
+  late Animation<double> _fade;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(duration: const Duration(milliseconds: 300), vsync: this);
+    _slide = Tween<Offset>(begin: const Offset(0, -1), end: Offset.zero)
+        .animate(CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic));
+    _fade = CurvedAnimation(parent: _controller, curve: Curves.easeOut);
+    _controller.forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _dismiss() async {
+    await _controller.reverse();
+    widget.onDismiss();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      top: MediaQuery.of(context).padding.top + 16,
+      left: 16,
+      right: 16,
+      child: FadeTransition(
+        opacity: _fade,
+        child: SlideTransition(
+          position: _slide,
+          child: Material(
+            color: Colors.transparent,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                color: widget.isError
+                    ? Colors.red.shade600.withOpacity(0.95)
+                    : Colors.green.shade600.withOpacity(0.95),
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withOpacity(0.15),
+                    blurRadius: 8,
+                    offset: const Offset(0, 4),
+                  ),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    widget.isError ? Icons.error_outline : Icons.check_circle_outline,
+                    color: Colors.white, size: 20,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      widget.message,
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w500),
+                    ),
+                  ),
+                  GestureDetector(
+                    onTap: _dismiss,
+                    child: const Icon(Icons.close, color: Colors.white, size: 18),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }

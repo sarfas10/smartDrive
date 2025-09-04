@@ -3,6 +3,12 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'services/session_service.dart';
+import 'login.dart';
+
+import 'messaging_setup.dart';
+
 
 class InstructorSettingsPage extends StatefulWidget {
   const InstructorSettingsPage({super.key});
@@ -176,10 +182,40 @@ class _InstructorSettingsPageState extends State<InstructorSettingsPage> {
     }
   }
 
-  Future<void> _logout() async {
+ Future<void> _logout({bool wipeAllPrefs = false}) async {
+  try {
+    // Optional: stop role/status topic notifications if you use them
+    try {
+      await unsubscribeRoleStatusTopics(alsoAll: false);
+    } catch (_) {}
+
+    // Clear saved session keys (userId/role/status)
+    await SessionService().clear();
+
+    // Clear remember-me so auto-redirect won’t happen next launch
+    final sp = await SharedPreferences.getInstance();
+    await sp.remove('sd_saved_email');
+    await sp.setBool('sd_remember_me', false);
+
+    // (Optional) hard wipe: nukes all SharedPreferences
+    if (wipeAllPrefs) {
+      await sp.clear();
+    }
+
+    // Firebase sign out
     await _auth.signOut();
-    if (mounted) Navigator.of(context).pop();
+
+    // Go to Login, clear back stack
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
+    );
+  } catch (e) {
+    _showSnack('Error logging out: $e');
   }
+}
+
 
   Future<void> _deleteAccount() async {
     final user = _auth.currentUser;

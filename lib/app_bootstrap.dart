@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:smart_drive/splash_router.dart';//session check + routing
 
 import 'firebase_options.dart';
 import 'messaging_setup.dart';
@@ -53,7 +54,7 @@ class _AppBootstrapState extends State<AppBootstrap> {
       if (!mounted) return;
       // Navigate to your actual home
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => OnboardingScreen()),
+        MaterialPageRoute(builder: (_) => SplashRouter()),
       );
     } catch (e) {
       setState(() => _error = e.toString());

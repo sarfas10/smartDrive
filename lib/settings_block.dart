@@ -2,15 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ui_common.dart';
 import 'package:smart_drive/reusables/vehicle_icons.dart';
-import 'maps_page_admin.dart'; // for navigation to the maps page
+import 'maps_page_admin.dart'; 
 
-// 🔽 NEW: add these imports
-import 'login.dart';                  // navigate to login after logout
-import 'messaging_setup.dart';        // unsubscribeRoleStatusTopics()
-import 'services/session_service.dart'; // clear saved session
+import 'login.dart';                  
+import 'messaging_setup.dart';        
+import 'services/session_service.dart'; 
 
 class SettingsBlock extends StatefulWidget {
   const SettingsBlock({super.key});
@@ -20,15 +20,15 @@ class SettingsBlock extends StatefulWidget {
 }
 
 class _SettingsBlockState extends State<SettingsBlock> {
-  // --- Controllers live in state and are disposed properly ---
+ 
   final TextEditingController _radiusCtrl = TextEditingController();
   final TextEditingController _perKmCtrl = TextEditingController();
   final TextEditingController _policyCtrl = TextEditingController();
 
-  // 🔽 NEW: auth handle
+  
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  // Keep the last Firestore payload we applied to avoid thrashing controllers.
+  
   Map<String, dynamic>? _lastAppliedSettings;
 
   @override
@@ -680,30 +680,41 @@ class _SettingsBlockState extends State<SettingsBlock> {
 
   // ---------------- Logout logic ----------------
 
-  Future<void> _logout() async {
-    try {
-      // 1) stop role/status notifications (set alsoAll: true to silence everything)
-      await unsubscribeRoleStatusTopics(alsoAll: false);
+  Future<void> _logout({bool wipeAllPrefs = false}) async {
+  try {
+    // 1) Stop role/status notifications (set alsoAll: true to silence everything)
+    await unsubscribeRoleStatusTopics(alsoAll: false);
 
-      // 2) clear saved session (userId/role/status in SharedPreferences)
-      await SessionService().clear();
+    // 2) Clear saved session
+    await SessionService().clear(); // removes userId/role/status
 
-      // 3) Firebase sign out
-      await _auth.signOut();
+    // 3) Clear remember-me prefs so auto-redirect won’t happen
+    final sp = await SharedPreferences.getInstance();
+    await sp.remove('sd_saved_email');
+    await sp.setBool('sd_remember_me', false);
 
-      // 4) navigate to Login
-      if (!mounted) return;
-      Navigator.of(context).pushAndRemoveUntil(
-        MaterialPageRoute(builder: (_) => const LoginScreen()),
-        (_) => false,
-      );
-    } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error logging out: $e')),
-      );
+    // Optional: nuke ALL prefs if you ever want a hard logout
+    if (wipeAllPrefs) {
+      await sp.clear();
     }
+
+    // 4) Firebase sign out
+    await _auth.signOut();
+
+    // 5) Navigate to Login (reset stack)
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (_) => false,
+    );
+  } catch (e) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text('Error logging out: $e')),
+    );
   }
+}
+
 
   // ---------------- Utils ----------------
 

@@ -1,7 +1,7 @@
-// lib/onboard.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'package:smart_drive/reusables/animated_background.dart';
 import 'package:smart_drive/reusables/branding.dart';
 
@@ -86,7 +86,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
 
   Future<void> _maybeSkipIfSeen() async {
     final prefs = await SharedPreferences.getInstance();
-    if (prefs.getBool(_seenKey) ?? false) {
+    if ((prefs.getBool(_seenKey) ?? false) && mounted) {
       _goToLogin(replace: true);
     }
   }
@@ -105,7 +105,10 @@ class _OnboardingScreenState extends State<OnboardingScreen>
   }
 
   void _goToLogin({bool replace = false}) {
-    final route = MaterialPageRoute(builder: (_) => const LoginScreen());
+    final route = MaterialPageRoute(
+      builder: (_) => const LoginScreen(skipBootCheck: true),
+    );
+    if (!mounted) return;
     if (replace) {
       Navigator.of(context).pushReplacement(route);
     } else {
@@ -157,7 +160,6 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           SafeArea(
             child: Column(
               children: [
-                // removed OnboardingHeader (top-left logo & Skip)
                 Expanded(
                   child: PageView.builder(
                     controller: _pageController,
@@ -188,19 +190,10 @@ class _OnboardingScreenState extends State<OnboardingScreen>
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // === Just logo (no container) ===
             AppLogo(size: 100),
             const SizedBox(height: 16),
-
-            // === App name below logo ===
-            const AppNameText(
-              size: 26,
-              color: Colors.white,
-            ),
-
+            const AppNameText(size: 26, color: Colors.white),
             const SizedBox(height: 40),
-
-            // === Title ===
             Text(
               data.title.contains("Welcome to ")
                   ? "${data.title}${AppBrand.appName}"
@@ -214,10 +207,7 @@ class _OnboardingScreenState extends State<OnboardingScreen>
               textAlign: TextAlign.center,
               maxLines: 2,
             ),
-
             const SizedBox(height: 24),
-
-            // === Description ===
             Text(
               data.description,
               style: TextStyle(
@@ -290,17 +280,9 @@ class _OnboardingScreenState extends State<OnboardingScreen>
           child: Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Text(
-                isLast ? 'Get Started' : 'Next',
-                style: AppText.buttonOnLight,
-              ),
+              Text(isLast ? 'Get Started' : 'Next', style: AppText.buttonOnLight),
               const SizedBox(width: 8),
-              Icon(
-                isLast
-                    ? Icons.rocket_launch_rounded
-                    : Icons.arrow_forward_rounded,
-                size: 20,
-              ),
+              Icon(isLast ? Icons.rocket_launch_rounded : Icons.arrow_forward_rounded, size: 20),
             ],
           ),
         ),
