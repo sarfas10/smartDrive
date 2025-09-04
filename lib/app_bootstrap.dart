@@ -7,7 +7,7 @@ import 'package:smart_drive/splash_router.dart';//session check + routing
 import 'firebase_options.dart';
 import 'messaging_setup.dart';
 import 'services/session_service.dart';
-import 'onboard.dart'; // your real entry screen
+// your real entry screen
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {

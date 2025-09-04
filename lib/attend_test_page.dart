@@ -127,7 +127,7 @@ class _AttendTestPageState extends State<AttendTestPage> {
       // 2) where uid == uid
       final q1 = await usersCol.where('uid', isEqualTo: user.uid).limit(1).get();
       if (q1.docs.isNotEmpty) {
-        final m = q1.docs.first.data() as Map<String, dynamic>;
+        final m = q1.docs.first.data();
         final sid = ((m['student_id'] ?? m['studentId'])?.toString() ?? '').trim();
         _resolvedStudentId = sid.isNotEmpty ? sid : user.uid;
         return;
@@ -138,7 +138,7 @@ class _AttendTestPageState extends State<AttendTestPage> {
       if (email != null && email.isNotEmpty) {
         final q2 = await usersCol.where('email', isEqualTo: email).limit(1).get();
         if (q2.docs.isNotEmpty) {
-          final m = q2.docs.first.data() as Map<String, dynamic>;
+          final m = q2.docs.first.data();
           final sid = ((m['student_id'] ?? m['studentId'])?.toString() ?? '').trim();
           _resolvedStudentId = sid.isNotEmpty ? sid : user.uid;
           return;
@@ -662,7 +662,7 @@ class _ProgressHeader extends StatelessWidget {
                 itemBuilder: (_, i) {
                   final isCurrent = i == index;
                   final isAnswered = answered.containsKey(questions[i].id) &&
-                      (!(answered[questions[i].id] is String) ||
+                      (answered[questions[i].id] is! String ||
                           (answered[questions[i].id] as String)
                               .trim()
                               .isNotEmpty);

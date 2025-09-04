@@ -9,7 +9,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 
 class MyBookingsPage extends StatefulWidget {
-  const MyBookingsPage({Key? key}) : super(key: key);
+  const MyBookingsPage({super.key});
 
   @override
   State<MyBookingsPage> createState() => _MyBookingsPageState();
@@ -273,7 +273,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
               ],
             ),
           ),
-          ...items.map((i) => _bookingCard(context, sw, i)).toList(),
+          ...items.map((i) => _bookingCard(context, sw, i)),
         ],
       ),
     );

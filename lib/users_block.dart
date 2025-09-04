@@ -255,8 +255,8 @@ class _UsersDataTable extends StatelessWidget {
                         : doc.id;
 
                     return DataRow(
-                      color: MaterialStateProperty.resolveWith((states) {
-                        if (states.contains(MaterialState.hovered)) {
+                      color: WidgetStateProperty.resolveWith((states) {
+                        if (states.contains(WidgetState.hovered)) {
                           return Theme.of(context).hoverColor.withOpacity(0.35);
                         }
                         return i.isEven
@@ -266,7 +266,7 @@ class _UsersDataTable extends StatelessWidget {
                                 .withOpacity(0.0)
                             : Theme.of(context)
                                 .colorScheme
-                                .surfaceVariant
+                                .surfaceContainerHighest
                                 .withOpacity(0.14);
                       }),
                       onSelectChanged: (_) => _openDetails(context, role, uid),
@@ -451,7 +451,6 @@ class _FiltersBar extends StatelessWidget {
     required this.onReset,
     required this.onRoleChanged,
     required this.onStatusChanged,
-    super.key,
   });
 
   @override
@@ -465,7 +464,7 @@ class _FiltersBar extends StatelessWidget {
     return Container(
       color: isDark
           ? theme.colorScheme.surface
-          : theme.colorScheme.surfaceVariant.withOpacity(0.25),
+          : theme.colorScheme.surfaceContainerHighest.withOpacity(0.25),
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -611,7 +610,7 @@ class _TableTheme extends StatelessWidget {
           color: theme.colorScheme.onSurface,
         ),
         headingRowColor:
-            MaterialStatePropertyAll(theme.colorScheme.surfaceVariant.withOpacity(0.4)),
+            WidgetStatePropertyAll(theme.colorScheme.surfaceContainerHighest.withOpacity(0.4)),
         dataTextStyle: theme.textTheme.bodyMedium,
         horizontalMargin: 16,
       ),
@@ -636,7 +635,7 @@ class _HeaderLabel extends StatelessWidget {
 }
 
 class _StatusLegend extends StatelessWidget {
-  const _StatusLegend({super.key});
+  const _StatusLegend();
   @override
   Widget build(BuildContext context) {
     return Wrap(
@@ -683,7 +682,6 @@ class _InfoCard extends StatelessWidget {
     this.subtitle,
     this.ctaText,
     this.onTap,
-    super.key,
   });
 
   @override
@@ -719,7 +717,6 @@ class _EmptyState extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.onClear,
-    super.key,
   });
 
   @override

@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:smart_drive/reusables/branding.dart';
 
-import 'ui_common.dart';
 import 'users_block.dart';
 import 'materials_block.dart';
 import 'tests_block.dart';

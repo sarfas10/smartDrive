@@ -119,16 +119,17 @@ class _StudentProgressPageState extends State<StudentProgressPage>
     // keep tolerant to userId/uid
     QuerySnapshot<Map<String, dynamic>>? q =
         await col.where('userId', isEqualTo: _uid).get().catchError((_) => null);
-    if (q == null || q.docs.isEmpty) {
+    if (q.docs.isEmpty) {
       q = await col.where('uid', isEqualTo: _uid).get().catchError((_) => null);
     }
 
     int p = 0, a = 0;
-    for (final d in q?.docs ?? const []) {
+    for (final d in q.docs ?? const []) {
       final m = d.data();
       final s = (m['status'] ?? m['state'] ?? '').toString().toLowerCase();
-      if (s.startsWith('p')) p++;
-      else if (s.startsWith('a')) a++;
+      if (s.startsWith('p')) {
+        p++;
+      } else if (s.startsWith('a')) a++;
     }
     _present = p;
     _absent = a;
@@ -227,7 +228,7 @@ class _StudentProgressPageState extends State<StudentProgressPage>
     final kyc = <_DocItem>[];
     final others = <_DocItem>[];
 
-    for (final d in q?.docs ?? const []) {
+    for (final d in q.docs ?? const []) {
       final m = d.data();
       final name = (m['name'] ?? m['title'] ?? 'Document').toString();
       final url = (m['url'] ?? m['link'] ?? '').toString();

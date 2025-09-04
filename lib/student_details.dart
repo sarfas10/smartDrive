@@ -835,7 +835,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: cs.surfaceVariant.withOpacity(0.25),
+        color: cs.surfaceContainerHighest.withOpacity(0.25),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: cs.outlineVariant),
       ),
@@ -888,7 +888,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
               errorBuilder: (_, __, ___) => Container(
                 width: 120,
                 height: 76,
-                color: cs.surfaceVariant,
+                color: cs.surfaceContainerHighest,
                 alignment: Alignment.center,
                 child: Icon(Icons.broken_image_outlined,
                     color: cs.onSurfaceVariant),
@@ -963,7 +963,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: cs.surfaceVariant.withOpacity(0.25),
+        color: cs.surfaceContainerHighest.withOpacity(0.25),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: cs.outlineVariant),
       ),

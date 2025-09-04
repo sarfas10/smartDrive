@@ -144,7 +144,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
         return _atMidnight(todayMid.add(Duration(days: index)));
       }
 
-      void _scrollToIndex(int index) {
+      void scrollToIndex(int index) {
         final itemExtent = cardWidth + gap;
         final target = index * itemExtent;
         _dateScroll.animateTo(
@@ -168,7 +168,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                 // Optional: force refresh for a date instead of using cache
                 // _bookedCacheByDay.remove(_dayKey);
               });
-              _scrollToIndex(index);
+              scrollToIndex(index);
             },
             child: Container(
               margin: EdgeInsets.only(right: gap),

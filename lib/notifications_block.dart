@@ -258,7 +258,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
 
                         return Card(
                           elevation: 0,
-                          color: Theme.of(context).colorScheme.surfaceVariant.withOpacity(.25),
+                          color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(.25),
                           child: Padding(
                             padding: const EdgeInsets.all(12),
                             child: Column(
@@ -622,7 +622,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
 class _Labeled extends StatelessWidget {
   final String label;
   final Widget child;
-  const _Labeled(this.label, this.child, {super.key});
+  const _Labeled(this.label, this.child);
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -637,7 +637,7 @@ class _Labeled extends StatelessWidget {
 
 class _StatusPill extends StatelessWidget {
   final String status;
-  const _StatusPill(this.status, {super.key});
+  const _StatusPill(this.status);
   @override
   Widget build(BuildContext context) {
     Color c = switch (status) {

@@ -817,7 +817,7 @@ Widget _buildTimeSlotGroup(
       // 1) Delete all past-day slots
       final pastSnap = await slotsCol.where('slot_day', isLessThan: todayTs).get();
 
-      Future<void> _deleteInBatches(List<QueryDocumentSnapshot> docs) async {
+      Future<void> deleteInBatches(List<QueryDocumentSnapshot> docs) async {
         WriteBatch batch = FirebaseFirestore.instance.batch();
         int op = 0;
         for (final d in docs) {
@@ -834,7 +834,7 @@ Widget _buildTimeSlotGroup(
         }
       }
 
-      await _deleteInBatches(pastSnap.docs);
+      await deleteInBatches(pastSnap.docs);
 
       // 2) For today, delete slots whose start time is within last 5 minutes (or earlier)
       final todaySnap = await slotsCol.where('slot_day', isEqualTo: todayTs).get();
@@ -856,7 +856,7 @@ Widget _buildTimeSlotGroup(
         }
       }
 
-      await _deleteInBatches(toDeleteToday);
+      await deleteInBatches(toDeleteToday);
 
       if (context.mounted && isAdmin) {
        debugPrint('Expired slots purged');

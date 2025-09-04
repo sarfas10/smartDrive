@@ -372,7 +372,9 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
                         bookingId: bookingId,
                         user: user,
                         status: status == 'unmarked' ? 'absent' : status,
-                      )) continue;
+                      )) {
+                        continue;
+                      }
 
                       rows.add([
                         // Slot (time + instructor)

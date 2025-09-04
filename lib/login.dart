@@ -514,8 +514,8 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
         Checkbox(
           value: rememberMe,
           onChanged: (value) => setState(() => rememberMe = value ?? false),
-          fillColor: MaterialStateProperty.resolveWith((states) {
-            if (states.contains(MaterialState.selected)) {
+          fillColor: WidgetStateProperty.resolveWith((states) {
+            if (states.contains(WidgetState.selected)) {
               return Colors.white.withOpacity(0.95);
             }
             return Colors.white.withOpacity(0.8);

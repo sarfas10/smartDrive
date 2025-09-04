@@ -725,7 +725,7 @@ class _SettingsBlockState extends State<SettingsBlock> {
       final va = a[key];
       final vb = b[key];
       if (va is Map && vb is Map) {
-        if (!_deepEquals(va as Map, vb as Map)) return false;
+        if (!_deepEquals(va, vb)) return false;
       } else if (va != vb) {
         return false;
       }

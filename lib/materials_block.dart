@@ -444,7 +444,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
   Widget _buildPickerCard() {
     final name = _picked?.name;
     final selected = name != null;
-    final kind = selected ? _detectKind(name!) : _Kind.other;
+    final kind = selected ? _detectKind(name) : _Kind.other;
 
     return Container(
       width: double.infinity,
@@ -471,7 +471,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               Icon(
-                selected ? _iconForName(name!) : Icons.cloud_upload_outlined,
+                selected ? _iconForName(name) : Icons.cloud_upload_outlined,
                 size: 42,
                 color: selected ? Colors.green : Colors.grey.shade600,
               ),
@@ -497,7 +497,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
           ),
           const SizedBox(height: 10),
           Text(
-            selected ? name! : 'Drop a file here or use the button below',
+            selected ? name : 'Drop a file here or use the button below',
             textAlign: TextAlign.center,
             style: TextStyle(
               color: selected ? Colors.black87 : Colors.grey.shade700,
@@ -734,7 +734,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     Uri candidate = uri0;
     try {
       final snap = await FirebaseFirestore.instance.collection('materials').doc(docId).get();
-      final m = snap.data() as Map<String, dynamic>? ?? {};
+      final m = snap.data() ?? {};
       final rt = (m['cloudinary_resource_type'] ?? '').toString(); // 'raw' | 'image' | 'video'
       if (rt.isNotEmpty) {
         final fixed = url

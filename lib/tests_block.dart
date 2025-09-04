@@ -415,7 +415,7 @@ class _TestsBlockState extends State<TestsBlock> {
 
     final ref = FirebaseFirestore.instance.collection('test_pool').doc(poolId);
 
-    Future<void> _deleteQuestionsBatch() async {
+    Future<void> deleteQuestionsBatch() async {
       const batchSize = 60;
       while (true) {
         final snap = await ref.collection('questions').limit(batchSize).get();
@@ -430,7 +430,7 @@ class _TestsBlockState extends State<TestsBlock> {
     }
 
     try {
-      await _deleteQuestionsBatch();
+      await deleteQuestionsBatch();
       await ref.delete();
     } catch (e) {
       if (!mounted) return;

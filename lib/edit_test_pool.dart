@@ -142,7 +142,7 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
 
       _drafts
         ..clear()
-        ..addAll(qs.docs.map((d) => _QDraft.fromMap(d.id, d.data() as Map<String, dynamic>)));
+        ..addAll(qs.docs.map((d) => _QDraft.fromMap(d.id, d.data())));
 
       setState(() => _loading = false);
     } catch (e) {

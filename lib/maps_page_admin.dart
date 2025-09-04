@@ -4,7 +4,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 class MapsPageAdmin extends StatefulWidget {
-  const MapsPageAdmin({Key? key}) : super(key: key);
+  const MapsPageAdmin({super.key});
 
   @override
   _MapsPageAdminState createState() => _MapsPageAdminState();
@@ -12,7 +12,7 @@ class MapsPageAdmin extends StatefulWidget {
 
 class _MapsPageAdminState extends State<MapsPageAdmin> {
   GoogleMapController? _mapController;
-  Set<Marker> _markers = {};
+  final Set<Marker> _markers = {};
   LatLng? _selectedLocation;
   bool _isSaving = false;
   bool _hasUnsavedChanges = false;

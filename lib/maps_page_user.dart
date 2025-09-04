@@ -8,9 +8,9 @@ class MapsPageUser extends StatefulWidget {
   final String userId; // required: user document id
 
   const MapsPageUser({
-    Key? key,
+    super.key,
     required this.userId,
-  }) : super(key: key);
+  });
 
   @override
   State<MapsPageUser> createState() => _MapsPageUserState();
@@ -515,12 +515,12 @@ class _CircleButton extends StatelessWidget {
   final Color? color;
 
   const _CircleButton({
-    Key? key,
+    super.key,
     required this.icon,
     required this.tooltip,
     required this.onPressed,
     this.color,
-  }) : super(key: key);
+  });
 
   @override
   Widget build(BuildContext context) {

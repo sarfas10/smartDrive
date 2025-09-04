@@ -798,15 +798,15 @@ class NotificationBell extends StatelessWidget {
     final List targets = (m['target_uids'] as List?) ?? const [];
     final bool direct = targets.map((e) => e.toString()).contains(uid);
 
-    DateTime? _asDt(dynamic v) {
+    DateTime? asDt(dynamic v) {
       if (v == null) return null;
       if (v is Timestamp) return v.toDate();
       if (v is DateTime) return v;
       return null;
     }
     final now = DateTime.now();
-    final scheduledAt = _asDt(m['scheduled_at']) ?? _asDt(m['created_at']);
-    final expiresAt   = _asDt(m['expires_at']);
+    final scheduledAt = asDt(m['scheduled_at']) ?? asDt(m['created_at']);
+    final expiresAt   = asDt(m['expires_at']);
     final withinTime  = (scheduledAt == null || !scheduledAt.isAfter(now)) &&
                         (expiresAt == null   ||  expiresAt.isAfter(now));
 
@@ -921,7 +921,7 @@ class NotificationBell extends StatelessWidget {
     Set<String> readIds,
   ) async {
     final RenderBox? box = anchorKey.currentContext?.findRenderObject() as RenderBox?;
-    final RenderBox? overlay = Overlay.of(context, rootOverlay: true)?.context.findRenderObject() as RenderBox?;
+    final RenderBox? overlay = Overlay.of(context, rootOverlay: true).context.findRenderObject() as RenderBox?;
     if (box == null || overlay == null) {
       // fallback
       await showModalBottomSheet(

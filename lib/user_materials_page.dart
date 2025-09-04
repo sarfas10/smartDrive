@@ -31,7 +31,7 @@ class _UserMaterialsPageState extends State<UserMaterialsPage> {
   String _sortBy = 'Newest';
   final List<String> _sortOptions = const ['Newest', 'Oldest', 'Downloads', 'Title A–Z'];
 
-  Key _streamKey = UniqueKey();
+  final Key _streamKey = UniqueKey();
 
   @override
   void dispose() {

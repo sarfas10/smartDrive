@@ -1,6 +1,8 @@
-// booking_page with Razorpay + Hostinger order+verify + Firestore booking writes
-// + Transaction that marks slots/{slotId}.status = "booked" only after a successful booking.
-// + Razorpay checkout config to HIDE EMI, Wallet, and Paylater options.
+// booking_page.dart
+// Booking page with Google Maps boarding point selector, distance-based surcharge,
+// Razorpay checkout (order+verify via Hostinger PHP), and Firestore transaction
+// that marks slots/{slotId}.status = "booked" only after successful booking.
+// EMI, Wallet, and Paylater are disabled in Razorpay (mobile + web fallback).
 
 import 'dart:async';
 import 'dart:convert';
@@ -27,10 +29,10 @@ class BookingPage extends StatefulWidget {
   final String slotId;
 
   const BookingPage({
-    Key? key,
+    super.key,
     required this.userId,
     required this.slotId,
-  }) : super(key: key);
+  });
 
   @override
   State<BookingPage> createState() => _BookingPageState();
@@ -245,7 +247,7 @@ class _BookingPageState extends State<BookingPage> {
             strokeColor: Colors.blue.withOpacity(0.4),
             strokeWidth: 2,
             consumeTapEvents: true,
-            onTap: _showBubbleHint,
+            // NOTE: google_maps_flutter Circle has no onTap; handled via map tap.
           ),
         );
       }
@@ -539,17 +541,28 @@ class _BookingPageState extends State<BookingPage> {
 
     final options = {
       'key': _razorpayKeyId,
-      'order_id': orderId, // IMPORTANT: use server-created order
+      'order_id': orderId, // IMPORTANT: server-created order
       'amount': amountPaise, // paise
       'currency': 'INR',
+
+      // optional branding
+      'name': '',
+      'description': '',
+      'image': '',
       'prefill': {'contact': '', 'email': '', 'name': ''},
-          'name': '',
-          'description': '',
-          'image': '',
-          'theme': {'color': '#FFFFFF'},
+      'theme': {'color': '#FFFFFF'},
 
+      // ✅ Native SDK toggles (Android/iOS)
+      'method': {
+        'card': true,
+        'upi': true,
+        'netbanking': true,
+        'wallet': false,   // hide
+        'emi': false,      // hide
+        'paylater': false, // hide
+      },
 
-      // ---------- HIDE EMI, Wallet, Paylater ----------
+      // 🌐 Web fallback (if using web checkout anywhere)
       'config': {
         'display': {
           'hide': [
@@ -557,18 +570,9 @@ class _BookingPageState extends State<BookingPage> {
             {'method': 'wallet'},
             {'method': 'paylater'},
           ],
-          // If an older SDK ignores 'hide', uncomment below to whitelist only UPI + Card:
-          // 'blocks': {
-          //   'upi': {'name': 'UPI'},
-          //   'card': {'name': 'Cards'},
-          // },
-          // 'sequence': ['block.upi', 'block.card'],
-          // 'preferences': {'show_default_blocks': false},
         }
       },
-      // -------------------------------------------------
 
-      
       'timeout': 300,
     };
 
@@ -873,7 +877,7 @@ class _BookingPageState extends State<BookingPage> {
   }
 }
 
-// -------------------- Small UI helpers (unchanged) --------------------
+// -------------------- Small UI helpers --------------------
 
 class _LoadingOverlay extends StatelessWidget {
   const _LoadingOverlay({required this.text});
@@ -913,8 +917,7 @@ class _LoadingOverlay extends StatelessWidget {
 }
 
 class _RoundedButtonsColumn extends StatelessWidget {
-  const _RoundedButtonsColumn({Key? key, required this.children})
-      : super(key: key);
+  const _RoundedButtonsColumn({super.key, required this.children});
   final List<Widget> children;
 
   @override
@@ -936,11 +939,11 @@ class _RoundedButtonsColumn extends StatelessWidget {
 
 class _RadiusToggleButton extends StatelessWidget {
   const _RadiusToggleButton({
-    Key? key,
+    super.key,
     required this.isVisible,
     required this.onPressed,
     this.showBadge = false,
-  }) : super(key: key);
+  });
 
   final bool isVisible;
   final VoidCallback onPressed;
@@ -1003,11 +1006,11 @@ class _RadiusToggleButton extends StatelessWidget {
 
 class _SpeechBubble extends StatelessWidget {
   const _SpeechBubble({
-    Key? key,
+    super.key,
     required this.text,
-    this.background = _kAccent,
-    this.textColor = Colors.white,
-  }) : super(key: key);
+    this.background = const Color(0xFFFFF6D6),
+    this.textColor = const Color(0xFF7A4D00),
+  });
 
   final String text;
   final Color background;
@@ -1041,13 +1044,13 @@ class _SpeechBubble extends StatelessWidget {
 }
 
 class _TrianglePointer extends StatelessWidget {
-  const _TrianglePointer({Key? key, required this.color}) : super(key: key);
+  const _TrianglePointer({super.key, required this.color});
   final Color color;
 
   @override
   Widget build(BuildContext context) {
     return Transform.rotate(
-      angle: 0.785398,
+      angle: 0.785398, // 45 degrees
       child: Container(
         width: 12,
         height: 12,
@@ -1130,14 +1133,15 @@ class _SummarySheet extends StatelessWidget {
                   _RadiusToggleButton(
                     isVisible: isRadiusVisible,
                     onPressed: onToggleRadius,
+                    showBadge: hintVisible, // draws attention until user selects a point
                   ),
                 ],
               ),
 
               if (showHintBubble) ...[
                 const SizedBox(height: 8),
-                Row(
-                  children: const [
+                const Row(
+                  children: [
                     Spacer(),
                     _SpeechBubble(
                       text: 'Tip: Hide the radius to select points inside the free area.',
@@ -1295,12 +1299,12 @@ class _SummarySheet extends StatelessWidget {
                     children: [
                       Icon(Icons.info_outline, size: 16, color: Colors.amber[800]),
                       const SizedBox(width: 8),
-                      Expanded(
+                      const Expanded(
                         child: Text(
                           'Tap on the map to select your boarding point',
                           style: TextStyle(
                             fontSize: 13,
-                            color: Colors.amber[800],
+                            color: Color(0xFF7A4D00),
                             fontWeight: FontWeight.w500,
                           ),
                         ),

@@ -722,7 +722,7 @@ class _RegisterScreenState extends State<RegisterScreen>
                 ? null
                 : (value) => setState(() => agreeToTerms = value ?? false),
             fillColor:
-                MaterialStateProperty.all(Colors.white.withOpacity(0.95)),
+                WidgetStateProperty.all(Colors.white.withOpacity(0.95)),
             checkColor: const Color(0xFF4C63D2),
             materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),

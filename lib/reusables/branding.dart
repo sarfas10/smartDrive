@@ -6,7 +6,7 @@ class AppBrand {
   static const String appName = 'SmartDrive';
 
  
-  static const String? assetLogo = 'assets/logo.png';
+  static const String assetLogo = 'assets/logo.png';
 }
 
 /// ===== Brand Colors =====
