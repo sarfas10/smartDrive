@@ -133,6 +133,20 @@ class _DashboardBodyState extends State<_DashboardBody> {
         routingNumber.isNotEmpty;
   }
 
+  // NEW: small helper to inform pending restriction
+  void _showPendingNotice() {
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text(
+          'Your instructor account is pending approval. This action is disabled until your status becomes Active.',
+        ),
+        behavior: SnackBarBehavior.floating,
+        duration: Duration(seconds: 3),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final uid = _user?.uid;
@@ -145,7 +159,9 @@ class _DashboardBodyState extends State<_DashboardBody> {
         final m = snap.data?.data() ?? _me;
         final name = (m['name'] ?? 'Instructor').toString();
         final email = (m['email'] ?? '').toString();
-        final active = (m['status'] ?? 'active').toString().toLowerCase() == 'active';
+        final statusStr = (m['status'] ?? 'active').toString().toLowerCase();
+        final isPending = statusStr == 'pending';
+        final active = statusStr == 'active';
         final role = 'instructor';
 
         // Wrap the rest in a second stream for the profile doc
@@ -189,7 +205,16 @@ class _DashboardBodyState extends State<_DashboardBody> {
                   ),
                 ),
 
-                // NEW: Setup warning banner
+                // Optional: clear pending status banner (visual context)
+                if (isPending)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                      child: _PendingBanner(onFixNow: _openSettings),
+                    ),
+                  ),
+
+                // Setup warning banner (payouts completeness)
                 if (needsSetup)
                   SliverToBoxAdapter(
                     child: Padding(
@@ -258,7 +283,9 @@ class _DashboardBodyState extends State<_DashboardBody> {
                           iconColor: Colors.purple,
                           title: 'Manage Slots',
                           subtitle: 'Manage scheduled sessions and availability',
-                          onTap: _openManageSlots,
+                          onTap: () => isPending ? _showPendingNotice() : _openManageSlots(),
+                          enabled: !isPending,
+                          disabledLabel: 'Pending approval',
                         ),
                         const SizedBox(height: 12),
                         _ActionTile(
@@ -266,7 +293,9 @@ class _DashboardBodyState extends State<_DashboardBody> {
                           iconColor: const Color(0xFF2E7D32),
                           title: 'Mark Attendance',
                           subtitle: 'Record student attendance and completion',
-                          onTap: _openMarkAttendance,
+                          onTap: () => isPending ? _showPendingNotice() : _openMarkAttendance(),
+                          enabled: !isPending,
+                          disabledLabel: 'Pending approval',
                         ),
                         const SizedBox(height: 12),
                         _ActionTile(
@@ -274,16 +303,19 @@ class _DashboardBodyState extends State<_DashboardBody> {
                           iconColor: const Color(0xFF1565C0),
                           title: 'View Student Progress',
                           subtitle: 'Track learning milestones and skills',
-                          onTap: _openStudentProgress,
+                          onTap: () => isPending ? _showPendingNotice() : _openStudentProgress(),
+                          enabled: !isPending,
+                          disabledLabel: 'Pending approval',
                         ),
                         const SizedBox(height: 12),
-                        // NEW Upload Documents card
+                        // Upload Documents is allowed even if pending
                         _ActionTile(
                           icon: Icons.upload_file_rounded,
                           iconColor: const Color(0xFF2D5BFF),
                           title: 'Upload Documents',
                           subtitle: 'Share study materials and files with students',
                           onTap: _openUploadDocuments,
+                          enabled: true,
                         ),
                       ],
                     ),
@@ -473,7 +505,38 @@ class _ProfileHeader extends StatelessWidget {
   }
 }
 
-// NEW: prominent warning card
+// NEW: pending-state banner (optional, helps explain disabled tiles)
+class _PendingBanner extends StatelessWidget {
+  final VoidCallback onFixNow;
+  const _PendingBanner({required this.onFixNow});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: const Color(0xFFE3F2FD),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: const [
+            Icon(Icons.lock_clock, color: Color(0xFF1565C0)),
+            SizedBox(width: 12),
+            Expanded(
+              child: Text(
+                'Your account is pending approval. Some actions are disabled until activation.',
+                style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF0D47A1)),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// Existing payouts completeness warning
 class _WarningCard extends StatelessWidget {
   final bool personalOk;
   final bool paymentOk;
@@ -607,17 +670,23 @@ class _ActionTile extends StatelessWidget {
   final String subtitle;
   final VoidCallback onTap;
 
+  // NEW
+  final bool enabled;
+  final String? disabledLabel;
+
   const _ActionTile({
     required this.icon,
     required this.iconColor,
     required this.title,
     required this.subtitle,
     required this.onTap,
+    this.enabled = true,
+    this.disabledLabel,
   });
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    final card = Card(
       elevation: 0,
       color: Colors.white,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -652,6 +721,54 @@ class _ActionTile extends StatelessWidget {
           ),
         ),
       ),
+    );
+
+    if (enabled) return card;
+
+    // Disabled visual placeholder: dim + lock ribbon
+    return Stack(
+      children: [
+        Opacity(opacity: 0.55, child: card),
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(14),
+                // subtle pattern overlay for a "placeholder" feel
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withOpacity(0.0),
+                    Colors.grey.withOpacity(0.05),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          right: 14,
+          top: 14,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFF9E9E9E).withOpacity(0.9),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.lock_rounded, size: 14, color: Colors.white),
+                const SizedBox(width: 6),
+                Text(
+                  disabledLabel ?? 'Disabled',
+                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
