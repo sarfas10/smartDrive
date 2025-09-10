@@ -1,4 +1,4 @@
-// my_uploads.dart
+// lib/my_uploads.dart
 // Lists user's uploads from `user_uploads` with search and delete.
 // Delete uses Cloudinary 'destroy' signed via your PHP (op=destroy).
 // Robustness: detects resource_type from URL and falls back if "not found".
@@ -11,6 +11,9 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 
 import 'upload_document_page.dart';
+
+// Adjust to your real path for app_theme.dart
+import 'theme/app_theme.dart';
 
 class MyUploadsPage extends StatefulWidget {
   const MyUploadsPage({super.key});
@@ -47,17 +50,18 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
   Widget build(BuildContext context) {
     final user = _auth.currentUser;
     if (user == null) {
-      return const Scaffold(
-        body: Center(child: Text('You must be signed in.')),
+      return Scaffold(
+        backgroundColor: context.c.background,
+        body: Center(child: Text('You must be signed in.', style: context.t.bodyMedium?.copyWith(color: context.c.onSurface))),
       );
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
+      backgroundColor: context.c.background,
       appBar: AppBar(
-        title: const Text('My Uploads'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
+        title: Text('My Uploads', style: AppText.sectionTitle.copyWith(color: AppColors.onSurfaceInverse)),
+        backgroundColor: context.c.surface,
+        foregroundColor: context.c.onSurface,
         elevation: 0.5,
         actions: [
           IconButton(
@@ -95,14 +99,14 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
               stream: _baseQuery(user.uid).snapshots(),
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
-                  return const Center(child: CircularProgressIndicator());
+                  return Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)));
                 }
                 if (snap.hasError) {
                   return Padding(
                     padding: const EdgeInsets.all(16),
                     child: Text(
                       'Could not load uploads: ${snap.error}',
-                      style: const TextStyle(color: Colors.red),
+                      style: context.t.bodyMedium?.copyWith(color: AppColors.danger),
                     ),
                   );
                 }
@@ -141,7 +145,7 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                       child: Text(
                         '${docs.length} document${docs.length == 1 ? '' : 's'} uploaded',
-                        style: const TextStyle(color: Colors.black54, fontSize: 12),
+                        style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: 12),
                       ),
                     ),
                     Expanded(
@@ -400,14 +404,14 @@ class _SearchField extends StatelessWidget {
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: context.c.surface,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(AppRadii.m),
+          borderSide: BorderSide(color: AppColors.divider),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(AppRadii.m),
+          borderSide: BorderSide(color: AppColors.divider),
         ),
       ),
     );
@@ -454,8 +458,8 @@ class _UploadCard extends StatelessWidget {
 
     return Card(
       elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      color: context.c.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -467,28 +471,28 @@ class _UploadCard extends StatelessWidget {
               children: [
                 Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEFF3FF),
+                    color: AppColors.neuBg,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   padding: const EdgeInsets.all(8),
-                  child: Icon(icon, size: 20, color: const Color(0xFF3559FF)),
+                  child: Icon(icon, size: 20, color: AppColors.brand),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                      Text(name, style: context.t.titleSmall?.copyWith(fontWeight: FontWeight.w700, fontSize: 14, color: context.c.onSurface)),
                       const SizedBox(height: 2),
-                      Text(fileName, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                      Text(fileName, style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: 12)),
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          const Icon(Icons.calendar_today, size: 14, color: Colors.black54),
+                          Icon(Icons.calendar_today, size: 14, color: AppColors.onSurfaceMuted),
                           const SizedBox(width: 6),
-                          Text(date, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                          Text(date, style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: 12)),
                           const SizedBox(width: 14),
-                          Text(size, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                          Text(size, style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: 12)),
                         ],
                       ),
                     ],
@@ -501,17 +505,17 @@ class _UploadCard extends StatelessWidget {
               Container(
                 width: double.infinity,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF6F8FE),
+                  color: AppColors.neuBg,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Remarks: ',
-                        style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87)),
+                    Text('Remarks: ',
+                        style: context.t.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: context.c.onSurface)),
                     Expanded(
-                      child: Text(remarks, style: const TextStyle(color: Colors.black87, height: 1.2)),
+                      child: Text(remarks, style: context.t.bodySmall?.copyWith(color: context.c.onSurface, height: 1.2)),
                     ),
                   ],
                 ),
@@ -523,19 +527,19 @@ class _UploadCard extends StatelessWidget {
                 TextButton.icon(
                   onPressed: onView,
                   icon: const Icon(Icons.visibility_outlined, size: 18),
-                  label: const Text('View'),
+                  label: Text('View', style: context.t.bodySmall?.copyWith(color: context.c.primary)),
                 ),
                 const SizedBox(width: 8),
                 TextButton.icon(
                   onPressed: onDownload,
                   icon: const Icon(Icons.download_rounded, size: 18),
-                  label: const Text('Download'),
+                  label: Text('Download', style: context.t.bodySmall?.copyWith(color: context.c.primary)),
                 ),
                 const Spacer(),
                 TextButton.icon(
                   onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline, size: 18, color: Color(0xFFD32F2F)),
-                  label: const Text('Delete', style: TextStyle(color: Color(0xFFD32F2F))),
+                  icon: Icon(Icons.delete_outline, size: 18, color: AppColors.danger),
+                  label: Text('Delete', style: context.t.bodySmall?.copyWith(color: AppColors.danger)),
                 ),
               ],
             ),
@@ -600,10 +604,10 @@ class _EmptyHint extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.folder_open, size: 48, color: Colors.black26),
-            SizedBox(height: 8),
-            Text('No uploads yet', style: TextStyle(color: Colors.black54)),
+          children: [
+            Icon(Icons.folder_open, size: 48, color: AppColors.onSurfaceFaint),
+            const SizedBox(height: 8),
+            Text('No uploads yet', style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted)),
           ],
         ),
       ),

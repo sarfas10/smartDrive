@@ -14,6 +14,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+import 'theme/app_theme.dart';
 
 enum QuestionType { mcq, paragraph }
 
@@ -33,8 +34,8 @@ class _QDraft {
   String explanation = '';
 
   // Image placeholders (picked but NOT uploaded yet)
-  Uint8List? imageBytes;       // for preview + later upload
-  String? imageFilename;       // original filename (if available)
+  Uint8List? imageBytes; // for preview + later upload
+  String? imageFilename; // original filename (if available)
 
   // Will be filled ONLY after upload during create
   String? imageUrl;
@@ -55,12 +56,9 @@ class _QDraft {
         'pool_id': poolId,
         'type': type == QuestionType.mcq ? 'mcq' : 'paragraph',
         'question': question.trim(),
-        'options': type == QuestionType.mcq
-            ? options.map((e) => e.trim()).toList()
-            : [],
+        'options': type == QuestionType.mcq ? options.map((e) => e.trim()).toList() : [],
         'answer_index': type == QuestionType.mcq ? answerIndex : null,
-        'expected_answer':
-            type == QuestionType.paragraph ? expectedAnswer.trim() : null,
+        'expected_answer': type == QuestionType.paragraph ? expectedAnswer.trim() : null,
         'explanation': explanation.trim(),
         'image_url': imageUrl,
         'image_public_id': imagePublicId,
@@ -145,13 +143,10 @@ class _CreateTestPoolPageState extends State<CreateTestPoolPage> {
       for (int i = 0; i < _drafts.length; i++) {
         final d = _drafts[i];
         if (d.imageBytes != null && d.imageBytes!.isNotEmpty) {
-          final publicId =
-              '${_slug(_title.text.isEmpty ? "test_pool" : _title.text)}_q${i + 1}_$tsBase';
+          final publicId = '${_slug(_title.text.isEmpty ? "test_pool" : _title.text)}_q${i + 1}_$tsBase';
           final res = await _uploadImageToCloudinary(
             bytes: d.imageBytes!,
-            filename: (d.imageFilename?.isNotEmpty ?? false)
-                ? d.imageFilename!
-                : '$publicId.jpg',
+            filename: (d.imageFilename?.isNotEmpty ?? false) ? d.imageFilename! : '$publicId.jpg',
             publicId: publicId,
             folder: _baseFolder, // "smartDrive/tests"
           );
@@ -186,8 +181,7 @@ class _CreateTestPoolPageState extends State<CreateTestPoolPage> {
     }
   }
 
-  void _toast(String m) =>
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  void _toast(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
 
   // ===== Cloudinary (signed) helpers ========================================
   String _slug(String s) => s
@@ -202,21 +196,17 @@ class _CreateTestPoolPageState extends State<CreateTestPoolPage> {
     required String resourceType, // 'image'
     String overwrite = 'true',
   }) async {
-    final res = await http
-        .post(_api('signature.php'), body: {
-          'public_id': publicId.trim(),
-          'folder': folder.trim(),
-          'overwrite': overwrite,
-          'resource_type': resourceType,
-        })
-        .timeout(const Duration(seconds: 20));
+    final res = await http.post(_api('signature.php'), body: {
+      'public_id': publicId.trim(),
+      'folder': folder.trim(),
+      'overwrite': overwrite,
+      'resource_type': resourceType,
+    }).timeout(const Duration(seconds: 20));
     if (res.statusCode != 200) {
       throw Exception('Signature server error: ${res.statusCode} ${res.body}');
     }
     final json = jsonDecode(res.body) as Map<String, dynamic>;
-    if (json['signature'] == null ||
-        json['api_key'] == null ||
-        json['timestamp'] == null) {
+    if (json['signature'] == null || json['api_key'] == null || json['timestamp'] == null) {
       throw Exception('Invalid signature response: $json');
     }
     return json;
@@ -296,16 +286,18 @@ class _CreateTestPoolPageState extends State<CreateTestPoolPage> {
     );
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: const Color(0xFF4c63d2),
-        title: const Text('Create Test Pool'),
+        backgroundColor: AppColors.brand,
+        foregroundColor: AppColors.onSurfaceInverse,
+        title: Text('Create Test Pool', style: AppText.sectionTitle.copyWith(color: AppColors.onSurfaceInverse)),
       ),
 
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => setState(() => _drafts.add(_QDraft())),
-        backgroundColor: const Color(0xFF4c63d2),
+        backgroundColor: AppColors.brand,
+        foregroundColor: AppColors.onSurfaceInverse,
         label: const Text('Add Question'),
         icon: const Icon(Icons.add),
       ),
@@ -313,12 +305,10 @@ class _CreateTestPoolPageState extends State<CreateTestPoolPage> {
       bottomNavigationBar: SafeArea(
         top: false,
         child: Container(
-          padding: EdgeInsets.fromLTRB(
-              pad.horizontal / 2, 10, pad.horizontal / 2, 10),
+          padding: EdgeInsets.fromLTRB(pad.horizontal / 2, 10, pad.horizontal / 2, 10),
           decoration: BoxDecoration(
-            color: Colors.white,
-            border:
-                Border(top: BorderSide(color: Colors.black12.withOpacity(.06))),
+            color: AppColors.surface,
+            border: Border(top: BorderSide(color: AppColors.divider)),
           ),
           child: Row(
             children: [
@@ -329,17 +319,14 @@ class _CreateTestPoolPageState extends State<CreateTestPoolPage> {
                   children: [
                     LinearProgressIndicator(
                       value: _progress(),
-                      color: const Color(0xFF4c63d2),
-                      backgroundColor: const Color(0xFFE9ECEF),
+                      color: AppColors.brand,
+                      backgroundColor: AppColors.neuBg,
                       minHeight: 6,
                     ),
                     const SizedBox(height: 6),
                     Text(
-                      _drafts.length == 1
-                          ? '1 question'
-                          : '${_drafts.length} questions',
-                      style:
-                          const TextStyle(fontSize: 12, color: Colors.black54),
+                      _drafts.length == 1 ? '1 question' : '${_drafts.length} questions',
+                      style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted),
                     ),
                   ],
                 ),
@@ -348,20 +335,19 @@ class _CreateTestPoolPageState extends State<CreateTestPoolPage> {
               ElevatedButton.icon(
                 onPressed: _saving ? null : _handleCreate,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF4c63d2),
-                  foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  backgroundColor: AppColors.brand,
+                  foregroundColor: AppColors.onSurfaceInverse,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
                 icon: _saving
-                    ? const SizedBox(
+                    ? SizedBox(
                         height: 16,
                         width: 16,
-                        child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onSurfaceInverse),
                       )
                     : const Icon(Icons.save_alt),
-                label: Text(_saving ? 'Saving...' : 'Create'),
+                label: Text(_saving ? 'Saving...' : 'Create',
+                    style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
               ),
             ],
           ),
@@ -387,15 +373,13 @@ class _CreateTestPoolPageState extends State<CreateTestPoolPage> {
                             _LabeledTextField(
                               label: 'Test Title *',
                               controller: _title,
-                              hint:
-                                  'e.g., Learner\'s Licence Mock Test – Set 1',
+                              hint: 'e.g., Learner\'s Licence Mock Test – Set 1',
                             ),
                             const SizedBox(height: 10),
                             _LabeledTextField(
                               label: 'Description',
                               controller: _description,
-                              hint:
-                                  'Brief description (e.g., Signs: Mandatory/Warning, Speed limits, Night driving).',
+                              hint: 'Brief description (e.g., Signs: Mandatory/Warning, Speed limits, Night driving).',
                               multiline: true,
                             ),
                             const SizedBox(height: 10),
@@ -429,19 +413,12 @@ class _CreateTestPoolPageState extends State<CreateTestPoolPage> {
                         titleWidget: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Questions',
-                                style: TextStyle(
-                                    fontWeight: FontWeight.w700,
-                                    fontSize: 16,
-                                    color: Colors.black)),
+                            Text('Questions', style: AppText.sectionTitle.copyWith(fontSize: 16)),
                             TextButton.icon(
-                              onPressed: () =>
-                                  setState(() => _drafts.add(_QDraft())),
+                              onPressed: () => setState(() => _drafts.add(_QDraft())),
                               icon: const Icon(Icons.add),
                               label: const Text('Add Question'),
-                              style: TextButton.styleFrom(
-                                foregroundColor: const Color(0xFF4c63d2),
-                              ),
+                              style: TextButton.styleFrom(foregroundColor: AppColors.brand),
                             ),
                           ],
                         ),
@@ -452,8 +429,7 @@ class _CreateTestPoolPageState extends State<CreateTestPoolPage> {
                                 key: ValueKey(_drafts[i]), // stabilize
                                 index: i + 1,
                                 draft: _drafts[i],
-                                onDelete: () =>
-                                    setState(() => _drafts.removeAt(i)),
+                                onDelete: () => setState(() => _drafts.removeAt(i)),
                                 onChanged: () => setState(() {}),
                                 onPickImage: () => _pickImage(_drafts[i]),
                                 onRemoveImage: () {
@@ -492,25 +468,19 @@ class _SectionCard extends StatelessWidget {
     return Card(
       margin: EdgeInsets.zero,
       elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (titleWidget != null)
-              Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
-                  child: titleWidget!)
+              Padding(padding: const EdgeInsets.only(bottom: 8), child: titleWidget!)
             else if (title != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: Text(title!,
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
-                        color: Colors.black)),
+                child: Text(title!, style: AppText.sectionTitle),
               ),
             child,
           ],
@@ -540,22 +510,21 @@ class _LabeledTextField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label,
-            style: const TextStyle(
-                fontSize: 12, fontWeight: FontWeight.w600, color: Colors.black87)),
+        Text(label, style: AppText.tileTitle.copyWith(fontSize: 12)),
         const SizedBox(height: 6),
         TextField(
           controller: controller,
           keyboardType: keyboardType,
           maxLines: multiline ? 3 : 1,
-          style: const TextStyle(color: Colors.black), // typed text black
+          style: AppText.tileTitle.copyWith(color: AppColors.onSurface),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: const TextStyle(color: Colors.black45), // placeholder dimmed
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+            hintStyle: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
             isDense: dense,
-            contentPadding:
-                EdgeInsets.symmetric(horizontal: 12, vertical: dense ? 12 : 14),
+            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: dense ? 12 : 14),
+            filled: true,
+            fillColor: AppColors.surface,
           ),
         ),
       ],
@@ -601,7 +570,9 @@ class _QuestionEditorState extends State<_QuestionEditor> {
     expAnsCtrl = TextEditingController(text: widget.draft.expectedAnswer);
 
     qCtrl.addListener(_sync);
-    for (final c in optCtrl) { c.addListener(_sync); }
+    for (final c in optCtrl) {
+      c.addListener(_sync);
+    }
     expCtrl.addListener(_sync);
     expAnsCtrl.addListener(_sync);
   }
@@ -619,7 +590,9 @@ class _QuestionEditorState extends State<_QuestionEditor> {
   @override
   void dispose() {
     qCtrl.dispose();
-    for (final c in optCtrl) { c.dispose(); }
+    for (final c in optCtrl) {
+      c.dispose();
+    }
     expCtrl.dispose();
     expAnsCtrl.dispose();
     super.dispose();
@@ -633,9 +606,9 @@ class _QuestionEditorState extends State<_QuestionEditor> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF8F9FA),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFE9ECEF)),
+        color: AppColors.neuBg,
+        borderRadius: BorderRadius.circular(AppRadii.m),
+        border: Border.all(color: AppColors.divider),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -645,10 +618,7 @@ class _QuestionEditorState extends State<_QuestionEditor> {
             children: [
               Expanded(
                 child: Text('Question ${widget.index}',
-                    style: const TextStyle(
-                        fontWeight: FontWeight.w700,
-                        fontSize: 16,
-                        color: Colors.black)),
+                    style: AppText.sectionTitle.copyWith(fontSize: 16)),
               ),
               DropdownButton<QuestionType>(
                 value: widget.draft.type,
@@ -657,25 +627,21 @@ class _QuestionEditorState extends State<_QuestionEditor> {
                   setState(() => widget.draft.type = v);
                   widget.onChanged();
                 },
-                items: const [
+                items: [
                   DropdownMenuItem(
                     value: QuestionType.mcq,
-                    child: Text('MCQ',
-                        style: TextStyle(
-                            color: Colors.black, fontWeight: FontWeight.w600)),
+                    child: Text('MCQ', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
                   ),
                   DropdownMenuItem(
                     value: QuestionType.paragraph,
-                    child: Text('Paragraph',
-                        style: TextStyle(
-                            color: Colors.black, fontWeight: FontWeight.w600)),
+                    child: Text('Paragraph', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
                   ),
                 ],
               ),
               IconButton(
                 tooltip: 'Delete',
                 onPressed: widget.onDelete,
-                icon: const Icon(Icons.delete_outline, color: Colors.red),
+                icon: Icon(Icons.delete_outline, color: AppColors.danger),
               ),
             ],
           ),
@@ -700,9 +666,9 @@ class _QuestionEditorState extends State<_QuestionEditor> {
                   margin: const EdgeInsets.only(right: 10),
                   clipBehavior: Clip.antiAlias,
                   decoration: BoxDecoration(
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE0E0E0)),
-                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(AppRadii.m),
+                    border: Border.all(color: AppColors.divider),
+                    color: AppColors.surface,
                   ),
                   child: Image.memory(widget.draft.imageBytes!, fit: BoxFit.cover),
                 ),
@@ -714,15 +680,17 @@ class _QuestionEditorState extends State<_QuestionEditor> {
                     OutlinedButton.icon(
                       onPressed: widget.onPickImage,
                       icon: const Icon(Icons.image),
-                      label: Text(widget.draft.imageBytes == null
-                          ? 'Add image (optional)'
-                          : 'Replace image'),
+                      label: Text(widget.draft.imageBytes == null ? 'Add image (optional)' : 'Replace image'),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.brand,
+                        side: BorderSide(color: AppColors.divider),
+                      ),
                     ),
                     if (widget.draft.imageBytes != null)
                       TextButton.icon(
                         onPressed: widget.onRemoveImage,
-                        icon: const Icon(Icons.close),
-                        label: const Text('Remove'),
+                        icon: Icon(Icons.close, color: AppColors.danger),
+                        label: Text('Remove', style: TextStyle(color: AppColors.danger)),
                       ),
                   ],
                 ),
@@ -732,9 +700,7 @@ class _QuestionEditorState extends State<_QuestionEditor> {
           const SizedBox(height: 10),
 
           if (widget.draft.type == QuestionType.mcq) ...[
-            const Text('Answer Options *',
-                style: TextStyle(
-                    fontWeight: FontWeight.w600, color: Colors.black)),
+            Text('Answer Options *', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
             const SizedBox(height: 8),
 
             for (int i = 0; i < 4; i++) ...[
@@ -751,10 +717,8 @@ class _QuestionEditorState extends State<_QuestionEditor> {
               if (i != 3) const SizedBox(height: 8),
             ],
             const SizedBox(height: 6),
-            const Text(
-              'Select the radio button next to the correct answer',
-              style: TextStyle(fontSize: 12, color: Colors.black54),
-            ),
+            Text('Select the radio button next to the correct answer',
+                style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
             const SizedBox(height: 12),
           ] else ...[
             _LabeledTextField(
@@ -806,19 +770,20 @@ class _OptionRow extends StatelessWidget {
           value: value,
           groupValue: groupValue,
           onChanged: onSelect,
-          activeColor: const Color(0xFF4c63d2),
+          activeColor: AppColors.brand,
         ),
         Expanded(
           child: TextField(
             controller: controller,
-            style: const TextStyle(color: Colors.black), // typed text black
+            style: AppText.tileTitle.copyWith(color: AppColors.onSurface),
             decoration: InputDecoration(
               hintText: label,
-              hintStyle: const TextStyle(color: Colors.black45), // dimmed placeholder
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+              hintStyle: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
               isDense: dense,
-              contentPadding: EdgeInsets.symmetric(
-                  horizontal: 12, vertical: dense ? 12 : 14),
+              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: dense ? 12 : 14),
+              filled: true,
+              fillColor: AppColors.surface,
             ),
           ),
         ),

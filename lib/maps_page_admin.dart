@@ -1,7 +1,11 @@
+// lib/maps_page_admin.dart
 import 'package:flutter/material.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+// Import your design tokens & theme helpers — adjust this path if needed
+import 'theme/app_theme.dart';
 
 class MapsPageAdmin extends StatefulWidget {
   const MapsPageAdmin({super.key});
@@ -37,22 +41,18 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
   // Add or update marker at the tapped location
   void _addMarker(LatLng position) {
     setState(() {
-      // Clear existing markers (only one marker allowed)
       _markers.clear();
-      
-      // Add new marker
       _markers.add(
         Marker(
           markerId: const MarkerId('selected_location'),
           position: position,
           infoWindow: InfoWindow(
             title: 'Selected Location',
-            snippet: '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}',
+            snippet:
+                '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}',
           ),
         ),
       );
-      
-      // Update selected location and mark as unsaved
       _selectedLocation = position;
       _hasUnsavedChanges = true;
     });
@@ -73,11 +73,10 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
     LocationPermission permission;
 
     try {
-      // Check if location services are enabled
       serviceEnabled = await Geolocator.isLocationServiceEnabled();
       if (!serviceEnabled) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Location services are disabled.')),
+          SnackBar(content: Text('Location services are disabled.'), backgroundColor: AppColors.warning),
         );
         setState(() {
           _isLocationLoading = false;
@@ -85,7 +84,6 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
         return;
       }
 
-      // Check permission
       permission = await Geolocator.checkPermission();
       if (permission == LocationPermission.denied) {
         permission = await Geolocator.requestPermission();
@@ -104,17 +102,14 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
         return;
       }
 
-      // Get current position
       final position = await Geolocator.getCurrentPosition(
         desiredAccuracy: LocationAccuracy.high,
       );
 
       final currentLocation = LatLng(position.latitude, position.longitude);
 
-      // Add marker at current location
       _addMarker(currentLocation);
 
-      // Move the camera to current location
       await _mapController?.animateCamera(
         CameraUpdate.newCameraPosition(
           CameraPosition(
@@ -132,7 +127,7 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
         _isLocationLoading = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error getting location: $e')),
+        SnackBar(content: Text('Error getting location: $e'), backgroundColor: AppColors.danger),
       );
     }
   }
@@ -150,7 +145,7 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
   Future<void> _saveToDatabase() async {
     if (_selectedLocation == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a location first')),
+        SnackBar(content: Text('Please select a location first'), backgroundColor: AppColors.warning),
       );
       return;
     }
@@ -161,13 +156,13 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
 
     try {
       final FirebaseFirestore firestore = FirebaseFirestore.instance;
-      const String settingsDocId = 'app_settings'; // Fixed document ID
-      
-      final DocumentReference settingsDoc = firestore.collection('settings').doc(settingsDocId);
-      
-      // Check if document exists
+      const String settingsDocId = 'app_settings';
+
+      final DocumentReference settingsDoc =
+          firestore.collection('settings').doc(settingsDocId);
+
       final DocumentSnapshot docSnapshot = await settingsDoc.get();
-      
+
       final Map<String, dynamic> locationData = {
         'latitude': _selectedLocation!.latitude,
         'longitude': _selectedLocation!.longitude,
@@ -175,35 +170,31 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
       };
 
       if (docSnapshot.exists) {
-        // Update existing document
         await settingsDoc.update(locationData);
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text('Location updated successfully!'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.success,
           ),
         );
-        
-        // Mark as saved
+
         setState(() {
           _hasUnsavedChanges = false;
         });
       } else {
-        // Create new document
         await settingsDoc.set({
           ...locationData,
           'created_at': FieldValue.serverTimestamp(),
         });
-        
+
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text('Location saved successfully!'),
-            backgroundColor: Colors.green,
+            backgroundColor: AppColors.success,
           ),
         );
-        
-        // Mark as saved
+
         setState(() {
           _hasUnsavedChanges = false;
         });
@@ -212,7 +203,7 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error saving location: $e'),
-          backgroundColor: Colors.red,
+          backgroundColor: AppColors.danger,
         ),
       );
     } finally {
@@ -225,50 +216,48 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
   // Show warning dialog for unsaved changes
   Future<bool> _showUnsavedChangesDialog() async {
     return await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
-          title: const Row(
-            children: [
-              Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
-              SizedBox(width: 12),
-              Text('Unsaved Changes'),
-            ],
-          ),
-          content: const Text(
-            'You have unsaved location changes. Do you want to leave without saving?',
-            style: TextStyle(fontSize: 16),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text(
-                'Cancel',
-                style: TextStyle(color: Colors.grey, fontSize: 16),
+          context: context,
+          barrierDismissible: false,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(AppRadii.l),
               ),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
+              title: Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 28),
+                  const SizedBox(width: 12),
+                  Text('Unsaved Changes', style: context.t.titleMedium?.copyWith(color: context.c.onSurface)),
+                ],
+              ),
+              content: Text(
+                'You have unsaved location changes. Do you want to leave without saving?',
+                style: context.t.bodyMedium?.copyWith(color: context.c.onSurface),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: Text('Cancel', style: context.t.bodyMedium?.copyWith(color: AppColors.onSurfaceMuted)),
                 ),
-              ),
-              child: const Text(
-                'Leave',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              ),
-            ),
-          ],
-        );
-      },
-    ) ?? false;
+                ElevatedButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.danger,
+                    foregroundColor: context.c.onPrimary,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.m),
+                    ),
+                  ),
+                  child: Text(
+                    'Leave',
+                    style: context.t.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            );
+          },
+        ) ??
+        false;
   }
 
   // Handle back navigation
@@ -300,7 +289,7 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
               mapType: MapType.normal,
               myLocationEnabled: true,
               myLocationButtonEnabled: false,
-              zoomControlsEnabled: false, // Disable default zoom controls
+              zoomControlsEnabled: false,
               zoomGesturesEnabled: true,
               scrollGesturesEnabled: true,
               rotateGesturesEnabled: false,
@@ -311,7 +300,7 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
               markers: _markers,
               onMapCreated: _onMapCreated,
               onTap: _onMapTap,
-              onLongPress: null, // Disable long press to avoid conflicts
+              onLongPress: null,
             ),
 
             // Loading overlay
@@ -322,61 +311,41 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
                   child: Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          spreadRadius: 2,
-                          blurRadius: 8,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
+                      color: context.c.surface,
+                      borderRadius: BorderRadius.circular(AppRadii.l),
+                      boxShadow: AppShadows.card,
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const SizedBox(
+                        SizedBox(
                           width: 48,
                           height: 48,
                           child: CircularProgressIndicator(
                             strokeWidth: 3,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.blue),
+                            valueColor: AlwaysStoppedAnimation<Color>(context.c.primary),
                           ),
                         ),
                         const SizedBox(height: 16),
                         Text(
-                          _isMapLoading 
-                            ? 'Loading Map...' 
-                            : 'Getting Current Location...',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.black87,
-                          ),
+                          _isMapLoading ? 'Loading Map...' : 'Getting Current Location...',
+                          style: context.t.bodyMedium?.copyWith(color: context.c.onSurface),
                         ),
                       ],
                     ),
                   ),
                 ),
               ),
-            
+
             // Back button (top left)
             Positioned(
               left: 16,
-              top: 50,
+              top: MediaQuery.of(context).padding.top + 10,
               child: Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: context.c.surface,
                   borderRadius: BorderRadius.circular(25),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      spreadRadius: 1,
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
+                  boxShadow: AppShadows.card,
                 ),
                 child: IconButton(
                   onPressed: () async {
@@ -389,151 +358,85 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
                       Navigator.of(context).pop();
                     }
                   },
-                  icon: const Icon(Icons.arrow_back),
-                  color: Colors.black87,
+                  icon: Icon(Icons.arrow_back, color: context.c.onSurface),
                   tooltip: 'Go Back',
                 ),
               ),
             ),
-            
-            // Custom Zoom Controls (styled to match other buttons)
+
+            // Custom Zoom Controls
             Positioned(
               right: 16,
-              bottom: 200, // Above current location button
+              bottom: 200,
               child: Column(
                 children: [
                   // Zoom In Button
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(25),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          spreadRadius: 1,
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: IconButton(
-                      onPressed: () async {
-                        if (_mapController != null) {
-                          await _mapController!.animateCamera(CameraUpdate.zoomIn());
-                        }
-                      },
-                      icon: const Icon(Icons.add),
-                      color: Colors.black87,
-                      tooltip: 'Zoom In',
-                    ),
+                  _roundIconButton(
+                    icon: Icons.add,
+                    onTap: () async {
+                      if (_mapController != null) {
+                        await _mapController!.animateCamera(CameraUpdate.zoomIn());
+                      }
+                    },
+                    tooltip: 'Zoom In',
                   ),
                   const SizedBox(height: 8),
                   // Zoom Out Button
-                  Container(
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(25),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          spreadRadius: 1,
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
-                    ),
-                    child: IconButton(
-                      onPressed: () async {
-                        if (_mapController != null) {
-                          await _mapController!.animateCamera(CameraUpdate.zoomOut());
-                        }
-                      },
-                      icon: const Icon(Icons.remove),
-                      color: Colors.black87,
-                      tooltip: 'Zoom Out',
-                    ),
+                  _roundIconButton(
+                    icon: Icons.remove,
+                    onTap: () async {
+                      if (_mapController != null) {
+                        await _mapController!.animateCamera(CameraUpdate.zoomOut());
+                      }
+                    },
+                    tooltip: 'Zoom Out',
                   ),
                 ],
               ),
             ),
-            
-            // Clear button (above current location button)
+
+            // Clear button
             Positioned(
               right: 16,
-              bottom: 120, // Above current location button
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(25),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      spreadRadius: 1,
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: IconButton(
-                  onPressed: _clearMarker,
-                  icon: const Icon(Icons.delete_sweep),
-                  color: Colors.red,
-                  tooltip: 'Clear All Markers',
-                ),
+              bottom: 120,
+              child: _roundIconButton(
+                icon: Icons.delete_sweep,
+                onTap: _clearMarker,
+                tooltip: 'Clear All Markers',
+                iconColor: AppColors.danger,
               ),
             ),
-            
+
             // Current location button
             Positioned(
               right: 16,
-              bottom: 60, // Bottom position
-              child: Container(
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(25),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withOpacity(0.2),
-                      spreadRadius: 1,
-                      blurRadius: 4,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-                child: IconButton(
-                  onPressed: _goToCurrentLocation,
-                  icon: const Icon(Icons.my_location),
-                  color: Colors.blue,
-                  tooltip: 'Go to Current Location',
-                ),
+              bottom: 60,
+              child: _roundIconButton(
+                icon: Icons.my_location,
+                onTap: _goToCurrentLocation,
+                tooltip: 'Go to Current Location',
+                iconColor: context.c.primary,
               ),
             ),
-            
-            // Coordinates display at top right (circular radius box)
+
+            // Coordinates display at top right
             if (_selectedLocation != null)
               Positioned(
                 right: 16,
-                left: 100, // More space from left, positioned towards right
-                top: 60,
+                left: 100,
+                top: MediaQuery.of(context).padding.top + 16,
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: context.c.surface,
                     borderRadius: BorderRadius.circular(30),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        spreadRadius: 1,
-                        blurRadius: 6,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
+                    boxShadow: AppShadows.card,
                   ),
                   child: Row(
                     children: [
-                      const Icon(
+                      Icon(
                         Icons.location_on,
-                        color: Colors.blue,
+                        color: context.c.primary,
                         size: 24,
                       ),
                       const SizedBox(width: 12),
@@ -544,26 +447,16 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
                           children: [
                             Text(
                               'Selected Location',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                                fontWeight: FontWeight.w500,
-                              ),
+                              style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontWeight: FontWeight.w500),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'Lat: ${_selectedLocation!.latitude.toStringAsFixed(6)}',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
+                              style: context.t.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: context.c.onSurface),
                             ),
                             Text(
                               'Lng: ${_selectedLocation!.longitude.toStringAsFixed(6)}',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
+                              style: context.t.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: context.c.onSurface),
                             ),
                           ],
                         ),
@@ -572,25 +465,25 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
                       ElevatedButton(
                         onPressed: _isSaving ? null : _saveToDatabase,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          foregroundColor: Colors.white,
+                          backgroundColor: context.c.primary,
+                          foregroundColor: context.c.onPrimary,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(AppRadii.l),
                           ),
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         ),
                         child: _isSaving
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 16,
                                 height: 16,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                                  valueColor: AlwaysStoppedAnimation<Color>(context.c.onPrimary),
                                 ),
                               )
-                            : const Text(
+                            : Text(
                                 'Save',
-                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                                style: context.t.bodyMedium?.copyWith(fontWeight: FontWeight.w600),
                               ),
                       ),
                     ],
@@ -599,6 +492,27 @@ class _MapsPageAdminState extends State<MapsPageAdmin> {
               ),
           ],
         ),
+      ),
+    );
+  }
+
+  // Helper to create the round icon buttons with consistent theme
+  Widget _roundIconButton({
+    required IconData icon,
+    required VoidCallback onTap,
+    required String tooltip,
+    Color? iconColor,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: context.c.surface,
+        borderRadius: BorderRadius.circular(25),
+        boxShadow: AppShadows.card,
+      ),
+      child: IconButton(
+        onPressed: onTap,
+        icon: Icon(icon, color: iconColor ?? context.c.onSurface),
+        tooltip: tooltip,
       ),
     );
   }

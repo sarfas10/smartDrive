@@ -5,18 +5,17 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'student_progress.dart'; // <-- from previous message
 
-class StudentsListPage extends StatefulWidget {
-  const StudentsListPage({super.key });
+// Use application tokens (colors, radii, shadows)
+import 'theme/app_theme.dart';
 
-  
+class StudentsListPage extends StatefulWidget {
+  const StudentsListPage({super.key});
 
   @override
   State<StudentsListPage> createState() => _StudentsListPageState();
 }
 
 class _StudentsListPageState extends State<StudentsListPage> {
-  static const _kBrand = Color(0xFF4C63D2);
-
   final _searchCtrl = TextEditingController();
   Timer? _debounce;
 
@@ -37,14 +36,18 @@ class _StudentsListPageState extends State<StudentsListPage> {
     // Prefer a Firestore-side filter to restrict to students; tolerate naming variants.
     final query = base.where('role', whereIn: ['student', 'Student']);
 
+    final bg = AppColors.background;
+    final surface = AppColors.surface;
+    final onSurface = AppColors.onSurface;
+    final muted = AppColors.onSurfaceMuted;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F8FA),
+      backgroundColor: bg,
       appBar: AppBar(
         elevation: 0.5,
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
+        backgroundColor: surface,
+        foregroundColor: onSurface,
         title: const Text('My Students'),
-        
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
         stream: query.snapshots(),
@@ -113,7 +116,9 @@ class _StudentsListPageState extends State<StudentsListPage> {
                         label: 'Total Students',
                         value: '$totalCount',
                         tint: const Color(0xFFE8EEFF),
-                        iconColor: _kBrand,
+                        iconColor: AppColors.brand,
+                        surface: surface,
+                        muted: muted,
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -123,7 +128,9 @@ class _StudentsListPageState extends State<StudentsListPage> {
                         label: 'Active Students',
                         value: '$activeCount',
                         tint: const Color(0xFFEAF7EF),
-                        iconColor: const Color(0xFF2E7D32),
+                        iconColor: AppColors.success,
+                        surface: surface,
+                        muted: muted,
                       ),
                     ),
                   ],
@@ -145,6 +152,7 @@ class _StudentsListPageState extends State<StudentsListPage> {
                           _debounce = Timer(const Duration(milliseconds: 250),
                               () => setState(() {}));
                         },
+                        surface: surface,
                       ),
                     ),
                   ],
@@ -155,9 +163,9 @@ class _StudentsListPageState extends State<StudentsListPage> {
                 padding: const EdgeInsets.symmetric(horizontal: 12),
                 child: Row(
                   children: [
-                    Expanded(child: _statusDropdown(_status, (v) => setState(() => _status = v))),
+                    Expanded(child: _statusDropdown(_status, (v) => setState(() => _status = v), surface: surface)),
                     const SizedBox(width: 12),
-                    Expanded(child: _sortDropdown(_sort, (v) => setState(() => _sort = v))),
+                    Expanded(child: _sortDropdown(_sort, (v) => setState(() => _sort = v), surface: surface)),
                   ],
                 ),
               ),
@@ -201,13 +209,15 @@ class _StudentsListPageState extends State<StudentsListPage> {
     required String value,
     required Color tint,
     required Color iconColor,
+    required Color surface,
+    required Color muted,
   }) {
     return Container(
       height: 74,
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        boxShadow: const [BoxShadow(color: Color(0x12000000), blurRadius: 10, offset: Offset(0, 4))],
+        color: surface,
+        borderRadius: BorderRadius.circular(AppRadii.l),
+        boxShadow: AppShadows.card,
       ),
       child: Row(
         children: [
@@ -224,9 +234,9 @@ class _StudentsListPageState extends State<StudentsListPage> {
               mainAxisAlignment: MainAxisAlignment.center,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(value, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.onSurface)),
                 const SizedBox(height: 2),
-                Text(label, style: const TextStyle(fontSize: 12, color: Colors.black54)),
+                Text(label, style: TextStyle(fontSize: 12, color: muted)),
               ],
             ),
           ),
@@ -240,6 +250,7 @@ class _StudentsListPageState extends State<StudentsListPage> {
     required TextEditingController controller,
     required String hint,
     ValueChanged<String>? onChanged,
+    required Color surface,
   }) {
     return SizedBox(
       height: 44,
@@ -250,26 +261,26 @@ class _StudentsListPageState extends State<StudentsListPage> {
           prefixIcon: const Icon(Icons.search),
           hintText: hint,
           filled: true,
-          fillColor: Colors.white,
+          fillColor: surface,
           contentPadding: const EdgeInsets.symmetric(horizontal: 12),
           border: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+            borderRadius: BorderRadius.circular(AppRadii.m),
+            borderSide: BorderSide(color: AppColors.divider),
           ),
           enabledBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFE5E7EB)),
+            borderRadius: BorderRadius.circular(AppRadii.m),
+            borderSide: BorderSide(color: AppColors.divider),
           ),
           focusedBorder: OutlineInputBorder(
-            borderRadius: BorderRadius.circular(12),
-            borderSide: const BorderSide(color: Color(0xFFC7CEF7)),
+            borderRadius: BorderRadius.circular(AppRadii.m),
+            borderSide: BorderSide(color: AppColors.brand.withOpacity(0.25)),
           ),
         ),
       ),
     );
   }
 
-  Widget _statusDropdown(String value, ValueChanged<String> onChanged) {
+  Widget _statusDropdown(String value, ValueChanged<String> onChanged, {required Color surface}) {
     const opts = [
       ['all', 'All Status'],
       ['active', 'Active'],
@@ -281,10 +292,11 @@ class _StudentsListPageState extends State<StudentsListPage> {
       value: value,
       items: opts,
       onChanged: onChanged,
+      surface: surface,
     );
   }
 
-  Widget _sortDropdown(String value, ValueChanged<String> onChanged) {
+  Widget _sortDropdown(String value, ValueChanged<String> onChanged, {required Color surface}) {
     const opts = [
       ['nameAsc', 'Sort by Name'],
       ['nameDesc', 'Name (Z–A)'],
@@ -296,6 +308,7 @@ class _StudentsListPageState extends State<StudentsListPage> {
       value: value,
       items: opts,
       onChanged: onChanged,
+      surface: surface,
     );
   }
 
@@ -303,13 +316,14 @@ class _StudentsListPageState extends State<StudentsListPage> {
     required String value,
     required List<List<String>> items,
     required ValueChanged<String> onChanged,
+    required Color surface,
   }) {
     return Container(
       height: 44,
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: const Color(0xFFE5E7EB)),
-        borderRadius: BorderRadius.circular(12),
+        color: surface,
+        border: Border.all(color: AppColors.divider),
+        borderRadius: BorderRadius.circular(AppRadii.m),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 10),
       child: DropdownButtonHideUnderline(
@@ -333,19 +347,17 @@ class _StudentsListPageState extends State<StudentsListPage> {
 
   Widget _studentTile({required _Student student, required VoidCallback onTap}) {
     return Material(
-      color: Colors.white,
-      borderRadius: BorderRadius.circular(12),
+      color: AppColors.surface,
+      borderRadius: BorderRadius.circular(AppRadii.m),
       child: InkWell(
         onTap: onTap,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(AppRadii.m),
         child: Container(
           height: 76,
           padding: const EdgeInsets.symmetric(horizontal: 12),
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(12),
-            boxShadow: const [
-              BoxShadow(color: Color(0x08000000), blurRadius: 6, offset: Offset(0, 2))
-            ],
+            borderRadius: BorderRadius.circular(AppRadii.m),
+            boxShadow: AppShadows.card,
           ),
           child: Row(
             children: [
@@ -359,7 +371,7 @@ class _StudentsListPageState extends State<StudentsListPage> {
               ),
               _StatusPill(status: student.status),
               const SizedBox(width: 6),
-              const Icon(Icons.chevron_right_rounded, color: Colors.black38),
+              Icon(Icons.chevron_right_rounded, color: AppColors.onSurfaceMuted),
             ],
           ),
         ),
@@ -371,7 +383,7 @@ class _StudentsListPageState extends State<StudentsListPage> {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(24),
-        child: Text(msg, textAlign: TextAlign.center),
+        child: Text(msg, textAlign: TextAlign.center, style: TextStyle(color: AppColors.danger)),
       ),
     );
   }
@@ -449,11 +461,11 @@ class _Avatar extends StatelessWidget {
   Widget build(BuildContext context) {
     return CircleAvatar(
       radius: 24,
-      backgroundColor: const Color(0xFFE9EDFF),
+      backgroundColor: AppColors.neuBg,
       child: Text(
         initials,
         style: const TextStyle(
-          color: Color(0xFF4C63D2),
+          color: AppColors.brand,
           fontWeight: FontWeight.w800,
         ),
       ),
@@ -477,13 +489,13 @@ class _TwoLine extends StatelessWidget {
           Text(title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: AppColors.onSurface)),
           const SizedBox(height: 2),
           Text(
             subtitle,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(fontSize: 12, color: Colors.black54),
+            style: const TextStyle(fontSize: 12, color: AppColors.onSurfaceMuted),
           ),
         ],
       ),
@@ -519,8 +531,8 @@ class _StatusPill extends StatelessWidget {
         break;
       case 'inactive':
       default:
-        bg = const Color(0xFFF4F6F8);
-        fg = const Color(0xFF6B7280);
+        bg = AppColors.neuBg;
+        fg = AppColors.neuFg;
         text = 'Inactive';
         break;
     }

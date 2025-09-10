@@ -4,6 +4,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 
+// Import your design tokens & theme helpers — adjust path if needed
+import 'theme/app_theme.dart';
+
 class InstructorSlotsBlock extends StatefulWidget {
   const InstructorSlotsBlock({super.key});
 
@@ -46,7 +49,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
     final ts = media.textScaleFactor.clamp(0.9, 1.2);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: context.c.background,
       body: NestedScrollView(
         headerSliverBuilder: (context, inner) => [
           SliverAppBar(
@@ -56,20 +59,17 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
             elevation: 0,
             backgroundColor: Colors.transparent,
             flexibleSpace: Container(
-              decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                ),
-                boxShadow: [
-                  BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2)),
-                ],
+              decoration: BoxDecoration(
+                gradient: AppGradients.brandHero,
+                boxShadow: AppShadows.card,
               ),
             ),
             leading: IconButton(
-              icon: Icon(Icons.arrow_back_ios_new,
-                  color: Colors.white, size: _scale(sw, 18, 22, 26)),
+              icon: Icon(
+                Icons.arrow_back_ios_new,
+                color: AppColors.onSurfaceInverse,
+                size: _scale(sw, 18, 22, 26),
+              ),
               tooltip: 'Back',
               onPressed: () {
                 if (Navigator.canPop(context)) Navigator.pop(context);
@@ -78,7 +78,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
             title: Text(
               '👨‍🏫 My Scheduled Slots',
               style: TextStyle(
-                color: Colors.white,
+                color: AppColors.onSurfaceInverse,
                 fontWeight: FontWeight.w600,
                 fontSize: _scale(sw, 16, 18, 20) * ts,
               ),
@@ -90,7 +90,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
             _buildDateSelector(context),
             Expanded(
               child: Container(
-                color: const Color(0xFFFAFBFC),
+                color: context.c.background,
                 child: _buildSlotsContent(context),
               ),
             ),
@@ -120,9 +120,9 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
 
     return Container(
       padding: EdgeInsets.symmetric(horizontal: barPaddingH, vertical: barPaddingV),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
+      decoration: BoxDecoration(
+        color: context.c.surface,
+        border: Border(bottom: BorderSide(color: AppColors.divider)),
       ),
       child: SizedBox(
         height: barHeight,
@@ -148,11 +148,11 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                   maxWidth: _scale(sw, 65, 70, 75),
                 ),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFFEF4444) : const Color(0xFFF8F9FA),
+                  color: isSelected ? AppColors.danger : context.c.surface,
                   border: Border.all(
-                    color: isSelected ? const Color(0xFFEF4444) : const Color(0xFFE5E7EB),
+                    color: isSelected ? AppColors.danger : AppColors.divider,
                   ),
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(AppRadii.m),
                 ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
@@ -163,7 +163,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                       style: TextStyle(
                         fontSize: dowSize,
                         fontWeight: FontWeight.w500,
-                        color: isSelected ? Colors.white : Colors.black.withOpacity(0.7),
+                        color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface.withOpacity(0.7),
                       ),
                     ),
                     SizedBox(height: _scale(sw, 1, 1, 2)),
@@ -172,7 +172,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                       style: TextStyle(
                         fontSize: daySize,
                         fontWeight: FontWeight.w600,
-                        color: isSelected ? Colors.white : Colors.black,
+                        color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface,
                       ),
                     ),
                     SizedBox(height: _scale(sw, 1, 1, 2)),
@@ -180,7 +180,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                       DateFormat('MMM').format(date).toUpperCase(),
                       style: TextStyle(
                         fontSize: monSize,
-                        color: isSelected ? Colors.white : Colors.black.withOpacity(0.7),
+                        color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface.withOpacity(0.7),
                       ),
                     ),
                   ],
@@ -196,7 +196,9 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
   // ───────────────────────── Stream + UI (ONLY current instructor’s slots) ─────────────────────────
   Widget _buildSlotsContent(BuildContext context) {
     if (!_identityLoaded) {
-      return const Center(child: CircularProgressIndicator());
+      return Center(
+        child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)),
+      );
     }
     if (_uid == null) {
       return _buildEmptyState(context, 'Please sign in to view your scheduled slots.');
@@ -215,7 +217,9 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
           return _buildEmptyState(context, 'Error: ${snapshot.error}');
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return Center(
+            child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)),
+          );
         }
 
         final docs = List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? const []);
@@ -243,21 +247,19 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
         return Container(
           margin: EdgeInsets.all(outerMargin),
           decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(8),
-            boxShadow: const [
-              BoxShadow(color: Colors.black12, blurRadius: 3, offset: Offset(0, 1)),
-            ],
+            color: context.c.surface,
+            borderRadius: BorderRadius.circular(AppRadii.m),
+            boxShadow: AppShadows.card,
           ),
           child: Column(
             children: [
               // Header
               Container(
                 padding: EdgeInsets.all(headerPad),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF8F9FA),
-                  borderRadius: BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
-                  border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
+                decoration: BoxDecoration(
+                  color: context.c.background,
+                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+                  border: Border(bottom: BorderSide(color: AppColors.divider)),
                 ),
                 child: Row(
                   children: [
@@ -266,10 +268,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                     Expanded(
                       child: Text(
                         'Your slots for ${DateFormat('EEEE, d MMM').format(selectedDate)}',
-                        style: TextStyle(
-                          fontSize: _scale(sw, 12, 13, 14),
-                          color: const Color(0xFF6B7280),
-                        ),
+                        style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: _scale(sw, 12, 13, 14)),
                       ),
                     ),
                   ],
@@ -299,9 +298,9 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('📅', style: TextStyle(fontSize: _scale(sw, 56, 64, 72), color: Colors.grey)),
+            Text('📅', style: TextStyle(fontSize: _scale(sw, 56, 64, 72), color: AppColors.onSurfaceFaint)),
             const SizedBox(height: 16),
-            Text(msg, style: TextStyle(fontSize: _scale(sw, 16, 18, 20), color: Colors.grey), textAlign: TextAlign.center),
+            Text(msg, style: context.t.bodyMedium?.copyWith(fontSize: _scale(sw, 16, 18, 20), color: AppColors.onSurfaceMuted), textAlign: TextAlign.center),
           ],
         ),
       ),
@@ -368,8 +367,8 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
 
     return Container(
       padding: EdgeInsets.all(groupPad),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6))),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppColors.neuBg)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -379,7 +378,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
             style: TextStyle(
               fontSize: titleSize,
               fontWeight: FontWeight.w600,
-              color: const Color(0xFF374151),
+              color: context.c.onSurface,
             ),
           ),
           const SizedBox(height: 12),
@@ -388,9 +387,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
               final columns = _columnsForWidth(constraints.maxWidth);
               final cardW = _cardWidth(constraints.maxWidth, columns, chipGap);
 
-              final slotCards = slots
-                  .map((s) => _buildSlotCard(context, s, cardW))
-                  .toList();
+              final slotCards = slots.map((s) => _buildSlotCard(context, s, cardW)).toList();
 
               if (columns == 1) {
                 return Wrap(
@@ -453,12 +450,12 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
         width: cardWidth,
         padding: EdgeInsets.all(padAll),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF10B981) : Colors.white,
+          color: isSelected ? AppColors.success : context.c.surface,
           border: Border.all(
-            color: isSelected ? const Color(0xFF10B981) : const Color(0xFFE5E7EB),
-            width: 2,
+            color: isSelected ? AppColors.success : AppColors.divider,
+            width: isSelected ? 2 : 1,
           ),
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(AppRadii.m),
         ),
         child: Stack(
           children: [
@@ -471,14 +468,14 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                   style: TextStyle(
                     fontSize: timeSize,
                     fontWeight: FontWeight.w600,
-                    color: isSelected ? Colors.white : Colors.black,
+                    color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface,
                   ),
                 ),
                 SizedBox(height: _scale(sw, 4, 6, 8)),
                 Container(
                   padding: EdgeInsets.symmetric(horizontal: badgePadH, vertical: badgePadV),
                   decoration: BoxDecoration(
-                    color: isSelected ? Colors.white.withOpacity(0.2) : const Color(0xFFEFF6FF),
+                    color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.12) : AppColors.neuBg,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
@@ -487,7 +484,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                     style: TextStyle(
                       fontSize: vehSize,
                       fontWeight: FontWeight.w500,
-                      color: isSelected ? Colors.white : const Color(0xFF1D4ED8),
+                      color: isSelected ? AppColors.onSurfaceInverse : context.c.primary,
                     ),
                   ),
                 ),
@@ -496,7 +493,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                   instructorName.length > 22 ? '${instructorName.substring(0, 22)}…' : instructorName,
                   style: TextStyle(
                     fontSize: instSize,
-                    color: isSelected ? Colors.white.withOpacity(0.9) : const Color(0xFF6B7280),
+                    color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.9) : AppColors.onSurfaceMuted,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -506,9 +503,9 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isSelected ? Colors.white.withOpacity(0.12) : const Color(0xFFFAFAFA),
+                    color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.12) : context.c.background,
                     border: Border.all(
-                      color: isSelected ? Colors.white.withOpacity(0.25) : const Color(0xFFE5E7EB),
+                      color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.25) : AppColors.divider,
                     ),
                     borderRadius: BorderRadius.circular(6),
                   ),
@@ -524,7 +521,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                             style: TextStyle(
                               fontSize: moneySize,
                               fontWeight: FontWeight.w500,
-                              color: isSelected ? Colors.white.withOpacity(0.95) : const Color(0xFF374151),
+                              color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.95) : context.c.onSurface,
                             ),
                           ),
                           Text(
@@ -532,7 +529,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                             style: TextStyle(
                               fontSize: moneySize,
                               fontWeight: FontWeight.w600,
-                              color: isSelected ? Colors.white : const Color(0xFF111827),
+                              color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface,
                             ),
                           ),
                         ],
@@ -548,7 +545,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                             style: TextStyle(
                               fontSize: moneySize,
                               fontWeight: FontWeight.w500,
-                              color: isSelected ? Colors.white.withOpacity(0.95) : const Color(0xFF374151),
+                              color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.95) : context.c.onSurface,
                             ),
                           ),
                           Row(
@@ -559,7 +556,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                                 style: TextStyle(
                                   fontSize: moneySize,
                                   fontWeight: FontWeight.w600,
-                                  color: isSelected ? Colors.white : const Color(0xFF111827),
+                                  color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface,
                                 ),
                               ),
                               const SizedBox(width: 6),
@@ -568,7 +565,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                                 child: Icon(
                                   Icons.edit,
                                   size: 16,
-                                  color: isSelected ? Colors.white : const Color(0xFF1F2937),
+                                  color: isSelected ? AppColors.onSurfaceInverse : AppColors.slate,
                                 ),
                               ),
                             ],
@@ -591,10 +588,10 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                   width: deleteBtn,
                   height: deleteBtn,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEE2E2),
+                    color: AppColors.errBg,
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: Icon(Icons.delete, size: deleteIcon, color: const Color(0xFFDC2626)),
+                  child: Icon(Icons.delete, size: deleteIcon, color: AppColors.danger),
                 ),
               ),
             ),
@@ -611,28 +608,30 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Edit Additional Cost'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+        title: Text('Edit Additional Cost', style: context.t.titleMedium?.copyWith(color: context.c.onSurface)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Align(alignment: Alignment.centerLeft, child: Text('Enter amount (INR):')),
+            Align(alignment: Alignment.centerLeft, child: Text('Enter amount (INR):', style: context.t.bodyMedium?.copyWith(color: context.c.onSurface))),
             const SizedBox(height: 8),
             TextField(
               controller: ctrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
                 hintText: 'e.g. 250',
+                filled: true,
+                fillColor: context.c.surface,
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: TextStyle(color: context.c.primary))),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF6366F1), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: context.c.primary, foregroundColor: context.c.onPrimary),
             child: const Text('Save'),
           ),
         ],
@@ -644,7 +643,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
     final newVal = num.tryParse(ctrl.text.trim());
     if (newVal == null) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid amount')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Invalid amount', style: context.t.bodyMedium?.copyWith(color: AppColors.danger))));
       }
       return;
     }
@@ -655,11 +654,11 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
         'updated_at': FieldValue.serverTimestamp(),
       });
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Additional cost updated')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Additional cost updated', style: context.t.bodyMedium?.copyWith(color: context.c.onSurface))));
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e', style: context.t.bodyMedium?.copyWith(color: AppColors.danger))));
       }
     }
   }
@@ -672,14 +671,14 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Delete Slot'),
-        content: Text('Are you sure you want to delete slot $slotId?'),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+        title: Text('Delete Slot', style: context.t.titleMedium?.copyWith(color: context.c.onSurface)),
+        content: Text('Are you sure you want to delete slot $slotId?', style: context.t.bodyMedium?.copyWith(color: context.c.onSurface)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: TextStyle(color: context.c.primary))),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger, foregroundColor: context.c.onPrimary),
             child: const Text('Delete'),
           ),
         ],
@@ -691,13 +690,13 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
         await slot.reference.delete();
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Slot $slotId deleted successfully')),
+            SnackBar(content: Text('Slot $slotId deleted successfully', style: context.t.bodyMedium?.copyWith(color: context.c.onSurface))),
           );
         }
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error deleting slot: $e')),
+            SnackBar(content: Text('Error deleting slot: $e', style: context.t.bodyMedium?.copyWith(color: AppColors.danger))),
           );
         }
       }

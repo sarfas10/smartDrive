@@ -4,8 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'test_result_page.dart';
-
-const kBrand = Color(0xFF4c63d2);
+import 'theme/app_theme.dart'; // <-- uses your AppColors, AppText, AppRadii
 
 enum _QType { mcq, paragraph }
 
@@ -440,11 +439,13 @@ class _AttendTestPageState extends State<AttendTestPage> {
     return WillPopScope(
       onWillPop: _onWillPop,
       child: Scaffold(
-        backgroundColor: const Color(0xFFF6F7FB),
+        backgroundColor: AppColors.background,
         appBar: AppBar(
           elevation: 0,
-          backgroundColor: kBrand,
-          title: Text(_loading ? 'Loading…' : _title),
+          backgroundColor: AppColors.brand,
+          foregroundColor: AppColors.onSurfaceInverse,
+          title: Text(_loading ? 'Loading…' : _title,
+              style: AppText.sectionTitle.copyWith(color: AppColors.onSurfaceInverse)),
           leading: BackButton(
             onPressed: () async {
               if (await _onWillPop()) {
@@ -508,36 +509,39 @@ class _AttendTestPageState extends State<AttendTestPage> {
                   padding: EdgeInsets.fromLTRB(
                       isCompact ? 12 : 16, 10, isCompact ? 12 : 16, 10),
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    border:
-                        Border(top: BorderSide(color: Colors.black12.withOpacity(.06))),
+                    color: AppColors.surface,
+                    border: Border(
+                        top: BorderSide(color: AppColors.divider)),
                   ),
                   child: Row(
                     children: [
                       OutlinedButton.icon(
                         onPressed: _index == 0 ? null : () => setState(() => _index--),
-                        icon: const Icon(Icons.chevron_left),
-                        label: const Text('Previous'),
+                        icon: Icon(Icons.chevron_left, color: AppColors.onSurface),
+                        label: Text('Previous',
+                            style: AppText.tileTitle.copyWith(color: AppColors.onSurface)),
                       ),
                       const SizedBox(width: 8),
                       OutlinedButton.icon(
                         onPressed: _index >= _questions.length - 1
                             ? null
                             : () => setState(() => _index++),
-                        icon: const Icon(Icons.chevron_right),
-                        label: const Text('Next'),
+                        icon: Icon(Icons.chevron_right, color: AppColors.onSurface),
+                        label: Text('Next',
+                            style: AppText.tileTitle.copyWith(color: AppColors.onSurface)),
                       ),
                       const Spacer(),
                       FilledButton.icon(
                         style: FilledButton.styleFrom(
-                          backgroundColor: kBrand,
-                          foregroundColor: Colors.white,
+                          backgroundColor: AppColors.brand,
+                          foregroundColor: AppColors.onSurfaceInverse,
                           padding: const EdgeInsets.symmetric(
                               horizontal: 16, vertical: 12),
                         ),
                         onPressed: () => _confirmSubmit(context),
                         icon: const Icon(Icons.check_circle_outline),
-                        label: const Text('Submit Test'),
+                        label: Text('Submit Test',
+                            style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
                       ),
                     ],
                   ),
@@ -588,17 +592,16 @@ class _TimerPill extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(.15),
+        color: AppColors.onSurfaceInverse.withOpacity(.15),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.white.withOpacity(.35)),
+        border: Border.all(color: AppColors.onSurfaceInverse.withOpacity(.35)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.timer, color: Colors.white, size: 16),
+          Icon(Icons.timer, color: AppColors.onSurfaceInverse, size: 16),
           const SizedBox(width: 6),
           Text(text,
-              style:
-                  const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
+              style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse, fontWeight: FontWeight.w700)),
         ],
       ),
     );
@@ -627,9 +630,9 @@ class _ProgressHeader extends StatelessWidget {
 
     return Card(
       elevation: 0,
-      color: Colors.white,
+      color: AppColors.surface,
       shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
         child: Column(
@@ -638,18 +641,17 @@ class _ProgressHeader extends StatelessWidget {
             Row(
               children: [
                 Text('Question ${index + 1} of $total',
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
+                    style: AppText.tileTitle.copyWith(color: AppColors.onSurface)),
                 const Spacer(),
                 Text('$done/$total answered',
-                    style:
-                        TextStyle(color: Colors.grey.shade700, fontSize: 12)),
+                    style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
               ],
             ),
             const SizedBox(height: 8),
             LinearProgressIndicator(
               value: value,
-              color: kBrand,
-              backgroundColor: const Color(0xFFE9ECEF),
+              color: AppColors.brand,
+              backgroundColor: AppColors.neuBg,
               minHeight: 6,
             ),
             const SizedBox(height: 8),
@@ -674,17 +676,17 @@ class _ProgressHeader extends StatelessWidget {
                       alignment: Alignment.center,
                       decoration: BoxDecoration(
                         color: isCurrent
-                            ? kBrand
+                            ? AppColors.brand
                             : isAnswered
-                                ? Colors.green.shade50
-                                : Colors.grey.shade200,
+                                ? AppColors.okBg
+                                : AppColors.neuBg,
                         borderRadius: BorderRadius.circular(999),
                         border: Border.all(
                           color: isCurrent
-                              ? kBrand
+                              ? AppColors.brand
                               : isAnswered
-                                  ? Colors.green
-                                  : Colors.grey.shade400,
+                                  ? AppColors.okFg
+                                  : AppColors.divider,
                         ),
                       ),
                       child: Text(
@@ -692,10 +694,10 @@ class _ProgressHeader extends StatelessWidget {
                         style: TextStyle(
                           fontWeight: FontWeight.w700,
                           color: isCurrent
-                              ? Colors.white
+                              ? AppColors.onSurfaceInverse
                               : isAnswered
-                                  ? Colors.green.shade800
-                                  : Colors.black87,
+                                  ? AppColors.okFg
+                                  : AppColors.onSurface,
                         ),
                       ),
                     ),
@@ -728,9 +730,9 @@ class _QuestionCard extends StatelessWidget {
     return Card(
       margin: EdgeInsets.zero,
       elevation: 0,
-      color: Colors.white,
+      color: AppColors.surface,
       shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -741,10 +743,10 @@ class _QuestionCard extends StatelessWidget {
                 Expanded(
                   child: Text(
                     q.text,
-                    style: const TextStyle(
-                      fontWeight: FontWeight.w700,
+                    style: AppText.sectionTitle.copyWith(
                       fontSize: 16,
                       height: 1.2,
+                      color: AppColors.onSurface,
                     ),
                   ),
                 ),
@@ -752,15 +754,15 @@ class _QuestionCard extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.deepPurple.withOpacity(.08),
+                    color: AppColors.purple.withOpacity(.08),
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                        color: Colors.deepPurple.withOpacity(.25)),
+                    border: Border.all(color: AppColors.purple.withOpacity(.25)),
                   ),
                   child: Text(
                     q.type == _QType.mcq ? 'MCQ' : 'PARAGRAPH',
                     style: const TextStyle(
-                      color: Colors.deepPurple,
+                      // keep slightly bolder visual for tags
+                      color: AppColors.purple,
                       fontWeight: FontWeight.w800,
                       fontSize: 11,
                     ),
@@ -778,9 +780,9 @@ class _QuestionCard extends StatelessWidget {
                     q.imageUrl!,
                     fit: BoxFit.cover,
                     errorBuilder: (_, __, ___) => Container(
-                      color: const Color(0xFFF1F3F5),
+                      color: AppColors.neuBg,
                       alignment: Alignment.center,
-                      child: const Icon(Icons.broken_image_outlined),
+                      child: Icon(Icons.broken_image_outlined, color: AppColors.onSurfaceMuted),
                     ),
                   ),
                 ),
@@ -793,7 +795,7 @@ class _QuestionCard extends StatelessWidget {
                   return Container(
                     margin: const EdgeInsets.only(bottom: 8),
                     decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xFFE9ECEF)),
+                      border: Border.all(color: AppColors.divider),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: RadioListTile<int>(
@@ -801,10 +803,10 @@ class _QuestionCard extends StatelessWidget {
                       value: i,
                       groupValue: value is int ? value as int? : null,
                       onChanged: (v) => onChanged(v),
-                      activeColor: kBrand,
+                      activeColor: AppColors.brand,
                       title: Text(
                         q.options[i],
-                        style: const TextStyle(color: Colors.black),
+                        style: TextStyle(color: AppColors.onSurface),
                       ),
                     ),
                   );
@@ -816,10 +818,10 @@ class _QuestionCard extends StatelessWidget {
                     TextEditingController(text: value?.toString() ?? ''),
                 onChanged: (v) => onChanged(v),
                 maxLines: 4,
-                style: const TextStyle(color: Colors.black),
+                style: TextStyle(color: AppColors.onSurface),
                 decoration: InputDecoration(
                   hintText: 'Type your answer here…',
-                  hintStyle: const TextStyle(color: Colors.black45),
+                  hintStyle: TextStyle(color: AppColors.onSurfaceFaint),
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(8)),
                   isDense: true,
@@ -831,13 +833,12 @@ class _QuestionCard extends StatelessWidget {
               Row(
                 children: [
                   Icon(Icons.info_outline,
-                      size: 16, color: Colors.grey.shade700),
+                      size: 16, color: AppColors.onSurfaceMuted),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       q.explanation,
-                      style: TextStyle(
-                          fontSize: 12, color: Colors.grey.shade700),
+                      style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
                     ),
                   ),
                 ],
@@ -861,16 +862,13 @@ class _CenteredEmpty extends StatelessWidget {
           child: Column(
             children: [
               Icon(Icons.quiz_outlined,
-                  size: 64, color: Colors.grey.shade500),
+                  size: 64, color: AppColors.onSurfaceMuted),
               const SizedBox(height: 12),
               Text(title,
-                  style: TextStyle(
-                      fontWeight: FontWeight.w700,
-                      color: Colors.grey.shade700)),
+                  style: AppText.tileTitle.copyWith(color: AppColors.onSurface)),
               const SizedBox(height: 6),
               Text(caption,
-                  style: TextStyle(
-                      fontSize: 12, color: Colors.grey.shade600)),
+                  style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
             ],
           ),
         ),

@@ -3,7 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
-import 'package:smart_drive/reusables/branding.dart';
+import 'package:smart_drive/reusables/branding.dart' hide AppColors, AppText;
+
+import 'ui_common.dart';
+import 'package:smart_drive/theme/app_theme.dart';
 
 class PlansBlock extends StatefulWidget {
   const PlansBlock({super.key});
@@ -32,6 +35,10 @@ class Plan {
   final bool freePickupRadius;
   final int freeRadius;
 
+  /// Driving test flags per class
+  final bool drivingTest8; // 8-type
+  final bool drivingTestH; // H-type
+
   final bool active;
   final Timestamp? createdAt;
   final Timestamp? updatedAt;
@@ -46,6 +53,8 @@ class Plan {
     required this.surcharge,
     required this.freePickupRadius,
     required this.freeRadius,
+    required this.drivingTest8,
+    required this.drivingTestH,
     required this.active,
     this.createdAt,
     this.updatedAt,
@@ -58,6 +67,16 @@ class Plan {
     final legacyFlexible = ((d['slots'] ?? 0) == 0 && (d['lessons'] != null));
     final isPPU = (d['isPayPerUse'] ?? false) as bool || legacyFlexible;
 
+    // Driving test flags: prefer explicit fields, fall back to old single flag if present
+    bool drv8 = (d['driving_test_8'] ?? null) != null ? (d['driving_test_8'] as bool) : false;
+    bool drvH = (d['driving_test_h'] ?? null) != null ? (d['driving_test_h'] as bool) : false;
+    if (!(d.containsKey('driving_test_8') || d.containsKey('driving_test_h'))) {
+      // older versions used driving_test_included (single flag). If present, apply to both.
+      final legacy = (d['driving_test_included'] ?? true) as bool;
+      drv8 = legacy;
+      drvH = legacy;
+    }
+
     return Plan(
       id: doc.id,
       name: (d['name'] ?? doc.id).toString(),
@@ -68,6 +87,8 @@ class Plan {
       surcharge: (d['surcharge'] ?? 0) as int,
       freePickupRadius: (d['freePickupRadius'] ?? false) as bool,
       freeRadius: (d['freeRadius'] ?? 0) as int,
+      drivingTest8: drv8,
+      drivingTestH: drvH,
       active: (d['active'] ?? true) as bool,
       createdAt: d['created_at'] as Timestamp?,
       updatedAt: d['updated_at'] as Timestamp?,
@@ -88,6 +109,11 @@ class Plan {
       'freeRadius': freePickupRadius ? freeRadius : 0,
 
       'isPayPerUse': isPayPerUse,
+
+      // driving test flags
+      'driving_test_8': drivingTest8,
+      'driving_test_h': drivingTestH,
+
       'active': active,
       if (forCreate) 'created_at': now,
       'updated_at': now,
@@ -107,8 +133,12 @@ class _PlansBlockState extends State<PlansBlock> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const Center(
-        child: SizedBox(width: 56, height: 56, child: CircularProgressIndicator()),
+      builder: (_) => Center(
+        child: SizedBox(
+          width: 56,
+          height: 56,
+          child: CircularProgressIndicator(color: context.c.primary),
+        ),
       ),
     );
     try {
@@ -171,7 +201,7 @@ class _PlansBlockState extends State<PlansBlock> {
           style: TextStyle(
             fontSize: isCompact ? 20 : 24,
             fontWeight: FontWeight.w700,
-            color: const Color(0xFF111827),
+            color: context.c.onSurface,
           ),
         ),
         const Spacer(),
@@ -179,13 +209,13 @@ class _PlansBlockState extends State<PlansBlock> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: const Color(0x1A4C008A),
+              color: AppColors.brand.withOpacity(0.08),
               borderRadius: BorderRadius.circular(999),
             ),
-            child: const Text(
+            child: Text(
               'Create & Manage Slot-Based / Pay-Per-Use',
               style: TextStyle(
-                color: AppColors.primary,
+                color: context.c.primary,
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
               ),
@@ -235,6 +265,8 @@ class _PlansBlockState extends State<PlansBlock> {
                     surcharge: 15,
                     freePickupRadius: true,
                     freeRadius: 5,
+                    drivingTest8: true,
+                    drivingTestH: true,
                     active: true,
                   ),
                   isCreate: true,
@@ -265,6 +297,8 @@ class _PlansBlockState extends State<PlansBlock> {
                     surcharge: 15,
                     freePickupRadius: true,
                     freeRadius: 5,
+                    drivingTest8: true,
+                    drivingTestH: true,
                     active: true,
                   ),
                   isCreate: true,
@@ -273,7 +307,7 @@ class _PlansBlockState extends State<PlansBlock> {
                 label: const Text('Pay-Per-Use'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white,
+                  foregroundColor: AppColors.onSurfaceInverse,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
@@ -294,10 +328,10 @@ class _PlansBlockState extends State<PlansBlock> {
           .snapshots(),
       builder: (context, snap) {
         if (snap.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return Center(child: CircularProgressIndicator(color: context.c.primary));
         }
         if (snap.hasError) {
-          return Center(child: Text('Error loading plans: ${snap.error}'));
+          return Center(child: Text('Error loading plans: ${snap.error}', style: AppText.tileSubtitle.copyWith(color: AppColors.danger)));
         }
 
         final docs = snap.data?.docs ?? [];
@@ -313,10 +347,12 @@ class _PlansBlockState extends State<PlansBlock> {
                 price: 0,
                 slots: 12,
                 isPayPerUse: false,
-                extraKmSurcharge: true,         // required at creation
+                extraKmSurcharge: true, // required at creation
                 surcharge: 15,
-                freePickupRadius: true,         // required at creation
+                freePickupRadius: true, // required at creation
                 freeRadius: 5,
+                drivingTest8: true,
+                drivingTestH: true,
                 active: true,
               ),
               isCreate: true,
@@ -378,6 +414,8 @@ class _PlansBlockState extends State<PlansBlock> {
       surcharge: p.surcharge,
       freePickupRadius: p.freePickupRadius,
       freeRadius: p.freeRadius,
+      drivingTest8: p.drivingTest8,
+      drivingTestH: p.drivingTestH,
       active: p.active,
     );
     await FirebaseFirestore.instance
@@ -397,7 +435,7 @@ class _PlansBlockState extends State<PlansBlock> {
           TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger, foregroundColor: AppColors.onSurfaceInverse),
             child: const Text('Delete'),
           ),
         ],
@@ -427,6 +465,10 @@ class _PlansBlockState extends State<PlansBlock> {
     bool extraKm = isCreate ? true : initial.extraKmSurcharge;
     bool freePickup = isCreate ? true : initial.freePickupRadius;
 
+    // NEW: driving test flags per class (default true for creation)
+    bool drivingTest8 = isCreate ? true : initial.drivingTest8;
+    bool drivingTestH = isCreate ? true : initial.drivingTestH;
+
     // Editable always
     bool active = initial.active;
 
@@ -448,7 +490,7 @@ class _PlansBlockState extends State<PlansBlock> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(isCreate ? 'Create Slot-Based Plan' : 'Edit Slot-Based Plan',
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                          style: AppText.sectionTitle.copyWith(fontSize: 18)),
                       const SizedBox(height: 16),
 
                       _LabeledField(
@@ -494,7 +536,7 @@ class _PlansBlockState extends State<PlansBlock> {
                       ),
 
                       const Divider(height: 24),
-                      const Text('Optional Transport Rules', style: TextStyle(fontWeight: FontWeight.w600)),
+                      Text('Optional Transport Rules', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
 
                       // Extra KM Surcharge — required at creation (locked ON)
@@ -558,6 +600,26 @@ class _PlansBlockState extends State<PlansBlock> {
                         ),
 
                       const SizedBox(height: 8),
+
+                      // NEW: Driving Test selection per class
+                      Text('Driving Test included for classes', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 6),
+                      CheckboxListTile(
+                        value: drivingTest8,
+                        onChanged: (vv) => setState(() => drivingTest8 = vv ?? false),
+                        title: const Text('8 type'),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                      ),
+                      CheckboxListTile(
+                        value: drivingTestH,
+                        onChanged: (vv) => setState(() => drivingTestH = vv ?? false),
+                        title: const Text('H type'),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                      ),
+
+                      const SizedBox(height: 8),
                       SwitchListTile.adaptive(
                         value: active,
                         onChanged: (vv) => setState(() => active = vv),
@@ -573,7 +635,7 @@ class _PlansBlockState extends State<PlansBlock> {
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
-                              foregroundColor: Colors.white,
+                              foregroundColor: AppColors.onSurfaceInverse,
                             ),
                             onPressed: () async {
                               // Enforce required transport toggles at creation
@@ -600,6 +662,8 @@ class _PlansBlockState extends State<PlansBlock> {
                                 surcharge: surcharge,
                                 freePickupRadius: true, // enforced at creation
                                 freeRadius: freeRadius,
+                                drivingTest8: drivingTest8,
+                                drivingTestH: drivingTestH,
                                 active: active,
                               );
 
@@ -667,6 +731,10 @@ class _PlansBlockState extends State<PlansBlock> {
     bool freePickup = isCreate ? true : initial.freePickupRadius;
     bool active = initial.active;
 
+    // NEW: driving test flags per class (default true for creation)
+    bool drivingTest8 = isCreate ? true : initial.drivingTest8;
+    bool drivingTestH = isCreate ? true : initial.drivingTestH;
+
     await showDialog(
       context: context,
       barrierDismissible: false,
@@ -684,7 +752,7 @@ class _PlansBlockState extends State<PlansBlock> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(isCreate ? 'Create Pay-Per-Use' : 'Edit Pay-Per-Use',
-                          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                          style: AppText.sectionTitle.copyWith(fontSize: 18)),
                       const SizedBox(height: 16),
 
                       _LabeledField(
@@ -698,7 +766,7 @@ class _PlansBlockState extends State<PlansBlock> {
                       const SizedBox(height: 12),
 
                       const Divider(height: 24),
-                      const Text('Transport Rules', style: TextStyle(fontWeight: FontWeight.w600)),
+                      Text('Transport Rules', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
 
                       // Extra KM Surcharge — required at creation (locked ON)
@@ -758,6 +826,26 @@ class _PlansBlockState extends State<PlansBlock> {
                         ),
 
                       const SizedBox(height: 8),
+
+                      // NEW: Driving Test selection per class
+                      Text('Driving Test included for classes', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 6),
+                      CheckboxListTile(
+                        value: drivingTest8,
+                        onChanged: (vv) => setState(() => drivingTest8 = vv ?? false),
+                        title: const Text('8 type'),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                      ),
+                      CheckboxListTile(
+                        value: drivingTestH,
+                        onChanged: (vv) => setState(() => drivingTestH = vv ?? false),
+                        title: const Text('H type'),
+                        contentPadding: EdgeInsets.zero,
+                        controlAffinity: ListTileControlAffinity.leading,
+                      ),
+
+                      const SizedBox(height: 8),
                       SwitchListTile.adaptive(
                         value: active,
                         onChanged: (vv) => setState(() => active = vv),
@@ -773,7 +861,7 @@ class _PlansBlockState extends State<PlansBlock> {
                           ElevatedButton(
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
-                              foregroundColor: Colors.white,
+                              foregroundColor: AppColors.onSurfaceInverse,
                             ),
                             onPressed: () async {
                               // Enforce required transport toggles at creation
@@ -798,6 +886,8 @@ class _PlansBlockState extends State<PlansBlock> {
                                 surcharge: surcharge,
                                 freePickupRadius: true, // enforced at creation
                                 freeRadius: freeRadius,
+                                drivingTest8: drivingTest8,
+                                drivingTestH: drivingTestH,
                                 active: active,
                               );
 
@@ -807,7 +897,7 @@ class _PlansBlockState extends State<PlansBlock> {
                                       .collection('plans')
                                       .doc(id)
                                       .set(data.toMap(forCreate: true));
-                                  _snack('Pay-Per-Use “$name” created');
+                                  _snack('Pay-Per-Use "$name" created');
                                 } else {
                                   if (id != initial.id) {
                                     final batch = FirebaseFirestore.instance.batch();
@@ -822,7 +912,7 @@ class _PlansBlockState extends State<PlansBlock> {
                                         .doc(id)
                                         .update(data.toMap());
                                   }
-                                  _snack('Pay-Per-Use “$name” updated');
+                                  _snack('Pay-Per-Use "$name" updated');
                                 }
                               });
 
@@ -867,10 +957,10 @@ class _QuickCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0x11000000)),
-        boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 12, offset: Offset(0, 4))],
+        border: Border.all(color: AppColors.divider),
+        boxShadow: AppShadows.card,
       ),
       child: child,
     );
@@ -889,7 +979,7 @@ class _SectionTitle extends StatelessWidget {
         const SizedBox(width: 8),
         Text(
           title,
-          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: Color(0xFF111827)),
+          style: AppText.sectionTitle.copyWith(color: context.c.onSurface),
         ),
       ],
     );
@@ -916,18 +1006,18 @@ class _PlanCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final badge = plan.isPayPerUse
-        ? const _Badge(text: 'PAY-PER-USE', color: Color(0xFF6366F1))
+        ? _Badge(text: 'PAY-PER-USE', color: AppColors.brand)
         : (plan.active
-            ? const _Badge(text: 'ACTIVE', color: Color(0xFF10B981))
-            : const _Badge(text: 'INACTIVE', color: Color(0xFFF59E0B)));
+            ? _Badge(text: 'ACTIVE', color: AppColors.success)
+            : _Badge(text: 'INACTIVE', color: AppColors.warning));
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0x11000000)),
-        boxShadow: const [BoxShadow(color: Color(0x07000000), blurRadius: 10, offset: Offset(0, 4))],
+        border: Border.all(color: AppColors.divider),
+        boxShadow: AppShadows.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -940,11 +1030,7 @@ class _PlanCard extends StatelessWidget {
                   plan.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w700,
-                    color: Color(0xFF111827),
-                  ),
+                  style: AppText.tileTitle.copyWith(color: context.c.onSurface),
                 ),
               ),
               badge,
@@ -971,10 +1057,10 @@ class _PlanCard extends StatelessWidget {
                       text: plan.active ? 'Deactivate' : 'Activate',
                     ),
                   ),
-                  const PopupMenuItem(value: 'dup', child: _MenuRow(icon: Icons.copy, text: 'Duplicate')),
-                  const PopupMenuItem(
+                  PopupMenuItem(value: 'dup', child: _MenuRow(icon: Icons.copy, text: 'Duplicate')),
+                  PopupMenuItem(
                     value: 'del',
-                    child: _MenuRow(icon: Icons.delete, text: 'Delete', color: Colors.red),
+                    child: _MenuRow(icon: Icons.delete, text: 'Delete', color: AppColors.danger),
                   ),
                 ],
               ),
@@ -983,7 +1069,7 @@ class _PlanCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             plan.isPayPerUse ? 'Pay as you go' : currency.format(plan.price),
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.primary),
+            style: AppText.tileTitle.copyWith(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.primary),
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -996,6 +1082,10 @@ class _PlanCard extends StatelessWidget {
                 _Feature(icon: Icons.local_gas_station, label: '₹${plan.surcharge}/km extra'),
               if (plan.freePickupRadius)
                 _Feature(icon: Icons.location_on, label: '${plan.freeRadius} km pickup'),
+
+              // NEW: driving test included features per class
+              if (plan.drivingTest8) _Feature(icon: Icons.verified_user, label: '8-type test included'),
+              if (plan.drivingTestH) _Feature(icon: Icons.verified_user, label: 'H-type test included'),
             ],
           ),
           const Spacer(),
@@ -1010,7 +1100,7 @@ class _PlanCard extends StatelessWidget {
               ),
               IconButton(
                 tooltip: 'Delete',
-                icon: const Icon(Icons.delete, color: Colors.red),
+                icon: Icon(Icons.delete, color: AppColors.danger),
                 onPressed: () => onDelete(plan),
               ),
             ],
@@ -1030,7 +1120,7 @@ class _Badge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
       decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(999)),
-      child: Text(text, style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700)),
+      child: Text(text, style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceInverse, fontSize: 10, fontWeight: FontWeight.w700)),
     );
   }
 }
@@ -1042,7 +1132,7 @@ class _MenuRow extends StatelessWidget {
   const _MenuRow({required this.icon, required this.text, this.color});
   @override
   Widget build(BuildContext context) {
-    final c = color ?? const Color(0xFF111827);
+    final c = color ?? context.c.onSurface;
     return Row(
       children: [
         Icon(icon, size: 18, color: c),
@@ -1062,9 +1152,9 @@ class _Feature extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 16, color: const Color(0xFF6B7280)),
+        Icon(icon, size: 16, color: AppColors.onSurfaceFaint),
         const SizedBox(width: 4),
-        Text(label, style: const TextStyle(fontSize: 12, color: Color(0xFF6B7280))),
+        Text(label, style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint)),
       ],
     );
   }
@@ -1077,13 +1167,14 @@ class _LabeledField extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+      Text(label, style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600, color: context.c.onSurface)),
       const SizedBox(height: 6),
       InputDecorator(
-        decoration: const InputDecoration(
-          border: OutlineInputBorder(),
+        decoration: InputDecoration(
+          border: const OutlineInputBorder(),
           isDense: true,
-          contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          fillColor: AppColors.surface,
         ),
         child: child,
       ),
@@ -1102,15 +1193,15 @@ class _EmptyState extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.inbox, size: 64, color: Color(0xFF9CA3AF)),
+            Icon(Icons.inbox, size: 64, color: AppColors.onSurfaceFaint),
             const SizedBox(height: 12),
-            const Text('No plans yet',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF374151))),
+            Text('No plans yet',
+                style: AppText.tileTitle.copyWith(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.slate)),
             const SizedBox(height: 4),
-            const Text(
+            Text(
               'Create your first plan: Slot-based (priced once) or Pay-Per-Use (Pay as you go).',
               textAlign: TextAlign.center,
-              style: TextStyle(color: Color(0xFF6B7280)),
+              style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
             ),
             const SizedBox(height: 14),
             ElevatedButton.icon(
@@ -1119,7 +1210,7 @@ class _EmptyState extends StatelessWidget {
               label: const Text('Create Plan'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
+                foregroundColor: AppColors.onSurfaceInverse,
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),

@@ -1,11 +1,11 @@
-// tests_block.dart — Horizontally scrollable table (phones/tablets/desktop)
+// lib/tests_block.dart — Horizontally scrollable table (phones/tablets/desktop)
 
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:cloud_firestore/cloud_firestore.dart';
-
+import 'package:smart_drive/theme/app_theme.dart'; 
 import 'ui_common.dart';
 import 'create_test_pool.dart';
 import 'edit_test_pool.dart';
@@ -64,27 +64,24 @@ class _TestsBlockState extends State<TestsBlock> {
     return ListView(
       primary: false, // avoid scroll conflicts on resize
       children: [
-        // Title in BLACK (local Theme override)
-        Theme(
-          data: Theme.of(context).copyWith(
-            textTheme: Theme.of(context)
-                .textTheme
-                .apply(bodyColor: Colors.black, displayColor: Colors.black),
-          ),
-          child: TableHeader(
-            title: 'Test Pools',
-            trailing: ElevatedButton.icon(
-              onPressed: () async {
-                await Navigator.of(context).push(
-                  MaterialPageRoute(builder: (_) => const CreateTestPoolPage()),
-                );
-              },
-              icon: const Icon(Icons.add),
-              label: const Text('Create Pool'),
+        // Title uses themed surface-on color
+        TableHeader(
+          title: 'Test Pools',
+          trailing: ElevatedButton.icon(
+            onPressed: () async {
+              await Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const CreateTestPoolPage()),
+              );
+            },
+            icon: Icon(Icons.add, color: context.c.onPrimary),
+            label: Text('Create Pool', style: AppText.tileTitle.copyWith(color: context.c.onPrimary)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: context.c.primary,
+              foregroundColor: context.c.onPrimary,
             ),
           ),
         ),
-        const Divider(height: 1),
+        const Divider(height: 1, color: AppColors.divider),
 
         // Toolbar: search + status filter + sort
         Padding(
@@ -180,8 +177,7 @@ class _TestsBlockState extends State<TestsBlock> {
                                       onEdit: () async {
                                         await Navigator.of(context).push(
                                           MaterialPageRoute(
-                                            builder: (_) =>
-                                                EditTestPoolPage(poolId: d.id),
+                                            builder: (_) => EditTestPoolPage(poolId: d.id),
                                           ),
                                         );
                                       },
@@ -191,13 +187,11 @@ class _TestsBlockState extends State<TestsBlock> {
                                         d.id,
                                         (m['title'] ?? '').toString(),
                                       ),
-                                      onAttempts: () =>
-                                          _openAttempts(context, d.id),
+                                      onAttempts: () => _openAttempts(context, d.id),
                                     );
                                   },
                                 ),
-                                if (i != docs.length - 1)
-                                  SizedBox(height: screenW < 520 ? 8 : 10),
+                                if (i != docs.length - 1) SizedBox(height: screenW < 520 ? 8 : 10),
                               ],
                             ],
                           ),
@@ -224,13 +218,12 @@ class _TestsBlockState extends State<TestsBlock> {
     });
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Status changed to $next')),
+      SnackBar(content: Text('Status changed to $next', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface))),
     );
   }
 
   // ── Modals ─────────────────────────────────────────────────────────────────
-  Future<void> _openQuestions(
-      BuildContext context, String poolId, String poolTitle) async {
+  Future<void> _openQuestions(BuildContext context, String poolId, String poolTitle) async {
     final q = FirebaseFirestore.instance
         .collection('test_pool')
         .doc(poolId)
@@ -240,7 +233,7 @@ class _TestsBlockState extends State<TestsBlock> {
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Questions — $poolTitle'),
+        title: Text('Questions — $poolTitle', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
         content: SizedBox(
           width: 720,
           height: 460,
@@ -262,9 +255,9 @@ class _TestsBlockState extends State<TestsBlock> {
                     margin: const EdgeInsets.only(bottom: 10),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF8F9FA),
+                      color: AppColors.neuBg,
                       borderRadius: BorderRadius.circular(10),
-                      border: const Border(left: BorderSide(color: kBrand, width: 4)),
+                      border: Border(left: BorderSide(color: kBrand, width: 4)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -274,26 +267,19 @@ class _TestsBlockState extends State<TestsBlock> {
                             Expanded(
                               child: Text(
                                 m['question']?.toString() ?? '-',
-                                style: const TextStyle(
-                                  fontWeight: FontWeight.w700,
-                                  height: 1.2,
-                                ),
+                                style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700, height: 1.2),
                               ),
                             ),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: Colors.deepPurple.withOpacity(.08),
+                                color: AppColors.purple.withOpacity(.08),
                                 borderRadius: BorderRadius.circular(999),
-                                border: Border.all(color: Colors.deepPurple.withOpacity(.25)),
+                                border: Border.all(color: AppColors.purple.withOpacity(.25)),
                               ),
                               child: Text(
                                 type.toUpperCase(),
-                                style: const TextStyle(
-                                  color: Colors.deepPurple,
-                                  fontWeight: FontWeight.w800,
-                                  fontSize: 11,
-                                ),
+                                style: AppText.hintSmall.copyWith(color: AppColors.purple, fontWeight: FontWeight.w800, fontSize: 11),
                               ),
                             ),
                           ],
@@ -316,12 +302,13 @@ class _TestsBlockState extends State<TestsBlock> {
                               child: Text(
                                 '${String.fromCharCode(65 + i)}) ${opts[i].toString()}'
                                 '${i == (m['answer_index'] ?? -1) ? '  ✓' : ''}',
+                                style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
                               ),
                             ),
                         ] else ...[
                           Text(
                             'Expected: ${m['expected_answer']?.toString() ?? '-'}',
-                            style: const TextStyle(color: Colors.black87),
+                            style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
                           ),
                         ],
                         if ((m['explanation']?.toString() ?? '').isNotEmpty)
@@ -329,7 +316,7 @@ class _TestsBlockState extends State<TestsBlock> {
                             padding: const EdgeInsets.only(top: 6),
                             child: Text(
                               'Explanation: ${m['explanation']}',
-                              style: const TextStyle(fontSize: 12, color: Colors.black87),
+                              style: AppText.hintSmall.copyWith(color: context.c.onSurface),
                             ),
                           ),
                         const SizedBox(height: 8),
@@ -337,8 +324,8 @@ class _TestsBlockState extends State<TestsBlock> {
                           alignment: Alignment.centerRight,
                           child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.red,
-                              foregroundColor: Colors.white,
+                              backgroundColor: AppColors.danger,
+                              foregroundColor: AppColors.onSurfaceInverse,
                             ),
                             onPressed: () async => d.reference.delete(),
                             icon: const Icon(Icons.delete_outline),
@@ -351,14 +338,14 @@ class _TestsBlockState extends State<TestsBlock> {
                 );
               }
               if (children.isEmpty) {
-                return const Center(child: Text('No questions added yet.'));
+                return Center(child: Text('No questions added yet.', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)));
               }
               return ListView(children: children);
             },
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close')),
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('Close', style: AppText.tileSubtitle.copyWith(color: context.c.primary))),
         ],
       ),
     );
@@ -373,7 +360,7 @@ class _TestsBlockState extends State<TestsBlock> {
     await showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        title: const Text('Test Attempts'),
+        title: Text('Test Attempts', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
         content: SizedBox(
           width: 720,
           height: 420,
@@ -384,15 +371,15 @@ class _TestsBlockState extends State<TestsBlock> {
               for (final d in snap.data?.docs ?? []) {
                 final m = d.data() as Map<String, dynamic>;
                 rows.add([
-                  Text(m['student_id']?.toString() ?? '-', overflow: TextOverflow.ellipsis),
-                  Text('${m['score'] ?? 0}'),
-                  Text(m['status']?.toString() ?? '-'),
-                  Text(_fmtTs(m['started_at'] as Timestamp?)),
-                  Text(_fmtTs(m['completed_at'] as Timestamp?)),
+                  Text(m['student_id']?.toString() ?? '-', overflow: TextOverflow.ellipsis, style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
+                  Text('${m['score'] ?? 0}', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
+                  Text(m['status']?.toString() ?? '-', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
+                  Text(_fmtTs(m['started_at'] as Timestamp?), style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
+                  Text(_fmtTs(m['completed_at'] as Timestamp?), style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
                 ]);
               }
               if (rows.isEmpty) {
-                return const Center(child: Text('No attempts found.'));
+                return Center(child: Text('No attempts found.', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)));
               }
               return DataTableWrap(
                 columns: const ['Student', 'Score', 'Status', 'Started', 'Completed'],
@@ -401,7 +388,7 @@ class _TestsBlockState extends State<TestsBlock> {
             },
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(context), child: const Text('Close'))],
+        actions: [TextButton(onPressed: () => Navigator.pop(context), child: Text('Close', style: AppText.tileSubtitle.copyWith(color: context.c.primary)))],
       ),
     );
   }
@@ -435,7 +422,7 @@ class _TestsBlockState extends State<TestsBlock> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Delete failed: $e')),
+        SnackBar(content: Text('Delete failed: $e', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface))),
       );
     }
   }
@@ -474,7 +461,7 @@ class _PoolsHeaderRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 0, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0x1A4c63d2),
+        color: AppColors.brand.withOpacity(0.10),
         borderRadius: BorderRadius.circular(10),
       ),
       child: Row(
@@ -517,9 +504,9 @@ class _HCell extends StatelessWidget {
       width: width,
       child: Text(
         head.toUpperCase(),
-        style: TextStyle(
+        style: AppText.hintSmall.copyWith(
           fontSize: 11,
-          color: Colors.grey.shade800,
+          color: AppColors.slate,
           fontWeight: FontWeight.w800,
           letterSpacing: .5,
         ),
@@ -539,7 +526,7 @@ class _Cell extends StatelessWidget {
     return SizedBox(
       width: width,
       child: DefaultTextStyle.merge(
-        style: const TextStyle(color: Colors.black87),
+        style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
         child: child,
       ),
     );
@@ -587,19 +574,19 @@ class _PoolRow extends StatelessWidget {
                 title.isEmpty ? '-' : title,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w800),
+                style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w800),
               ),
             ),
           ),
           const _Spacer(width: _Cols.gap),
           _Cell(
             width: _Cols.duration,
-            child: Text('$dur min', style: const TextStyle(fontWeight: FontWeight.w600)),
+            child: Text('$dur min', style: AppText.tileSubtitle.copyWith(fontWeight: FontWeight.w600)),
           ),
           const _Spacer(width: _Cols.gap),
           _Cell(
             width: _Cols.passing,
-            child: Text('Pass $pass%', style: const TextStyle(fontWeight: FontWeight.w600)),
+            child: Text('Pass $pass%', style: AppText.tileSubtitle.copyWith(fontWeight: FontWeight.w600)),
           ),
           const _Spacer(width: _Cols.gap),
           _Cell(
@@ -626,7 +613,7 @@ class _PoolRow extends StatelessWidget {
                     onPressed: onToggleStatus,
                     icon: Icon(
                       status == 'active' ? Icons.toggle_on : Icons.toggle_off,
-                      color: status == 'active' ? Colors.green : Colors.grey,
+                      color: status == 'active' ? AppColors.success : AppColors.onSurfaceMuted,
                       size: 26,
                     ),
                     visualDensity: VisualDensity.compact,
@@ -640,7 +627,7 @@ class _PoolRow extends StatelessWidget {
             width: _Cols.created,
             child: Text(
               createdAt == null ? '-' : _fmtDate(createdAt),
-              style: const TextStyle(fontSize: 12),
+              style: AppText.hintSmall.copyWith(fontSize: 12),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -660,10 +647,10 @@ class _PoolRow extends StatelessWidget {
   }
 }
 
-// Always-3-dots menu (both wide & narrow) — white background
+// Always-3-dots menu (both wide & narrow) — themed background
 class _RowActions extends StatelessWidget {
   final VoidCallback onQuestions; // kept for compatibility (not shown)
-  final VoidCallback onAttempts;  // kept for compatibility (unused)
+  final VoidCallback onAttempts; // kept for compatibility (unused)
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -677,11 +664,11 @@ class _RowActions extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final menuItems = <PopupMenuEntry<String>>[
-      const PopupMenuItem(
+      PopupMenuItem(
         value: 'edit',
         child: _MenuRow('Edit', Icons.edit),
       ),
-      const PopupMenuItem(
+      PopupMenuItem(
         value: 'delete',
         child: _MenuRow('Delete', Icons.delete_forever, danger: true),
       ),
@@ -700,25 +687,24 @@ class _RowActions extends StatelessWidget {
 
     return Theme(
       data: Theme.of(context).copyWith(
-        popupMenuTheme: const PopupMenuThemeData(
-          color: Colors.white,
-          textStyle: TextStyle(color: Colors.black87),
+        popupMenuTheme: PopupMenuThemeData(
+          color: AppColors.surface,
+          textStyle: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
           elevation: 8,
         ),
       ),
       child: IconTheme.merge(
-        data: const IconThemeData(color: Colors.black87),
+        data: IconThemeData(color: context.c.onSurface),
         child: PopupMenuButton<String>(
           tooltip: 'Actions',
           onSelected: handleSelect,
           itemBuilder: (_) => menuItems,
-          child: const Icon(Icons.more_vert, size: 22),
+          child: Icon(Icons.more_vert, size: 22, color: context.c.onSurface),
         ),
       ),
     );
   }
 }
-
 
 class _MenuRow extends StatelessWidget {
   final String label;
@@ -727,12 +713,12 @@ class _MenuRow extends StatelessWidget {
   const _MenuRow(this.label, this.icon, {this.danger = false});
   @override
   Widget build(BuildContext context) {
-    final c = danger ? Colors.red : Colors.black87;
+    final c = danger ? AppColors.danger : context.c.onSurface;
     return Row(
       children: [
         Icon(icon, size: 18, color: c),
         const SizedBox(width: 8),
-        Text(label, style: TextStyle(color: c)),
+        Text(label, style: AppText.tileSubtitle.copyWith(color: c)),
       ],
     );
   }
@@ -755,7 +741,7 @@ class _QuestionsCountText extends StatelessWidget {
       stream: qs,
       builder: (_, snap) {
         final count = snap.data?.docs.length ?? 0;
-        return Text('$count', style: const TextStyle(fontWeight: FontWeight.w700));
+        return Text('$count', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700, color: context.c.onSurface));
       },
     );
   }
@@ -792,20 +778,22 @@ class _Toolbar extends StatelessWidget {
       onChanged: onQueryChanged,
       decoration: InputDecoration(
         hintText: 'Search by title or description…',
-        hintStyle: const TextStyle(color: Colors.black45),
-        prefixIcon: const Icon(Icons.search, color: Colors.black54),
+        hintStyle: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
+        prefixIcon: Icon(Icons.search, color: AppColors.onSurfaceMuted),
         suffixIcon: (searchCtrl.text.isEmpty)
             ? null
             : IconButton(
                 onPressed: onClearSearch,
-                icon: const Icon(Icons.close, color: Colors.black54),
+                icon: Icon(Icons.close, color: AppColors.onSurfaceMuted),
                 tooltip: 'Clear',
               ),
-        border: const OutlineInputBorder(),
+        border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        filled: true,
+        fillColor: AppColors.surface,
       ),
-      style: const TextStyle(color: Colors.black),
+      style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
     );
 
     final filters = Wrap(
@@ -830,12 +818,12 @@ class _Toolbar extends StatelessWidget {
       ],
     );
 
-    // Sort menu with white popup background
+    // Sort menu with themed popup background
     final sortButton = Theme(
       data: Theme.of(context).copyWith(
-        popupMenuTheme: const PopupMenuThemeData(
-          color: Colors.white,
-          textStyle: TextStyle(color: Colors.black87),
+        popupMenuTheme: PopupMenuThemeData(
+          color: AppColors.surface,
+          textStyle: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
           elevation: 8,
         ),
       ),
@@ -852,15 +840,15 @@ class _Toolbar extends StatelessWidget {
         ],
         child: OutlinedButton.icon(
           onPressed: null, // acts only as an anchor; PopupMenu handles taps
-          icon: const Icon(Icons.sort, color: Colors.black),
+          icon: Icon(Icons.sort, color: context.c.onSurface),
           label: Text(
             _sortLabel(sortBy),
-            style: const TextStyle(color: Colors.black),
+            style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
           ),
           style: OutlinedButton.styleFrom(
-            foregroundColor: Colors.black,
-            disabledForegroundColor: Colors.black,
-            side: const BorderSide(color: Colors.black12),
+            foregroundColor: context.c.onSurface,
+            disabledForegroundColor: context.c.onSurface,
+            side: BorderSide(color: AppColors.divider),
           ),
         ),
       ),
@@ -899,9 +887,9 @@ class _SortRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Row(
         children: [
-          Icon(icon, size: 18, color: Colors.black87),
+          Icon(icon, size: 18, color: context.c.onSurface),
           const SizedBox(width: 8),
-          Text(label),
+          Text(label, style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
         ],
       );
 }
@@ -967,7 +955,7 @@ class _LoadingState extends StatelessWidget {
           children: [
             const CircularProgressIndicator(),
             const SizedBox(height: 12),
-            Text('Loading test pools…', style: TextStyle(color: Colors.grey.shade700)),
+            Text('Loading test pools…', style: AppText.tileSubtitle.copyWith(color: AppColors.slate)),
           ],
         ),
       ),
@@ -986,13 +974,13 @@ class _EmptyState extends StatelessWidget {
         padding: const EdgeInsets.all(28.0),
         child: Column(
           children: [
-            Icon(Icons.fact_check_outlined, size: 64, color: Colors.grey.shade500),
+            Icon(Icons.fact_check_outlined, size: 64, color: AppColors.onSurfaceMuted),
             const SizedBox(height: 10),
             Text(message ?? 'No test pools yet',
-                style: TextStyle(color: Colors.grey.shade700, fontWeight: FontWeight.w600)),
+                style: AppText.tileTitle.copyWith(color: context.c.onSurface, fontWeight: FontWeight.w600)),
             const SizedBox(height: 6),
             Text('Create your first pool to get started',
-                style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted, fontSize: 12)),
           ],
         ),
       ),
@@ -1009,7 +997,7 @@ class _ErrorState extends StatelessWidget {
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Text('Failed to load pools: $error', style: const TextStyle(color: Colors.red)),
+        child: Text('Failed to load pools: $error', style: AppText.tileSubtitle.copyWith(color: AppColors.danger)),
       ),
     );
   }

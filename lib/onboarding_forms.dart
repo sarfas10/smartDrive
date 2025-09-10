@@ -1,4 +1,3 @@
-// onboarding_form.dart
 import 'dart:convert';
 import 'dart:io' show File;
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -8,10 +7,11 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'package:image_picker/image_picker.dart';
-import 'package:geolocator/geolocator.dart';
-
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
+
+// Use your app theme tokens (do NOT modify app_theme.dart)
+import 'theme/app_theme.dart';
 
 class OnboardingForm extends StatefulWidget {
   const OnboardingForm({super.key});
@@ -22,7 +22,6 @@ class OnboardingForm extends StatefulWidget {
 
 class _OnboardingFormState extends State<OnboardingForm> {
   final _personalKey = GlobalKey<FormState>();
-  final _kycKey = GlobalKey<FormState>();
 
   // ===== Cloudinary & Server Config =====
   static const String _cloudName = 'dxeunc4vd'; // keep in sync with .env
@@ -31,36 +30,27 @@ class _OnboardingFormState extends State<OnboardingForm> {
       'https://tajdrivingschool.in/smartDrive/cloudinary';
 
   // ===== Personal fields =====
-  final _address1Ctrl = TextEditingController();
-  final _address2Ctrl = TextEditingController();
-  final _zipCtrl = TextEditingController();
-  final _latCtrl = TextEditingController();
-  final _lngCtrl = TextEditingController();
+  final _permanentAddressCtrl = TextEditingController();
+  final _relationCtrl = TextEditingController(); // Son/Wife/Daughter of
+
+  // learner/license fields
+  bool _isLearnerHolder = false;
+  final _learnerNumberCtrl = TextEditingController();
+  DateTime? _learnerExpiry;
+
+  bool _isLicenseHolder = false;
+  final _licenseNumberCtrl = TextEditingController();
+  DateTime? _licenseExpiry;
 
   DateTime? _dob;
-  double? _homeLat;
-  double? _homeLng;
   XFile? _profilePhoto;
   String? _photoUrl;
 
-  // ===== KYC fields =====
-  String? _docType; // Aadhaar / PAN / VoterId
-  XFile? _docFront;
-  XFile? _docBack;
-
   // ===== State / Flow =====
-  int _step = 0;
   bool _saving = false;
   bool _loadingState = true;
   String? _onboardingStatus;
-  String? _kycStatus;
   final _picker = ImagePicker();
-
-  bool get _isUnderVerification =>
-      (_kycStatus == 'pending') || (_onboardingStatus == 'kyc_pending');
-  bool get _isApproved =>
-      _kycStatus == 'approved' || _onboardingStatus == 'kyc_approved';
-  bool get _isReadOnly => _isUnderVerification || _isApproved;
 
   // Remove ALL whitespace (to avoid signature mismatch)
   String _clean(String s) => s.replaceAll(RegExp(r'\s+'), '');
@@ -73,21 +63,19 @@ class _OnboardingFormState extends State<OnboardingForm> {
 
   @override
   void dispose() {
-    _address1Ctrl.dispose();
-    _address2Ctrl.dispose();
-    _zipCtrl.dispose();
-    _latCtrl.dispose();
-    _lngCtrl.dispose();
+    _permanentAddressCtrl.dispose();
+    _relationCtrl.dispose();
+    _learnerNumberCtrl.dispose();
+    _licenseNumberCtrl.dispose();
     super.dispose();
   }
 
   bool _isPersonalCompleteFromData(Map<String, dynamic> data) {
-    final addr1 = (data['address_line1'] ?? '').toString().trim();
-    final zip = (data['zipcode'] ?? '').toString().trim();
+    final addr = (data['permanent_address'] ?? '').toString().trim();
     final dob = data['dob'];
-    final lat = data['home_lat'];
-    final lng = data['home_lng'];
-    return addr1.isNotEmpty && zip.isNotEmpty && dob != null && lat != null && lng != null;
+    final relation = (data['relation_of'] ?? '').toString().trim();
+    // learner/license are optional; only require address, relation and dob
+    return addr.isNotEmpty && relation.isNotEmpty && dob != null;
   }
 
   Future<void> _hydrateState() async {
@@ -101,43 +89,28 @@ class _OnboardingFormState extends State<OnboardingForm> {
       final profRef = FirebaseFirestore.instance.collection('user_profiles').doc(user.uid);
       final profSnap = await profRef.get();
 
-      Map<String, dynamic>? data;
       if (profSnap.exists) {
-        data = profSnap.data();
+        final data = profSnap.data();
         _onboardingStatus = data?['onboarding_status'] as String?;
         _photoUrl = data?['photo_url'] as String?;
-        _address1Ctrl.text = (data?['address_line1'] ?? '') as String;
-        _address2Ctrl.text = (data?['address_line2'] ?? '') as String? ?? '';
-        _zipCtrl.text = (data?['zipcode'] ?? '') as String;
+        _permanentAddressCtrl.text = (data?['permanent_address'] ?? '') as String;
+        _relationCtrl.text = (data?['relation_of'] ?? '') as String? ?? '';
+
         final ts = data?['dob'] as Timestamp?;
         _dob = ts?.toDate();
-        _homeLat = (data?['home_lat'] as num?)?.toDouble();
-        _homeLng = (data?['home_lng'] as num?)?.toDouble();
 
-        _latCtrl.text = _homeLat != null ? _homeLat!.toStringAsFixed(6) : '';
-        _lngCtrl.text = _homeLng != null ? _homeLng!.toStringAsFixed(6) : '';
-      }
+        _isLearnerHolder = (data?['is_learner_holder'] as bool?) ?? false;
+        _learnerNumberCtrl.text = (data?['learner_number'] ?? '') as String;
+        final lExp = data?['learner_expiry'] as Timestamp?;
+        _learnerExpiry = lExp?.toDate();
 
-      final kycQ = await FirebaseFirestore.instance
-          .collection('documents')
-          .where('uid', isEqualTo: user.uid)
-          .orderBy('created_at', descending: true)
-          .limit(1)
-          .get();
-
-      if (kycQ.docs.isNotEmpty) {
-        _kycStatus = kycQ.docs.first.data()['status'] as String?;
-      }
-
-      if (_isUnderVerification || _isApproved) {
-        _step = 1;
-      } else if (_onboardingStatus == 'personal_saved' || (data != null && _isPersonalCompleteFromData(data))) {
-        _step = 1;
-      } else {
-        _step = 0;
+        _isLicenseHolder = (data?['is_license_holder'] as bool?) ?? false;
+        _licenseNumberCtrl.text = (data?['license_number'] ?? '') as String;
+        final licExp = data?['license_expiry'] as Timestamp?;
+        _licenseExpiry = licExp?.toDate();
       }
     } catch (_) {
-      _step = 0;
+      // ignore and let user fill
     } finally {
       if (mounted) setState(() => _loadingState = false);
     }
@@ -220,37 +193,23 @@ class _OnboardingFormState extends State<OnboardingForm> {
     return (json['secure_url'] as String?) ?? (json['url'] as String);
   }
 
-  // ===== Location =====
-  Future<void> _useCurrentLocation() async {
-    LocationPermission permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-      permission = await Geolocator.requestPermission();
-    }
-    if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Location permission denied')),
-        );
-      }
-      return;
-    }
-    final pos = await Geolocator.getCurrentPosition();
-    setState(() {
-      _homeLat = pos.latitude;
-      _homeLng = pos.longitude;
-      _latCtrl.text = _homeLat!.toStringAsFixed(6);
-      _lngCtrl.text = _homeLng!.toStringAsFixed(6);
-    });
-  }
-
   // ===== Save Personal =====
   Future<void> _savePersonal() async {
     if (!_personalKey.currentState!.validate()) return;
-    if (_isReadOnly) return;
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not logged in')));
+      return;
+    }
+
+    // Additional validation: expiry dates when applicable
+    if (_isLearnerHolder && _learnerExpiry == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick learner expiry date')));
+      return;
+    }
+    if (_isLicenseHolder && _licenseExpiry == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick license expiry date')));
       return;
     }
 
@@ -269,13 +228,16 @@ class _OnboardingFormState extends State<OnboardingForm> {
 
       final data = {
         'uid': user.uid,
-        'address_line1': _address1Ctrl.text.trim(),
-        'address_line2': _address2Ctrl.text.trim().isEmpty ? null : _address2Ctrl.text.trim(),
-        'zipcode': _zipCtrl.text.trim(),
+        'permanent_address': _permanentAddressCtrl.text.trim(),
+        'relation_of': _relationCtrl.text.trim(),
         'dob': _dob != null ? Timestamp.fromDate(_dob!) : null,
-        'home_lat': _homeLat,
-        'home_lng': _homeLng,
         'photo_url': photoUrl,
+        'is_learner_holder': _isLearnerHolder,
+        'learner_number': _isLearnerHolder ? _learnerNumberCtrl.text.trim() : null,
+        'learner_expiry': _isLearnerHolder && _learnerExpiry != null ? Timestamp.fromDate(_learnerExpiry!) : null,
+        'is_license_holder': _isLicenseHolder,
+        'license_number': _isLicenseHolder ? _licenseNumberCtrl.text.trim() : null,
+        'license_expiry': _isLicenseHolder && _licenseExpiry != null ? Timestamp.fromDate(_licenseExpiry!) : null,
         'onboarding_status': 'personal_saved',
         'updated_at': FieldValue.serverTimestamp(),
         'created_at': FieldValue.serverTimestamp(),
@@ -289,7 +251,6 @@ class _OnboardingFormState extends State<OnboardingForm> {
       _photoUrl = photoUrl;
       setState(() {
         _onboardingStatus = 'personal_saved';
-        _step = 1;
       });
 
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Personal info saved')));
@@ -300,108 +261,40 @@ class _OnboardingFormState extends State<OnboardingForm> {
     }
   }
 
-  // ===== Submit KYC =====
-  Future<void> _submitKyc() async {
-    if (!_kycKey.currentState!.validate()) return;
-    if (_isReadOnly) return;
-
-    final user = FirebaseAuth.instance.currentUser;
-    if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not logged in')));
-      return;
-    }
-    setState(() => _saving = true);
-    try {
-      final doctype = _docType!.toLowerCase(); // "aadhaar" | "pan" | "voterid"
-      final baseFolder = _clean('$_baseFolder/users/${user.uid}/kyc/$doctype');
-
-      final String frontUrl = await _uploadToCloudinarySigned(
-        xfile: _docFront!,
-        publicId: _clean('kyc_${doctype}_front'),
-        folder: baseFolder,
-      );
-      final String backUrl = await _uploadToCloudinarySigned(
-        xfile: _docBack!,
-        publicId: _clean('kyc_${doctype}_back'),
-        folder: baseFolder,
-      );
-
-      await FirebaseFirestore.instance.collection('documents').add({
-        'uid': user.uid,
-        'type': _docType,
-        'front': frontUrl,
-        'back': backUrl,
-        'status': 'pending',
-        'created_at': FieldValue.serverTimestamp(),
-        'updated_at': FieldValue.serverTimestamp(),
-      });
-
-      await FirebaseFirestore.instance.collection('user_profiles').doc(user.uid).set(
-        {'onboarding_status': 'kyc_pending', 'updated_at': FieldValue.serverTimestamp()},
-        SetOptions(merge: true),
-      );
-
-      setState(() {
-        _onboardingStatus = 'kyc_pending';
-        _kycStatus = 'pending';
-      });
-
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('KYC submitted. Status: pending')));
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
-    } finally {
-      if (mounted) setState(() => _saving = false);
-    }
-  }
-
   // ===== UI =====
   @override
   Widget build(BuildContext context) {
+    final bg = context.c.background;
+    final surface = context.c.surface;
+    final onSurface = context.c.onSurface;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
+      backgroundColor: bg,
       appBar: AppBar(
         title: const Text('Complete Onboarding'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
+        backgroundColor: surface,
+        foregroundColor: onSurface,
         elevation: 0.5,
       ),
       body: _loadingState
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)))
           : Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 640),
                 child: Card(
+                  color: surface,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.xl)),
                   margin: const EdgeInsets.all(16),
                   child: Padding(
                     padding: const EdgeInsets.all(18),
                     child: Column(
                       children: [
-                        _Header(step: _step),
+                        _SimpleHeader(),
                         const SizedBox(height: 12),
-                        if (_isUnderVerification)
-                          const _StatusBanner(
-                            type: BannerType.info,
-                            text: 'Your KYC is under verification. Editing is disabled.',
-                          ),
-                        if (_isApproved)
-                          const _StatusBanner(
-                            type: BannerType.success,
-                            text: 'Your KYC is approved.',
-                          ),
-                        if (_kycStatus == 'rejected' || _onboardingStatus == 'kyc_rejected')
-                          const _StatusBanner(
-                            type: BannerType.error,
-                            text: 'Your KYC was rejected. Please fix and resubmit.',
-                          ),
                         const SizedBox(height: 8),
                         Expanded(
-                          child: AnimatedSwitcher(
-                            duration: const Duration(milliseconds: 300),
-                            child: _step == 0 ? _buildPersonalForm() : _buildKycForm(),
-                          ),
+                          child: _buildPersonalForm(),
                         ),
                       ],
                     ),
@@ -413,7 +306,6 @@ class _OnboardingFormState extends State<OnboardingForm> {
   }
 
   Widget _buildPersonalForm() {
-    final disabled = _isReadOnly;
     return Form(
       key: _personalKey,
       child: ListView(
@@ -423,82 +315,66 @@ class _OnboardingFormState extends State<OnboardingForm> {
             child: Column(
               children: [
                 GestureDetector(
-                  onTap: disabled ? null : _pickAvatar,
+                  onTap: _pickAvatar,
                   child: Stack(
                     alignment: Alignment.bottomRight,
                     children: [
                       _AvatarPreview(xfile: _profilePhoto, networkUrl: _photoUrl, radius: 48),
-                      if (!disabled)
-                        Container(
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF6759FF),
-                            borderRadius: BorderRadius.circular(16),
-                          ),
-                          padding: const EdgeInsets.all(6),
-                          child: const Icon(Icons.edit, size: 16, color: Colors.white),
-                        )
+                      Container(
+                        decoration: BoxDecoration(
+                          color: AppColors.brand,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        padding: const EdgeInsets.all(6),
+                        child: const Icon(Icons.edit, size: 16, color: Colors.white),
+                      )
                     ],
                   ),
                 ),
                 const SizedBox(height: 8),
-                if (!disabled)
-                  TextButton(
-                    onPressed: _pickAvatar,
-                    child: const Text('Add / Change Photo'),
-                  ),
+                TextButton(
+                  onPressed: _pickAvatar,
+                  child: Text('Add / Change Passport Photo', style: TextStyle(color: context.c.primary)),
+                ),
               ],
             ),
           ),
           const SizedBox(height: 8),
 
           _Labeled(
-            'Address Line 1*',
+            'Permanent Address*',
             child: TextFormField(
-              controller: _address1Ctrl,
-              enabled: !disabled,
-              decoration: _inputDecoration('House / Street / Area'),
+              controller: _permanentAddressCtrl,
+              decoration: _inputDecoration('Flat, Street, Area, City, State, PIN'),
               validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
           ),
           const SizedBox(height: 12),
 
           _Labeled(
-            'Address Line 2 (optional)',
+            'Son/Wife/Daughter of*',
             child: TextFormField(
-              controller: _address2Ctrl,
-              enabled: !disabled,
-              decoration: _inputDecoration('Apartment / Landmark (optional)'),
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          _Labeled(
-            'Zipcode*',
-            child: TextFormField(
-              controller: _zipCtrl,
-              enabled: !disabled,
-              decoration: _inputDecoration('e.g. 682001'),
-              keyboardType: TextInputType.number,
+              controller: _relationCtrl,
+              decoration: _inputDecoration('Name of parent or spouse'),
               validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
           ),
+
           const SizedBox(height: 12),
 
           _Labeled(
             'Date of Birth*',
             child: InkWell(
-              onTap: disabled
-                  ? null
-                  : () async {
-                      final now = DateTime.now();
-                      final picked = await showDatePicker(
-                        context: context,
-                        firstDate: DateTime(1900),
-                        lastDate: DateTime(now.year - 10, now.month, now.day),
-                        initialDate: DateTime(now.year - 18),
-                      );
-                      if (picked != null) setState(() => _dob = picked);
-                    },
+              onTap: () async {
+                final now = DateTime.now();
+                final picked = await showDatePicker(
+                  context: context,
+                  firstDate: DateTime(1900),
+                  lastDate: DateTime(now.year - 10, now.month, now.day),
+                  initialDate: DateTime(now.year - 18),
+                );
+                if (picked != null) setState(() => _dob = picked);
+              },
               child: InputDecorator(
                 decoration: _inputDecoration('Pick your DOB'),
                 child: Text(
@@ -507,157 +383,123 @@ class _OnboardingFormState extends State<OnboardingForm> {
                       : '${_dob!.day.toString().padLeft(2, '0')}-'
                           '${_dob!.month.toString().padLeft(2, '0')}-'
                           '${_dob!.year}',
+                  style: TextStyle(color: _dob == null ? AppColors.onSurfaceFaint : context.c.onSurface),
                 ),
               ),
             ),
           ),
           const SizedBox(height: 12),
 
+          // ===== New: Learner holder question =====
           _Labeled(
-            'Home Location (lat/lng)*',
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextFormField(
-                    decoration: _inputDecoration('Latitude'),
-                    enabled: !disabled,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    controller: _latCtrl,
-                    onChanged: (v) => _homeLat = double.tryParse(v.trim()),
-                    validator: (v) => (_homeLat == null) ? 'Required' : null,
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: TextFormField(
-                    decoration: _inputDecoration('Longitude'),
-                    enabled: !disabled,
-                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                    controller: _lngCtrl,
-                    onChanged: (v) => _homeLng = double.tryParse(v.trim()),
-                    validator: (v) => (_homeLng == null) ? 'Required' : null,
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  tooltip: 'Use current location',
-                  onPressed: disabled ? null : _useCurrentLocation,
-                  icon: const Icon(Icons.my_location_rounded),
-                )
+            'Are you a learner\'s holder?*',
+            child: DropdownButtonFormField<bool>(
+              value: _isLearnerHolder,
+              decoration: _inputDecoration('Select'),
+              items: const [
+                DropdownMenuItem(value: false, child: Text('No')),
+                DropdownMenuItem(value: true, child: Text('Yes')),
               ],
+              onChanged: (v) => setState(() => _isLearnerHolder = v ?? false),
             ),
           ),
-          if (_homeLat != null && _homeLng != null) ...[
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 8,
-              children: [
-                Chip(label: Text('Lat: ${_homeLat!.toStringAsFixed(6)}')),
-                Chip(label: Text('Lng: ${_homeLng!.toStringAsFixed(6)}')),
+          const SizedBox(height: 8),
+          if (_isLearnerHolder) ...[
+            _Labeled(
+              'Learner Number*',
+              child: TextFormField(
+                controller: _learnerNumberCtrl,
+                decoration: _inputDecoration('Enter learner number'),
+                validator: (v) => (_isLearnerHolder && (v == null || v.trim().isEmpty)) ? 'Required' : null,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _Labeled(
+              'Learner Expiry*',
+              child: InkWell(
+                onTap: () async {
+                  final now = DateTime.now();
+                  final picked = await showDatePicker(
+                    context: context,
+                    firstDate: DateTime(now.year - 10),
+                    lastDate: DateTime(now.year + 50),
+                    initialDate: _learnerExpiry ?? now,
+                  );
+                  if (picked != null) setState(() => _learnerExpiry = picked);
+                },
+                child: InputDecorator(
+                  decoration: _inputDecoration('Pick learner expiry date'),
+                  child: Text(
+                    _learnerExpiry == null
+                        ? 'Tap to select'
+                        : '${_learnerExpiry!.day.toString().padLeft(2, '0')}-'
+                            '${_learnerExpiry!.month.toString().padLeft(2, '0')}-'
+                            '${_learnerExpiry!.year}',
+                    style: TextStyle(color: _learnerExpiry == null ? AppColors.onSurfaceFaint : context.c.onSurface),
+                  ),
+                ),
+              ),
+            ),
+          ],
+
+          const SizedBox(height: 12),
+
+          // ===== New: License holder question =====
+          _Labeled(
+            'Are you a license holder?*',
+            child: DropdownButtonFormField<bool>(
+              value: _isLicenseHolder,
+              decoration: _inputDecoration('Select'),
+              items: const [
+                DropdownMenuItem(value: false, child: Text('No')),
+                DropdownMenuItem(value: true, child: Text('Yes')),
               ],
+              onChanged: (v) => setState(() => _isLicenseHolder = v ?? false),
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (_isLicenseHolder) ...[
+            _Labeled(
+              'License Number*',
+              child: TextFormField(
+                controller: _licenseNumberCtrl,
+                decoration: _inputDecoration('Enter license number'),
+                validator: (v) => (_isLicenseHolder && (v == null || v.trim().isEmpty)) ? 'Required' : null,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _Labeled(
+              'License Expiry*',
+              child: InkWell(
+                onTap: () async {
+                  final now = DateTime.now();
+                  final picked = await showDatePicker(
+                    context: context,
+                    firstDate: DateTime(now.year - 10),
+                    lastDate: DateTime(now.year + 50),
+                    initialDate: _licenseExpiry ?? now,
+                  );
+                  if (picked != null) setState(() => _licenseExpiry = picked);
+                },
+                child: InputDecorator(
+                  decoration: _inputDecoration('Pick license expiry date'),
+                  child: Text(
+                    _licenseExpiry == null
+                        ? 'Tap to select'
+                        : '${_licenseExpiry!.day.toString().padLeft(2, '0')}-'
+                            '${_licenseExpiry!.month.toString().padLeft(2, '0')}-'
+                            '${_licenseExpiry!.year}',
+                    style: TextStyle(color: _licenseExpiry == null ? AppColors.onSurfaceFaint : context.c.onSurface),
+                  ),
+                ),
+              ),
             ),
           ],
 
           const SizedBox(height: 20),
-          if (!disabled)
-            _SubmitButton(
-              text: _saving ? 'Saving...' : 'Save & Continue',
-              onPressed: _saving ? null : _savePersonal,
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildKycForm() {
-    final disabled = _isReadOnly;
-    return Form(
-      key: _kycKey,
-      child: ListView(
-        padding: const EdgeInsets.only(top: 6),
-        children: [
-          _Labeled(
-            'Select Document Type*',
-            child: DropdownButtonFormField<String>(
-              value: _docType,
-              decoration: _inputDecoration('Choose one'),
-              items: const [
-                DropdownMenuItem(value: 'Aadhaar', child: Text('Aadhaar')),
-                DropdownMenuItem(value: 'PAN', child: Text('PAN')),
-                DropdownMenuItem(value: 'VoterId', child: Text('Voter ID')),
-              ],
-              onChanged: disabled ? null : (v) => setState(() => _docType = v),
-              validator: (v) => (v == null || v.isEmpty) ? 'Required' : null,
-            ),
-          ),
-          const SizedBox(height: 12),
-
-          _Labeled(
-            'Front Side Image*',
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.upload_file_rounded),
-                    label: const Text('Pick Front'),
-                    onPressed: disabled
-                        ? null
-                        : () async {
-                            final f = await _pickImage();
-                            if (f != null) setState(() => _docFront = f);
-                          },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                if (_docFront != null) _ThumbPreview(xfile: _docFront!),
-              ],
-            ),
-            validator: () => _docFront == null ? 'Required' : null,
-          ),
-          const SizedBox(height: 12),
-
-          _Labeled(
-            'Back Side Image*',
-            child: Row(
-              children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    icon: const Icon(Icons.upload_file_rounded),
-                    label: const Text('Pick Back'),
-                    onPressed: disabled
-                        ? null
-                        : () async {
-                            final f = await _pickImage();
-                            if (f != null) setState(() => _docBack = f);
-                          },
-                  ),
-                ),
-                const SizedBox(width: 12),
-                if (_docBack != null) _ThumbPreview(xfile: _docBack!),
-              ],
-            ),
-            validator: () => _docBack == null ? 'Required' : null,
-          ),
-          const SizedBox(height: 20),
-
-          Row(
-            children: [
-              Expanded(
-                child: OutlinedButton(
-                  onPressed: _saving ? null : () => setState(() => _step = 0),
-                  child: const Text('Back'),
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: !disabled
-                    ? _SubmitButton(
-                        text: _saving ? 'Submitting...' : 'Submit KYC',
-                        onPressed: _saving ? null : _submitKyc,
-                      )
-                    : const SizedBox.shrink(),
-              ),
-            ],
+          _SubmitButton(
+            text: _saving ? 'Saving...' : 'Save & Continue',
+            onPressed: _saving ? null : _savePersonal,
           ),
         ],
       ),
@@ -669,71 +511,21 @@ class _OnboardingFormState extends State<OnboardingForm> {
       hintText: hint,
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
     );
   }
 }
 
 // ================== UI building blocks ==================
 
-class _Header extends StatelessWidget {
-  final int step;
-  const _Header({required this.step});
-
+class _SimpleHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    final chips = [
-      _StepChip(label: 'Personal', active: step == 0, done: step > 0),
-      _StepChip(label: 'KYC', active: step == 1, done: false),
-    ];
     return Row(
       children: [
-        const Text('Onboarding', style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+        Text('Onboarding', style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
         const Spacer(),
-        Wrap(spacing: 8, children: chips),
       ],
-    );
-  }
-}
-
-class _StepChip extends StatelessWidget {
-  final String label;
-  final bool active;
-  final bool done;
-  const _StepChip({required this.label, required this.active, required this.done});
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = done
-        ? Colors.green.shade50
-        : active
-            ? Colors.deepPurple.shade50
-            : Colors.grey.shade100;
-    final fg = done
-        ? Colors.green.shade700
-        : active
-            ? Colors.deepPurple
-            : Colors.black54;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: done
-              ? Colors.green.shade200
-              : active
-                  ? Colors.deepPurple.shade200
-                  : Colors.grey.shade300,
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(done ? Icons.check_circle : Icons.circle, size: 14, color: fg),
-          const SizedBox(width: 6),
-          Text(label, style: TextStyle(color: fg)),
-        ],
-      ),
     );
   }
 }
@@ -751,9 +543,9 @@ class _SubmitButton extends StatelessWidget {
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          backgroundColor: const Color(0xFF6759FF),
-          foregroundColor: Colors.white,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+          backgroundColor: context.c.primary,
+          foregroundColor: context.c.inverseSurface ?? AppColors.onSurfaceInverse, // fallback handled by theme
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -780,68 +572,15 @@ class _Labeled extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+        Text(label, style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
         const SizedBox(height: 8),
         child,
         if (errorText != null)
           Padding(
             padding: const EdgeInsets.only(top: 6, left: 4),
-            child: Text(errorText, style: TextStyle(color: Colors.red.shade700, fontSize: 12)),
+            child: Text(errorText, style: TextStyle(color: AppColors.errFg, fontSize: 12)),
           ),
       ],
-    );
-  }
-}
-
-enum BannerType { info, success, error }
-
-class _StatusBanner extends StatelessWidget {
-  final BannerType type;
-  final String text;
-  const _StatusBanner({required this.type, required this.text});
-
-  @override
-  Widget build(BuildContext context) {
-    Color bg, fg, border;
-    switch (type) {
-      case BannerType.success:
-        bg = Colors.green.shade50;
-        fg = Colors.green.shade800;
-        border = Colors.green.shade200;
-        break;
-      case BannerType.error:
-        bg = Colors.red.shade50;
-        fg = Colors.red.shade800;
-        border = Colors.red.shade200;
-        break;
-      default:
-        bg = Colors.amber.shade50;
-        fg = Colors.amber.shade900;
-        border = Colors.amber.shade200;
-    }
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      decoration: BoxDecoration(
-        color: bg,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: border),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            type == BannerType.success
-                ? Icons.verified_outlined
-                : type == BannerType.error
-                    ? Icons.error_outline
-                    : Icons.info_outline,
-            size: 18,
-            color: fg,
-          ),
-          const SizedBox(width: 8),
-          Expanded(child: Text(text, style: TextStyle(color: fg))),
-        ],
-      ),
     );
   }
 }
@@ -864,14 +603,14 @@ class _AvatarPreview extends StatelessWidget {
     if (provider == null) {
       return CircleAvatar(
         radius: radius,
-        backgroundColor: const Color(0xFFE9EAF4),
-        child: const Icon(Icons.person, size: 48, color: Colors.grey),
+        backgroundColor: AppColors.neuBg,
+        child: Icon(Icons.person, size: 48, color: AppColors.onSurfaceFaint),
       );
     }
     return CircleAvatar(
       radius: radius,
       backgroundImage: provider,
-      backgroundColor: const Color(0xFFE9EAF4),
+      backgroundColor: AppColors.neuBg,
     );
   }
 }

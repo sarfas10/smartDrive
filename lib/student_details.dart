@@ -1,7 +1,10 @@
-// student_details.dart
+// lib/student_details.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart'; // for view/download + opening links
+
+// Use app theme tokens for consistent colors
+import 'theme/app_theme.dart';
 
 class StudentDetailsPage extends StatelessWidget {
   const StudentDetailsPage({super.key});
@@ -342,7 +345,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                                 .textTheme
                                                 .bodySmall
                                                 ?.copyWith(
-                                                  color: cs.onSurfaceVariant,
+                                                  color: AppColors.onSurfaceMuted,
                                                 ),
                                           ),
                                           const SizedBox(height: 12),
@@ -359,13 +362,13 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                                               const SizedBox(width: 8),
                                               _badge(
                                                 text: 'Active',
-                                                color: _okGreen,
+                                                color: AppColors.okFg,
                                                 isOn: status.toLowerCase() == 'active',
                                               ),
                                               const SizedBox(width: 8),
                                               _badge(
                                                 text: _prettyKyc(kyc),
-                                                color: _warnAmber,
+                                                color: AppColors.warnFg,
                                                 isOn:
                                                     !kyc.toLowerCase().contains('approved'),
                                                 altColors: _kycColors(kyc),
@@ -628,7 +631,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                               label: const Text('Block Student'),
                               onPressed: _blockUser,
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: _dangerRed,
+                                backgroundColor: AppColors.danger,
                                 foregroundColor: Colors.white,
                                 padding:
                                     const EdgeInsets.symmetric(vertical: 14),
@@ -642,8 +645,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                               children: [
                                 Expanded(
                                   child: ElevatedButton.icon(
-                                    icon: const Icon(
-                                        Icons.check_circle_outline),
+                                    icon: const Icon(Icons.check_circle_outline),
                                     label: const Text('Approve KYC'),
                                     onPressed: _approveKyc,
                                     style: ElevatedButton.styleFrom(
@@ -686,7 +688,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     );
   }
 
-  // ── Helpers ────────────────────────────────────────────────────────────────
+  // ── Helpers ───────────────────────────────────────────────────────────────
   DateTime? _asDate(dynamic v) {
     if (v is Timestamp) return v.toDate();
     if (v is DateTime) return v;
@@ -810,16 +812,16 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
       child: Text(text,
           style: TextStyle(
               fontSize: 12,
-              color: colors[0] == _warnAmber ? cs.primary : colors[0],
+              color: colors[0] == AppColors.warnFg ? cs.primary : colors[0],
               fontWeight: FontWeight.w700)),
     );
   }
 
   List<Color> _kycColors(String s) {
     final t = s.toLowerCase();
-    if (t.contains('approved')) return [_okGreen, _okGreen.withOpacity(0.25)];
-    if (t.contains('rejected')) return [_dangerRed, _dangerRed.withOpacity(0.25)];
-    return [_warnAmber, _warnAmber.withOpacity(0.25)];
+    if (t.contains('approved')) return [AppColors.okFg, AppColors.okFg.withOpacity(0.25)];
+    if (t.contains('rejected')) return [AppColors.errFg, AppColors.errFg.withOpacity(0.25)];
+    return [AppColors.warnFg, AppColors.warnFg.withOpacity(0.25)];
   }
 
   // ── Document tiles with inline front/back images ───────────────────────────
@@ -835,9 +837,9 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withOpacity(0.25),
+        color: AppColors.neuBg, // use token for subtle background
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outlineVariant),
+        border: Border.all(color: AppColors.divider),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -852,7 +854,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
               style: Theme.of(context)
                   .textTheme
                   .bodySmall
-                  ?.copyWith(color: cs.onSurfaceVariant)),
+                  ?.copyWith(color: AppColors.onSurfaceMuted)),
           const SizedBox(height: 10),
           Row(
             children: [
@@ -862,7 +864,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
               if (frontUrl.isEmpty && backUrl.isEmpty)
                 Expanded(
                     child: Text('No files attached',
-                        style: TextStyle(color: cs.onSurfaceVariant))),
+                        style: TextStyle(color: AppColors.onSurfaceMuted))),
             ],
           ),
         ],
@@ -888,10 +890,10 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
               errorBuilder: (_, __, ___) => Container(
                 width: 120,
                 height: 76,
-                color: cs.surfaceContainerHighest,
+                color: AppColors.neuBg,
                 alignment: Alignment.center,
                 child: Icon(Icons.broken_image_outlined,
-                    color: cs.onSurfaceVariant),
+                    color: AppColors.onSurfaceMuted),
               ),
             ),
           ),
@@ -963,13 +965,13 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: cs.surfaceContainerHighest.withOpacity(0.25),
+        color: AppColors.neuBg,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outlineVariant),
+        border: Border.all(color: AppColors.divider),
       ),
       child: Row(
         children: [
-          Icon(Icons.info_outline, size: 18, color: cs.onSurfaceVariant),
+          Icon(Icons.info_outline, size: 18, color: AppColors.onSurfaceMuted),
           const SizedBox(width: 8),
           Expanded(child: Text(text, style: TextStyle(color: cs.onSurface))),
         ],
@@ -978,9 +980,9 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
   }
 
   // ── Utils ──────────────────────────────────────────────────────────────────
-  static const _okGreen = Color(0xFF16A34A);
-  static const _dangerRed = Color(0xFFEF4444);
-  static const _warnAmber = Color(0xFFF59E0B);
+  static const _okGreen = AppColors.okFg;
+  static const _dangerRed = AppColors.errFg;
+  static const _warnAmber = AppColors.warnFg;
 
   String _prettyDocType(String raw) {
     final parts =

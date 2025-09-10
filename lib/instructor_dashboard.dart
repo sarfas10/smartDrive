@@ -9,6 +9,7 @@ import 'package:smart_drive/students_list_page.dart';
 import 'package:smart_drive/upload_document_page.dart'; // NEW
 import 'package:url_launcher/url_launcher.dart';
 import 'package:smart_drive/instructor_slots.dart';
+import 'theme/app_theme.dart';
 
 class InstructorDashboardPage extends StatelessWidget {
   const InstructorDashboardPage({super.key});
@@ -16,7 +17,7 @@ class InstructorDashboardPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return const Scaffold(
-      backgroundColor: Color(0xFFF6F7FB),
+      backgroundColor: AppColors.background,
       body: SafeArea(child: _DashboardBody()),
     );
   }
@@ -137,12 +138,13 @@ class _DashboardBodyState extends State<_DashboardBody> {
   void _showPendingNotice() {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
+      SnackBar(
+        content: const Text(
           'Your instructor account is pending approval. This action is disabled until your status becomes Active.',
         ),
         behavior: SnackBarBehavior.floating,
-        duration: Duration(seconds: 3),
+        duration: const Duration(seconds: 3),
+        backgroundColor: AppColors.warnBg,
       ),
     );
   }
@@ -151,7 +153,7 @@ class _DashboardBodyState extends State<_DashboardBody> {
   Widget build(BuildContext context) {
     final uid = _user?.uid;
     if (_loading) return const Center(child: CircularProgressIndicator());
-    if (uid == null) return const Center(child: Text('Not signed in'));
+    if (uid == null) return Center(child: Text('Not signed in', style: AppText.tileTitle));
 
     return StreamBuilder(
       stream: _meDoc(uid),
@@ -165,273 +167,244 @@ class _DashboardBodyState extends State<_DashboardBody> {
         final role = 'instructor';
 
         // Wrap the rest in a second stream for the profile doc
-        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: _profileDoc(uid),
-          builder: (context, profSnap) {
-            final prof = profSnap.data?.data() ?? <String, dynamic>{};
+        return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(stream: _profileDoc(uid), builder: (context, profSnap) {
+          final prof = profSnap.data?.data() ?? <String, dynamic>{};
 
-            final personalOk = _isPersonalComplete(m, prof);
-            final paymentOk = _isPaymentComplete(prof);
-            final needsSetup = !(personalOk && paymentOk) && !_dismissedSetupWarning;
+          final personalOk = _isPersonalComplete(m, prof);
+          final paymentOk = _isPaymentComplete(prof);
+          final needsSetup = !(personalOk && paymentOk) && !_dismissedSetupWarning;
 
-            return CustomScrollView(
-              slivers: [
-                SliverAppBar(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  pinned: true,
-                  elevation: 0,
-                  title: const Text('Instructor Dashboard'),
-                  actions: [
-                    _InstructorBell(uid: uid, role: role, userStatus: _status),
-                    IconButton(
-                      icon: const Icon(Icons.settings_outlined),
-                      onPressed: _openSettings,
-                    ),
-                    const SizedBox(width: 8),
-                  ],
+          return CustomScrollView(
+            slivers: [
+              SliverAppBar(
+                backgroundColor: AppColors.surface,
+                foregroundColor: AppColors.onSurface,
+                pinned: true,
+                elevation: 0,
+                title: Text('Instructor Dashboard', style: AppText.sectionTitle.copyWith(color: AppColors.onSurface)),
+                actions: [
+                  _InstructorBell(uid: uid, role: role, userStatus: _status),
+                  IconButton(
+                    icon: Icon(Icons.settings_outlined, color: AppColors.onSurface),
+                    onPressed: _openSettings,
+                  ),
+                  const SizedBox(width: 8),
+                ],
+              ),
+
+              // Profile header
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                  child: _ProfileHeader(
+                    initials: _initials(name),
+                    name: name,
+                    email: email,
+                    active: active,
+                  ),
                 ),
+              ),
 
-                // Profile header
+              // Optional: clear pending status banner (visual context)
+              if (isPending)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-                    child: _ProfileHeader(
-                      initials: _initials(name),
-                      name: name,
-                      email: email,
-                      active: active,
-                    ),
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: _PendingBanner(onFixNow: _openSettings),
                   ),
                 ),
 
-                // Optional: clear pending status banner (visual context)
-                if (isPending)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                      child: _PendingBanner(onFixNow: _openSettings),
-                    ),
-                  ),
-
-                // Setup warning banner (payouts completeness)
-                if (needsSetup)
-                  SliverToBoxAdapter(
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                      child: _WarningCard(
-                        personalOk: personalOk,
-                        paymentOk: paymentOk,
-                        onFixNow: _openSettings,
-                        onDismiss: () => setState(() => _dismissedSetupWarning = true),
-                      ),
-                    ),
-                  ),
-
-                // Metric cards
+              // Setup warning banner (payouts completeness)
+              if (needsSetup)
                 SliverToBoxAdapter(
                   child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: StreamBuilder<
-                              List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
-                            stream: _todaySlots(),
-                            builder: (context, s) {
-                              final slots = s.data ?? const [];
-                              final cap = (m['maxDailySlots'] ?? 0) as int;
-                              final value =
-                                  cap > 0 ? '${slots.length}/$cap' : '${slots.length}';
-                              return _MetricCard(
-                                icon: Icons.event_available,
-                                iconBg: const Color(0xFFE9F0FF),
-                                title: "Today's Slots",
-                                value: value,
-                              );
-                            },
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: StreamBuilder<int>(
-                            stream: _activeStudentsCount(),
-                            builder: (context, s) {
-                              final total = s.data ?? 0;
-                              return _MetricCard(
-                                icon: Icons.groups_2_outlined,
-                                iconBg: const Color(0xFFEAF7F0),
-                                title: 'Active Students',
-                                value: '$total',
-                              );
-                            },
-                          ),
-                        ),
-                      ],
+                    padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                    child: _WarningCard(
+                      personalOk: personalOk,
+                      paymentOk: paymentOk,
+                      onFixNow: _openSettings,
+                      onDismiss: () => setState(() => _dismissedSetupWarning = true),
                     ),
                   ),
                 ),
 
-                // Action tiles
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Column(
-                      children: [
-                        _ActionTile(
-                          icon: Icons.event_note,
-                          iconColor: Colors.purple,
-                          title: 'Manage Slots',
-                          subtitle: 'Manage scheduled sessions and availability',
-                          onTap: () => isPending ? _showPendingNotice() : _openManageSlots(),
-                          enabled: !isPending,
-                          disabledLabel: 'Pending approval',
-                        ),
-                        const SizedBox(height: 12),
-                        _ActionTile(
-                          icon: Icons.check_circle,
-                          iconColor: const Color(0xFF2E7D32),
-                          title: 'Mark Attendance',
-                          subtitle: 'Record student attendance and completion',
-                          onTap: () => isPending ? _showPendingNotice() : _openMarkAttendance(),
-                          enabled: !isPending,
-                          disabledLabel: 'Pending approval',
-                        ),
-                        const SizedBox(height: 12),
-                        _ActionTile(
-                          icon: Icons.trending_up,
-                          iconColor: const Color(0xFF1565C0),
-                          title: 'View Student Progress',
-                          subtitle: 'Track learning milestones and skills',
-                          onTap: () => isPending ? _showPendingNotice() : _openStudentProgress(),
-                          enabled: !isPending,
-                          disabledLabel: 'Pending approval',
-                        ),
-                        const SizedBox(height: 12),
-                        // Upload Documents is allowed even if pending
-                        _ActionTile(
-                          icon: Icons.upload_file_rounded,
-                          iconColor: const Color(0xFF2D5BFF),
-                          title: 'Upload Documents',
-                          subtitle: 'Share study materials and files with students',
-                          onTap: _openUploadDocuments,
-                          enabled: true,
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // Today's schedule
-                SliverToBoxAdapter(
-                  child: Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
-                    child: Row(
-                      children: const [
-                        Icon(Icons.access_time, size: 18, color: Colors.black87),
-                        SizedBox(width: 8),
-                        Text("Today's Schedule",
-                            style: TextStyle(
-                              fontWeight: FontWeight.w600,
-                              fontSize: 16,
-                              color: Colors.black87,
-                            )),
-                      ],
-                    ),
-                  ),
-                ),
-
-                StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
-                  stream: _todaySlots(),
-                  builder: (context, s) {
-                    final slots = s.data ?? const [];
-                    if (s.connectionState == ConnectionState.waiting) {
-                      return const SliverToBoxAdapter(
-                        child: Padding(
-                          padding: EdgeInsets.all(24),
-                          child: Center(child: CircularProgressIndicator()),
-                        ),
-                      );
-                    }
-                    if (slots.isEmpty) {
-                      return const SliverToBoxAdapter(
-                        child: Padding(
-                          padding: EdgeInsets.fromLTRB(16, 8, 16, 32),
-                          child: _EmptyCard(message: 'No sessions scheduled for today.'),
-                        ),
-                      );
-                    }
-                    return SliverList.separated(
-                      itemCount: slots.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
-                      itemBuilder: (context, i) {
-                        final d = slots[i].data();
-                        final ts = (d['startAt'] as Timestamp).toDate();
-                        final status = (d['status'] ?? 'confirmed') as String;
-                        final studentId = (d['studentId'] ?? '') as String;
-                        final skill = (d['skill'] ?? d['note'] ?? '') as String;
-
-                        return FutureBuilder<Map<String, dynamic>?>(
-                          future: _studentById(studentId),
-                          builder: (context, s2) {
-                            final studentName =
-                                (s2.data?['name'] ?? 'Student').toString();
-                            return _ScheduleTile(
-                              time: _fmtTime(ts),
-                              name: studentName,
-                              subtitle: skill,
-                              status: status,
+              // Metric cards
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+                          stream: _todaySlots(),
+                          builder: (context, s) {
+                            final slots = s.data ?? const [];
+                            final cap = (m['maxDailySlots'] ?? 0) as int;
+                            final value = cap > 0 ? '${slots.length}/$cap' : '${slots.length}';
+                            return _MetricCard(
+                              icon: Icons.event_available,
+                              iconBg: AppColors.cardGradA.withOpacity(0.08),
+                              title: "Today's Slots",
+                              value: value,
                             );
                           },
-                        );
-                      },
-                    );
-                  },
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: StreamBuilder<int>(
+                          stream: _activeStudentsCount(),
+                          builder: (context, s) {
+                            final total = s.data ?? 0;
+                            return _MetricCard(
+                              icon: Icons.groups_2_outlined,
+                              iconBg: AppColors.okBg,
+                              title: 'Active Students',
+                              value: '$total',
+                            );
+                          },
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
+              ),
 
-                const SliverToBoxAdapter(child: SizedBox(height: 24)),
-              ],
-            );
-          },
-        );
+              // Action tiles
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    children: [
+                      _ActionTile(
+                        icon: Icons.event_note,
+                        iconColor: AppColors.purple,
+                        title: 'Manage Slots',
+                        subtitle: 'Manage scheduled sessions and availability',
+                        onTap: () => isPending ? _showPendingNotice() : _openManageSlots(),
+                        enabled: !isPending,
+                        disabledLabel: 'Pending approval',
+                      ),
+                      const SizedBox(height: 12),
+                      _ActionTile(
+                        icon: Icons.check_circle,
+                        iconColor: AppColors.success,
+                        title: 'Mark Attendance',
+                        subtitle: 'Record student attendance and completion',
+                        onTap: () => isPending ? _showPendingNotice() : _openMarkAttendance(),
+                        enabled: !isPending,
+                        disabledLabel: 'Pending approval',
+                      ),
+                      const SizedBox(height: 12),
+                      _ActionTile(
+                        icon: Icons.trending_up,
+                        iconColor: AppColors.info,
+                        title: 'View Student Progress',
+                        subtitle: 'Track learning milestones and skills',
+                        onTap: () => isPending ? _showPendingNotice() : _openStudentProgress(),
+                        enabled: !isPending,
+                        disabledLabel: 'Pending approval',
+                      ),
+                      const SizedBox(height: 12),
+                      // Upload Documents is allowed even if pending
+                      _ActionTile(
+                        icon: Icons.upload_file_rounded,
+                        iconColor: AppColors.primary,
+                        title: 'Upload Documents',
+                        subtitle: 'Share study materials and files with students',
+                        onTap: _openUploadDocuments,
+                        enabled: true,
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+
+              // Today's schedule
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                  child: Row(
+                    children: [
+                      Icon(Icons.access_time, size: 18, color: AppColors.onSurface),
+                      const SizedBox(width: 8),
+                      Text("Today's Schedule", style: AppText.sectionTitle),
+                    ],
+                  ),
+                ),
+              ),
+
+              StreamBuilder<List<QueryDocumentSnapshot<Map<String, dynamic>>>>(
+                stream: _todaySlots(),
+                builder: (context, s) {
+                  final slots = s.data ?? const [];
+                  if (s.connectionState == ConnectionState.waiting) {
+                    return SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Center(child: CircularProgressIndicator(color: AppColors.brand)),
+                      ),
+                    );
+                  }
+                  if (slots.isEmpty) {
+                    return SliverToBoxAdapter(
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(16, 8, 16, 32),
+                        child: _EmptyCard(message: 'No sessions scheduled for today.'),
+                      ),
+                    );
+                  }
+                  return SliverList.separated(
+                    itemCount: slots.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, i) {
+                      final d = slots[i].data();
+                      final ts = (d['startAt'] as Timestamp).toDate();
+                      final status = (d['status'] ?? 'confirmed') as String;
+                      final studentId = (d['studentId'] ?? '') as String;
+                      final skill = (d['skill'] ?? d['note'] ?? '') as String;
+
+                      return FutureBuilder<Map<String, dynamic>?>(future: _studentById(studentId), builder: (context, s2) {
+                        final studentName = (s2.data?['name'] ?? 'Student').toString();
+                        return _ScheduleTile(
+                          time: _fmtTime(ts),
+                          name: studentName,
+                          subtitle: skill,
+                          status: status,
+                        );
+                      });
+                    },
+                  );
+                },
+              ),
+
+              const SliverToBoxAdapter(child: SizedBox(height: 24)),
+            ],
+          );
+        });
       },
     );
   }
 
   // Navigation hooks
   void _openUploadDocuments() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const UploadDocumentPage()),
-    );
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const UploadDocumentPage()));
   }
 
   void _openManageSlots() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const InstructorSlotsBlock()),
-    );
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const InstructorSlotsBlock()));
   }
 
   void _openMarkAttendance() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const AttendencePage()),
-    );
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const AttendencePage()));
   }
 
   void _openStudentProgress() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const StudentsListPage()),
-    );
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const StudentsListPage()));
   }
 
   void _openSettings() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const InstructorSettingsPage()),
-    );
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const InstructorSettingsPage()));
   }
 }
 
@@ -454,18 +427,18 @@ class _ProfileHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.xl)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
           children: [
             CircleAvatar(
               radius: 22,
-              backgroundColor: const Color(0xFF4C63D2),
+              backgroundColor: AppColors.brand,
               child: Text(
                 initials,
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse, fontWeight: FontWeight.w700),
               ),
             ),
             const SizedBox(width: 12),
@@ -473,8 +446,8 @@ class _ProfileHeader extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
-                  Text(email, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                  Text(name, style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700)),
+                  Text(email, style: AppText.tileSubtitle),
                 ],
               ),
             ),
@@ -483,7 +456,7 @@ class _ProfileHeader extends StatelessWidget {
                 Container(
                   width: 8, height: 8,
                   decoration: BoxDecoration(
-                    color: active ? const Color(0xFF2E7D32) : Colors.grey,
+                    color: active ? AppColors.success : AppColors.onSurfaceFaint,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -491,7 +464,7 @@ class _ProfileHeader extends StatelessWidget {
                 Text(
                   active ? 'Active' : 'Inactive',
                   style: TextStyle(
-                    color: active ? const Color(0xFF2E7D32) : Colors.grey,
+                    color: active ? AppColors.success : AppColors.onSurfaceFaint,
                     fontWeight: FontWeight.w600,
                     fontSize: 12,
                   ),
@@ -514,19 +487,19 @@ class _PendingBanner extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 0,
-      color: const Color(0xFFE3F2FD),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: AppColors.info.withOpacity(0.12),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.xl)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: const [
-            Icon(Icons.lock_clock, color: Color(0xFF1565C0)),
-            SizedBox(width: 12),
+          children: [
+            Icon(Icons.lock_clock, color: AppColors.info),
+            const SizedBox(width: 12),
             Expanded(
               child: Text(
                 'Your account is pending approval. Some actions are disabled until activation.',
-                style: TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF0D47A1)),
+                style: AppText.tileSubtitle.copyWith(color: AppColors.info),
               ),
             ),
           ],
@@ -557,36 +530,30 @@ class _WarningCard extends StatelessWidget {
 
     return Card(
       elevation: 0,
-      color: Colors.orange.shade50,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: AppColors.warnBg,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.xl)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Icon(Icons.warning_amber_rounded, color: Color(0xFFF57C00)),
+            Icon(Icons.warning_amber_rounded, color: AppColors.warning),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Action needed before payouts',
-                    style: TextStyle(fontWeight: FontWeight.w800),
-                  ),
+                  Text('Action needed before payouts', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w800)),
                   const SizedBox(height: 6),
                   Text(
                     [
                       if (needPersonal) 'Complete your Personal Information',
                       if (needPayment) 'Set up your Payment Preference',
                     ].join(' • '),
-                    style: TextStyle(color: Colors.orange.shade900),
+                    style: AppText.hintSmall.copyWith(color: AppColors.warning),
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    'Payouts will not be processed until setup is complete.',
-                    style: TextStyle(fontSize: 12, color: Colors.orange.shade900),
-                  ),
+                  Text('Payouts will not be processed until setup is complete.', style: AppText.hintSmall.copyWith(color: AppColors.warning)),
                   const SizedBox(height: 10),
                   Row(
                     children: [
@@ -595,8 +562,8 @@ class _WarningCard extends StatelessWidget {
                         icon: const Icon(Icons.settings),
                         label: const Text('Open Settings'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFF57C00),
-                          foregroundColor: Colors.white,
+                          backgroundColor: AppColors.warning,
+                          foregroundColor: AppColors.onSurfaceInverse,
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -604,6 +571,7 @@ class _WarningCard extends StatelessWidget {
                         onPressed: onDismiss,
                         icon: const Icon(Icons.close),
                         label: const Text('Dismiss'),
+                        style: TextButton.styleFrom(foregroundColor: AppColors.onSurfaceMuted),
                       ),
                     ],
                   ),
@@ -634,8 +602,8 @@ class _MetricCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.xl)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
@@ -643,16 +611,16 @@ class _MetricCard extends StatelessWidget {
             Container(
               decoration: BoxDecoration(color: iconBg, borderRadius: BorderRadius.circular(12)),
               padding: const EdgeInsets.all(10),
-              child: Icon(icon, size: 22),
+              child: Icon(icon, size: 22, color: AppColors.onSurface),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(title, style: const TextStyle(fontSize: 12, color: Colors.black54, height: 1.1)),
+                  Text(title, style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted, height: 1.1)),
                   const SizedBox(height: 4),
-                  Text(value, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800)),
+                  Text(value, style: AppText.tileTitle.copyWith(fontSize: 20)),
                 ],
               ),
             ),
@@ -688,20 +656,17 @@ class _ActionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final card = Card(
       elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.xl)),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadii.xl),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
             children: [
               Container(
-                decoration: BoxDecoration(
-                  color: iconColor.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(12),
-                ),
+                decoration: BoxDecoration(color: iconColor.withOpacity(0.08), borderRadius: BorderRadius.circular(12)),
                 padding: const EdgeInsets.all(10),
                 child: Icon(icon, color: iconColor),
               ),
@@ -710,13 +675,13 @@ class _ActionTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                    Text(title, style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700)),
                     const SizedBox(height: 4),
-                    Text(subtitle, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                    Text(subtitle, style: AppText.tileSubtitle),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Colors.black38),
+              Icon(Icons.chevron_right_rounded, color: AppColors.onSurfaceFaint),
             ],
           ),
         ),
@@ -733,15 +698,11 @@ class _ActionTile extends StatelessWidget {
           child: IgnorePointer(
             child: Container(
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(14),
-                // subtle pattern overlay for a "placeholder" feel
+                borderRadius: BorderRadius.circular(AppRadii.xl),
                 gradient: LinearGradient(
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
-                  colors: [
-                    Colors.white.withOpacity(0.0),
-                    Colors.grey.withOpacity(0.05),
-                  ],
+                  colors: [AppColors.surface.withOpacity(0.0), AppColors.surface.withOpacity(0.03)],
                 ),
               ),
             ),
@@ -753,16 +714,16 @@ class _ActionTile extends StatelessWidget {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
             decoration: BoxDecoration(
-              color: const Color(0xFF9E9E9E).withOpacity(0.9),
+              color: AppColors.onSurfaceFaint.withOpacity(0.95),
               borderRadius: BorderRadius.circular(999),
             ),
             child: Row(
               children: [
-                const Icon(Icons.lock_rounded, size: 14, color: Colors.white),
+                Icon(Icons.lock_rounded, size: 14, color: AppColors.surface),
                 const SizedBox(width: 6),
                 Text(
                   disabledLabel ?? 'Disabled',
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.white),
+                  style: AppText.hintSmall.copyWith(color: AppColors.surface),
                 ),
               ],
             ),
@@ -789,33 +750,33 @@ class _ScheduleTile extends StatelessWidget {
   Color get _dotColor {
     switch (status.toLowerCase()) {
       case 'pending':
-        return const Color(0xFFF9A825);
+        return AppColors.warning;
       case 'confirmed':
-        return const Color(0xFF2E7D32);
+        return AppColors.success;
       default:
-        return Colors.grey;
+        return AppColors.onSurfaceFaint;
     }
   }
 
   Color get _chipBg {
     switch (status.toLowerCase()) {
       case 'pending':
-        return const Color(0xFFFFF4E0);
+        return AppColors.warnBg;
       case 'confirmed':
-        return const Color(0xFFEAF7F0);
+        return AppColors.okBg;
       default:
-        return const Color(0xFFF1F3F6);
+        return AppColors.neuBg;
     }
   }
 
   Color get _chipText {
     switch (status.toLowerCase()) {
       case 'pending':
-        return const Color(0xFF9E6400);
+        return AppColors.warnFg;
       case 'confirmed':
-        return const Color(0xFF1B5E20);
+        return AppColors.okFg;
       default:
-        return Colors.black54;
+        return AppColors.onSurfaceMuted;
     }
   }
 
@@ -825,32 +786,25 @@ class _ScheduleTile extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
       child: Card(
         elevation: 0,
-        color: Colors.white,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        color: AppColors.surface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.xl)),
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              SizedBox(
-                width: 86,
-                child: Text(time, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-              ),
+              SizedBox(width: 86, child: Text(time, style: AppText.tileTitle.copyWith(fontSize: 14))),
               const SizedBox(width: 8),
-              Container(
-                width: 6, height: 6,
-                margin: const EdgeInsets.only(top: 8),
-                decoration: BoxDecoration(color: _dotColor, shape: BoxShape.circle),
-              ),
+              Container(width: 6, height: 6, margin: const EdgeInsets.only(top: 8), decoration: BoxDecoration(color: _dotColor, shape: BoxShape.circle)),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(name, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
+                    Text(name, style: AppText.tileTitle.copyWith(fontSize: 14)),
                     if (subtitle.isNotEmpty) ...[
                       const SizedBox(height: 4),
-                      Text(subtitle, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                      Text(subtitle, style: AppText.tileSubtitle),
                     ],
                   ],
                 ),
@@ -858,8 +812,7 @@ class _ScheduleTile extends StatelessWidget {
               Container(
                 decoration: BoxDecoration(color: _chipBg, borderRadius: BorderRadius.circular(999)),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                child: Text(status.toLowerCase(),
-                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: _chipText)),
+                child: Text(status.toLowerCase(), style: AppText.hintSmall.copyWith(color: _chipText, fontWeight: FontWeight.w600)),
               ),
             ],
           ),
@@ -877,17 +830,15 @@ class _EmptyCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.xl)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
           children: [
-            const Icon(Icons.info_outline, color: Colors.black45),
+            Icon(Icons.info_outline, color: AppColors.onSurfaceFaint),
             const SizedBox(width: 10),
-            Expanded(
-              child: Text(message, style: const TextStyle(color: Colors.black54)),
-            ),
+            Expanded(child: Text(message, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted))),
           ],
         ),
       ),
@@ -899,7 +850,7 @@ class _EmptyCard extends StatelessWidget {
 
 class _InstructorBell extends StatelessWidget {
   final String uid;
-  final String role;       // 'instructor'
+  final String role; // 'instructor'
   final String userStatus; // 'active' | 'pending'
 
   const _InstructorBell({
@@ -924,14 +875,13 @@ class _InstructorBell extends StatelessWidget {
       if (v is DateTime) return v;
       return null;
     }
+
     final now = DateTime.now();
     final scheduledAt = asDt(m['scheduled_at']) ?? asDt(m['created_at']);
-    final expiresAt   = asDt(m['expires_at']);
-    final withinTime  = (scheduledAt == null || !scheduledAt.isAfter(now)) &&
-                        (expiresAt == null   ||  expiresAt.isAfter(now));
+    final expiresAt = asDt(m['expires_at']);
+    final withinTime = (scheduledAt == null || !scheduledAt.isAfter(now)) && (expiresAt == null || expiresAt.isAfter(now));
 
-    final bool segmentHit =
-        S.contains('all') ||
+    final bool segmentHit = S.contains('all') ||
         (S.contains('students') && role == 'student') ||
         (S.contains('instructors') && role == 'instructor') ||
         (S.contains('active') && userStatus == 'active') ||
@@ -944,14 +894,9 @@ class _InstructorBell extends StatelessWidget {
   Widget build(BuildContext context) {
     final fs = FirebaseFirestore.instance;
 
-    final readsStream =
-        fs.collection('users').doc(uid).collection('notif_reads').snapshots();
+    final readsStream = fs.collection('users').doc(uid).collection('notif_reads').snapshots();
 
-    final notifsQuery = fs
-        .collection('notifications')
-        .orderBy('created_at', descending: true)
-        .limit(30)
-        .snapshots();
+    final notifsQuery = fs.collection('notifications').orderBy('created_at', descending: true).limit(30).snapshots();
 
     final anchorKey = GlobalKey();
 
@@ -978,7 +923,7 @@ class _InstructorBell extends StatelessWidget {
               children: [
                 IconButton(
                   key: anchorKey,
-                  icon: const Icon(Icons.notifications_none_rounded),
+                  icon: Icon(Icons.notifications_none_rounded, color: AppColors.onSurface),
                   onPressed: () => _openMenu(context, anchorKey, targeted, readIds),
                 ),
                 if (unreadCount > 0)
@@ -987,14 +932,8 @@ class _InstructorBell extends StatelessWidget {
                     top: 6,
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFD32F2F),
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        unreadCount > 99 ? '99+' : '$unreadCount',
-                        style: const TextStyle(color: Colors.white, fontSize: 10),
-                      ),
+                      decoration: BoxDecoration(color: AppColors.danger, borderRadius: BorderRadius.circular(999)),
+                      child: Text(unreadCount > 99 ? '99+' : '$unreadCount', style: const TextStyle(color: Colors.white, fontSize: 10)),
                     ),
                   ),
               ],
@@ -1005,12 +944,7 @@ class _InstructorBell extends StatelessWidget {
     );
   }
 
-  Future<void> _openMenu(
-    BuildContext context,
-    GlobalKey anchorKey,
-    List<QueryDocumentSnapshot> targeted,
-    Set<String> readIds,
-  ) async {
+  Future<void> _openMenu(BuildContext context, GlobalKey anchorKey, List<QueryDocumentSnapshot> targeted, Set<String> readIds) async {
     final RenderBox? box = anchorKey.currentContext?.findRenderObject() as RenderBox?;
     final RenderBox? overlay = Overlay.of(context, rootOverlay: true).context.findRenderObject() as RenderBox?;
     if (box == null || overlay == null) {
@@ -1036,10 +970,7 @@ class _InstructorBell extends StatelessWidget {
     final Offset topRight = box.localToGlobal(Offset(box.size.width, 0), ancestor: overlay);
     final Offset bottomRight = box.localToGlobal(Offset(box.size.width, box.size.height), ancestor: overlay);
 
-    final RelativeRect position = RelativeRect.fromRect(
-      Rect.fromPoints(topRight, bottomRight),
-      Offset.zero & overlay.size,
-    );
+    final RelativeRect position = RelativeRect.fromRect(Rect.fromPoints(topRight, bottomRight), Offset.zero & overlay.size);
 
     final double menuWidth = math.min(MediaQuery.of(context).size.width * 0.92, 340);
 
@@ -1080,15 +1011,9 @@ class _InstructorBell extends StatelessWidget {
 
   Future<void> _markRead(BuildContext context, String notifId) async {
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('notif_reads')
-          .doc(notifId)
-          .set({'readAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+      await FirebaseFirestore.instance.collection('users').doc(uid).collection('notif_reads').doc(notifId).set({'readAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Failed to mark read: $e')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to mark read: $e')));
     }
   }
 }
@@ -1121,16 +1046,13 @@ class _NotificationsList extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (targeted.isEmpty) {
-      return const SizedBox(
-        height: 120,
-        child: Center(child: Text('No notifications')),
-      );
+      return const SizedBox(height: 120, child: Center(child: Text('No notifications')));
     }
 
     return ListView.separated(
       shrinkWrap: true,
       itemCount: targeted.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
+      separatorBuilder: (_, __) => Divider(color: AppColors.divider),
       itemBuilder: (ctx, i) {
         final d = targeted[i];
         final m = (d.data() as Map).cast<String, dynamic>();
@@ -1148,48 +1070,22 @@ class _NotificationsList extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  isRead ? Icons.notifications_none : Icons.notifications_active,
-                  size: 22,
-                  color: isRead ? Colors.grey : Colors.redAccent,
-                ),
+                Icon(isRead ? Icons.notifications_none : Icons.notifications_active, size: 22, color: isRead ? AppColors.onSurfaceFaint : AppColors.danger),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          )),
+                      Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.tileTitle.copyWith(color: AppColors.onSurface)),
                       const SizedBox(height: 2),
-                      Text(
-                        msg,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface.withOpacity(.75),
-                          fontSize: 12,
-                        ),
-                      ),
+                      Text(msg, maxLines: 2, overflow: TextOverflow.ellipsis, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          Text(whenTxt, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                          Text(whenTxt, style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint)),
                           const Spacer(),
-                          if (url.isNotEmpty)
-                            TextButton(
-                              onPressed: () => onTapItem(d.id, url),
-                              child: const Text('Open'),
-                            ),
-                          if (!isRead)
-                            TextButton(
-                              onPressed: () => onTapItem(d.id, null),
-                              child: const Text('Mark as read'),
-                            ),
+                          if (url.isNotEmpty) TextButton(onPressed: () => onTapItem(d.id, url), child: Text('Open', style: TextStyle(color: AppColors.brand))),
+                          if (!isRead) TextButton(onPressed: () => onTapItem(d.id, null), child: Text('Mark as read', style: TextStyle(color: AppColors.brand))),
                         ],
                       ),
                     ],
@@ -1210,9 +1106,7 @@ String _initials(String name) {
   final parts = name.trim().split(RegExp(r'\s+'));
   if (parts.isEmpty) return 'IN';
   if (parts.length == 1) return parts.first.characters.take(2).toString().toUpperCase();
-  return (parts.first.characters.take(1).toString() +
-          parts.last.characters.take(1).toString())
-      .toUpperCase();
+  return (parts.first.characters.take(1).toString() + parts.last.characters.take(1).toString()).toUpperCase();
 }
 
 String _fmtTime(DateTime dt) {

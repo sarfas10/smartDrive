@@ -1,16 +1,19 @@
 // lib/admin_dashboard.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+// Branding row (keeps app brand look)
 import 'package:smart_drive/reusables/branding.dart';
 
+// Blocks
 import 'users_block.dart';
 import 'materials_block.dart';
 import 'tests_block.dart';
+import 'test_bookings_block.dart'; // NEW - Test Booking Management
 import 'notifications_block.dart';
-
 import 'settings_block.dart';
 import 'slots_block.dart';
-import 'plans_block.dart'; // New import for plans management
+import 'plans_block.dart'; // Plans management
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -40,7 +43,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return Scaffold(
           backgroundColor: kBg,
           drawer: isDesktop ? null : _buildDrawer(),
-          appBar: isDesktop ? null : _buildAppBar(),
+          appBar: isDesktop ? null : _buildAppBar(context),
           body: SafeArea(
             bottom: false,
             child: Row(
@@ -64,9 +67,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  PreferredSizeWidget _buildAppBar() {
+  PreferredSizeWidget _buildAppBar(BuildContext context) {
+    // Use Theme color for primary
+    final primary = Theme.of(context).colorScheme.primary;
     return AppBar(
-      backgroundColor: AppColors.primary,
+      backgroundColor: primary,
       elevation: 2,
       iconTheme: const IconThemeData(color: Colors.white),
       title: const AppBrandingRow(
@@ -112,11 +117,12 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return const MaterialsBlock();
       case 'tests':
         return TestsBlock(onCreatePool: _openCreatePool);
+      case 'test_bookings':
+        return const TestBookingsBlock(); // Test Booking Management
       case 'plans':
-        return const PlansBlock(); // New plans block
+        return const PlansBlock(); // Plans block
       case 'notifications':
         return const NotificationsBlock();
-      
       case 'settings':
         return const SettingsBlock();
       default:
@@ -158,7 +164,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ElevatedButton(
             onPressed: () => _saveTestPool(controllers),
             style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: Theme.of(context).colorScheme.primary,
               foregroundColor: Colors.white,
             ),
             child: const Text('Save'),
@@ -227,9 +233,9 @@ class Sidebar extends StatelessWidget {
     (Icons.event_available_rounded, 'Slots', 'slots'),
     (Icons.menu_book_rounded, 'Materials', 'materials'),
     (Icons.quiz_rounded, 'Tests', 'tests'),
-    (Icons.payment_rounded, 'Plans', 'plans'), // New plans menu item
+    (Icons.book_online_rounded, 'Test Bookings', 'test_bookings'), // NEW
+    (Icons.payment_rounded, 'Plans', 'plans'),
     (Icons.notifications_rounded, 'Notifications', 'notifications'),
-    
     (Icons.settings_rounded, 'Settings', 'settings'),
   ];
 
@@ -304,7 +310,7 @@ class _MenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    const activeColor = AppColors.primary;
+    final activeColor = Theme.of(context).colorScheme.primary;
     const inactiveColor = Colors.white;
 
     return InkWell(
@@ -599,6 +605,8 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -616,14 +624,14 @@ class _StatCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(icon, color: AppColors.primary, size: 20),
+              Icon(icon, color: primary, size: 20),
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
                   color: const Color(0x1A4C008A),
                   borderRadius: BorderRadius.circular(6),
                 ),
-                child: Icon(icon, color: AppColors.primary, size: 14),
+                child: Icon(icon, color: primary, size: 14),
               ),
             ],
           ),

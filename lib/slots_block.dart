@@ -1,9 +1,12 @@
-// slots_block.dart
+// lib/slots_block.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'add_slots.dart';
+
+import 'ui_common.dart';
+import 'package:smart_drive/theme/app_theme.dart';
 
 class SlotsBlock extends StatefulWidget {
   const SlotsBlock({super.key});
@@ -65,7 +68,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
     final ts = media.textScaleFactor.clamp(0.9, 1.2);
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: AppColors.background,
       body: NestedScrollView(
         headerSliverBuilder: (context, inner) => [
           SliverAppBar(
@@ -76,11 +79,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
             backgroundColor: Colors.transparent,
             flexibleSpace: Container(
               decoration: const BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [Color(0xFF6366F1), Color(0xFF8B5CF6)],
-                  begin: Alignment.centerLeft,
-                  end: Alignment.centerRight,
-                ),
+                gradient: AppGradients.brandHero,
                 boxShadow: [
                   BoxShadow(
                     color: Colors.black12,
@@ -92,7 +91,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
             ),
             leading: IconButton(
               icon: Icon(Icons.arrow_back_ios_new,
-                  color: Colors.white, size: _scale(sw, 18, 22, 26)),
+                  color: AppColors.onSurfaceInverse, size: _scale(sw, 18, 22, 26)),
               tooltip: 'Back',
               onPressed: () {
                 if (Navigator.canPop(context)) Navigator.pop(context);
@@ -100,8 +99,8 @@ class _SlotsBlockState extends State<SlotsBlock> {
             ),
             title: Text(
               '🚗 Driving School Slots',
-              style: TextStyle(
-                color: Colors.white,
+              style: AppText.sectionTitle.copyWith(
+                color: AppColors.onSurfaceInverse,
                 fontWeight: FontWeight.w600,
                 fontSize: _scale(sw, 16, 18, 20) * ts,
               ),
@@ -116,17 +115,16 @@ class _SlotsBlockState extends State<SlotsBlock> {
                       MaterialPageRoute(builder: (_) => const AddSlotsPage()),
                     );
                   },
-                  icon: Icon(Icons.add, size: _scale(sw, 14, 16, 18)),
+                  icon: Icon(Icons.add, size: _scale(sw, 14, 16, 18), color: AppColors.onSurfaceInverse),
                   label: Text(
                     'Create Slot',
-                    style: TextStyle(fontSize: _scale(sw, 12, 13, 14) * ts),
+                    style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse, fontSize: _scale(sw, 12, 13, 14) * ts),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white.withOpacity(0.2),
-                    foregroundColor: Colors.white,
-                    side: BorderSide(color: Colors.white.withOpacity(0.3)),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(6)),
+                    backgroundColor: AppColors.onSurfaceInverse.withOpacity(0.12),
+                    foregroundColor: AppColors.onSurfaceInverse,
+                    side: BorderSide(color: AppColors.onSurfaceInverse.withOpacity(0.18)),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                     padding: EdgeInsets.symmetric(
                       horizontal: _scale(sw, 10, 12, 14),
                       vertical: _scale(sw, 6, 8, 10),
@@ -143,7 +141,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
             _buildDateSelector(context),
             Expanded(
               child: Container(
-                color: const Color(0xFFFAFBFC),
+                color: AppColors.surface,
                 child: _buildSlotsContent(context),
               ),
             ),
@@ -173,9 +171,9 @@ class _SlotsBlockState extends State<SlotsBlock> {
 
     return Container(
       padding: EdgeInsets.symmetric(horizontal: barPaddingH, vertical: barPaddingV),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border(bottom: BorderSide(color: AppColors.divider)),
       ),
       child: SizedBox(
         height: barHeight,
@@ -201,9 +199,9 @@ class _SlotsBlockState extends State<SlotsBlock> {
                   maxWidth: _scale(sw, 65, 70, 75),
                 ),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFFEF4444) : const Color(0xFFF8F9FA),
+                  color: isSelected ? AppColors.danger : AppColors.background,
                   border: Border.all(
-                    color: isSelected ? const Color(0xFFEF4444) : const Color(0xFFE5E7EB),
+                    color: isSelected ? AppColors.danger : AppColors.divider,
                   ),
                   borderRadius: BorderRadius.circular(8),
                 ),
@@ -213,27 +211,27 @@ class _SlotsBlockState extends State<SlotsBlock> {
                   children: [
                     Text(
                       DateFormat('EEE').format(date).toUpperCase(),
-                      style: TextStyle(
+                      style: AppText.hintSmall.copyWith(
                         fontSize: dowSize,
                         fontWeight: FontWeight.w500,
-                        color: isSelected ? Colors.white : Colors.black.withOpacity(0.7),
+                        color: isSelected ? AppColors.onSurfaceInverse : AppColors.onSurfaceMuted,
                       ),
                     ),
                     SizedBox(height: _scale(sw, 1, 1, 2)),
                     Text(
                       DateFormat('d').format(date),
-                      style: TextStyle(
+                      style: AppText.tileTitle.copyWith(
                         fontSize: daySize,
                         fontWeight: FontWeight.w600,
-                        color: isSelected ? Colors.white : Colors.black,
+                        color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface,
                       ),
                     ),
                     SizedBox(height: _scale(sw, 1, 1, 2)),
                     Text(
                       DateFormat('MMM').format(date).toUpperCase(),
-                      style: TextStyle(
+                      style: AppText.hintSmall.copyWith(
                         fontSize: monSize,
-                        color: isSelected ? Colors.white : Colors.black.withOpacity(0.7),
+                        color: isSelected ? AppColors.onSurfaceInverse : AppColors.onSurfaceFaint,
                       ),
                     ),
                   ],
@@ -249,22 +247,19 @@ class _SlotsBlockState extends State<SlotsBlock> {
   // ————————————————— Firestore stream + list —————————————————
   Widget _buildSlotsContent(BuildContext context) {
     if (!_roleLoaded) {
-      return const Center(child: CircularProgressIndicator());
+      return Center(child: CircularProgressIndicator(color: context.c.primary));
     }
 
     final ts = Timestamp.fromDate(selectedDate);
 
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('slots')
-          .where('slot_day', isEqualTo: ts)
-          .snapshots(),
+      stream: FirebaseFirestore.instance.collection('slots').where('slot_day', isEqualTo: ts).snapshots(),
       builder: (context, snapshot) {
         if (snapshot.hasError) {
-          return Center(child: Text('Error: ${snapshot.error}'));
+          return Center(child: Text('Error: ${snapshot.error}', style: AppText.tileSubtitle.copyWith(color: AppColors.danger)));
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Center(child: CircularProgressIndicator());
+          return Center(child: CircularProgressIndicator(color: context.c.primary));
         }
 
         final docs = List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? const []);
@@ -290,40 +285,28 @@ class _SlotsBlockState extends State<SlotsBlock> {
         return Container(
           margin: EdgeInsets.all(outerMargin),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: AppColors.surface,
             borderRadius: BorderRadius.circular(8),
-            boxShadow: const [
-              BoxShadow(
-                color: Colors.black12,
-                blurRadius: 3,
-                offset: Offset(0, 1),
-              ),
-            ],
+            boxShadow: AppShadows.card,
           ),
           child: Column(
             children: [
               // Header
               Container(
                 padding: EdgeInsets.all(headerPad),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFF8F9FA),
-                  borderRadius: BorderRadius.only(
-                    topLeft: Radius.circular(8),
-                    topRight: Radius.circular(8),
-                  ),
-                  border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
+                decoration: BoxDecoration(
+                  color: AppColors.background,
+                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+                  border: Border(bottom: BorderSide(color: AppColors.divider)),
                 ),
                 child: Row(
                   children: [
-                    Text('🎯', style: TextStyle(fontSize: _scale(sw, 14, 16, 18))),
+                    Text('🎯', style: AppText.tileTitle.copyWith(fontSize: _scale(sw, 14, 16, 18))),
                     const SizedBox(width: 6),
                     Expanded(
                       child: Text(
                         'Available slots for ${DateFormat('EEEE, d MMM').format(selectedDate)} - Select your preferred time',
-                        style: TextStyle(
-                          fontSize: _scale(sw, 12, 13, 14),
-                          color: const Color(0xFF6B7280),
-                        ),
+                        style: AppText.tileSubtitle.copyWith(fontSize: _scale(sw, 12, 13, 14), color: AppColors.onSurfaceMuted),
                       ),
                     ),
                   ],
@@ -333,9 +316,7 @@ class _SlotsBlockState extends State<SlotsBlock> {
               // Slots
               Expanded(
                 child: ListView(
-                  children: grouped.entries
-                      .map((e) => _buildTimeSlotGroup(context, e.key, e.value))
-                      .toList(),
+                  children: grouped.entries.map((e) => _buildTimeSlotGroup(context, e.key, e.value)).toList(),
                 ),
               ),
             ],
@@ -353,15 +334,15 @@ class _SlotsBlockState extends State<SlotsBlock> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('📅', style: TextStyle(fontSize: _scale(sw, 56, 64, 72), color: Colors.grey)),
+            Text('📅', style: AppText.tileTitle.copyWith(fontSize: _scale(sw, 56, 64, 72), color: AppColors.onSurfaceFaint)),
             const SizedBox(height: 16),
             Text(
               'No slots available for ${DateFormat('EEEE, MMM d').format(selectedDate)}',
-              style: TextStyle(fontSize: _scale(sw, 16, 18, 20), color: Colors.grey),
+              style: AppText.tileTitle.copyWith(fontSize: _scale(sw, 16, 18, 20), color: AppColors.onSurfaceMuted),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
-            const Text('Try selecting a different date', style: TextStyle(color: Colors.grey)),
+            Text('Try selecting a different date', style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
           ],
         ),
       ),
@@ -395,87 +376,64 @@ class _SlotsBlockState extends State<SlotsBlock> {
   }
 
   // ————————————————— Group section —————————————————
-Widget _buildTimeSlotGroup(
-  BuildContext context,
-  String period,
-  List<QueryDocumentSnapshot> slots,
-) {
-  final sw = MediaQuery.of(context).size.width;
-  // final emojiSize = _scale(sw, 14, 16, 18); // (unused; remove if you don't need it)
-  final titleSize = _scale(sw, 13, 14, 16);
-  final groupPad = _scale(sw, 12, 16, 20);
-  final chipGap = _scale(sw, 10, 12, 14);
+  Widget _buildTimeSlotGroup(BuildContext context, String period, List<QueryDocumentSnapshot> slots) {
+    final sw = MediaQuery.of(context).size.width;
+    final titleSize = _scale(sw, 13, 14, 16);
+    final groupPad = _scale(sw, 12, 16, 20);
+    final chipGap = _scale(sw, 10, 12, 14);
 
-  String emoji = '🌅';
-  String timeRange = '';
+    String emoji = '🌅';
+    String timeRange = '';
 
-  switch (period) {
-    case 'Morning':
-      emoji = '🌅';
-      timeRange = '(6:00 AM - 12:00 PM)';
-      break;
-    case 'Afternoon':
-      emoji = '☀️';
-      timeRange = '(12:00 PM - 5:00 PM)';
-      break;
-    case 'Evening':
-      emoji = '🌇';
-      timeRange = '(5:00 PM - 10:00 PM)';
-      break;
-    default:
-      // optional: handle unexpected keys
-      emoji = '🕒';
-      timeRange = '';
-  }
+    switch (period) {
+      case 'Morning':
+        emoji = '🌅';
+        timeRange = '(6:00 AM - 12:00 PM)';
+        break;
+      case 'Afternoon':
+        emoji = '☀️';
+        timeRange = '(12:00 PM - 5:00 PM)';
+        break;
+      case 'Evening':
+        emoji = '🌇';
+        timeRange = '(5:00 PM - 10:00 PM)';
+        break;
+      default:
+        emoji = '🕒';
+        timeRange = '';
+    }
 
-  return Container(
-    padding: EdgeInsets.all(groupPad),
-    decoration: const BoxDecoration(
-      border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6))),
-    ),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          '$emoji $period $timeRange',
-          style: TextStyle(
-            fontSize: titleSize,
-            fontWeight: FontWeight.w600,
-            color: const Color(0xFF374151),
+    return Container(
+      padding: EdgeInsets.all(groupPad),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: AppColors.background)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$emoji $period $timeRange',
+            style: AppText.tileTitle.copyWith(fontSize: titleSize, fontWeight: FontWeight.w600, color: AppColors.slate),
           ),
-        ),
-        const SizedBox(height: 12),
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final columns = _columnsForWidth(constraints.maxWidth);
-            final cardW = _cardWidth(constraints.maxWidth, columns, chipGap);
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              final columns = _columnsForWidth(constraints.maxWidth);
+              final cardW = _cardWidth(constraints.maxWidth, columns, chipGap);
 
-            final slotCards = slots
-                .map((s) => _buildSlotCard(context, s, cardW))
-                .toList();
+              final slotCards = slots.map((s) => _buildSlotCard(context, s, cardW)).toList();
 
-            if (columns == 1) {
-              return Wrap(
-                spacing: 0,
-                runSpacing: chipGap,
-                alignment: WrapAlignment.center,
-                children: slotCards,
-              );
-            }
+              if (columns == 1) {
+                return Wrap(spacing: 0, runSpacing: chipGap, alignment: WrapAlignment.center, children: slotCards);
+              }
 
-            return Wrap(
-              spacing: chipGap,
-              runSpacing: chipGap,
-              alignment: WrapAlignment.start,
-              children: slotCards,
-            );
-          },
-        ),
-      ],
-    ),
-  );
-}
-
+              return Wrap(spacing: chipGap, runSpacing: chipGap, alignment: WrapAlignment.start, children: slotCards);
+            },
+          ),
+        ],
+      ),
+    );
+  }
 
   // ————————————————— Slot card —————————————————
   Widget _buildSlotCard(BuildContext context, QueryDocumentSnapshot slot, double cardWidth) {
@@ -484,11 +442,8 @@ Widget _buildTimeSlotGroup(
     final data = slot.data() as Map<String, dynamic>;
     final slotId = data['slot_id']?.toString() ?? slot.id;
     final vehicleType = data['vehicle_type']?.toString() ?? 'Unknown';
-    final instructorName = data['instructor_name']?.toString() ??
-        (data['instructor_user_id']?.toString() ?? 'Unknown');
-    final seats = (data['seat'] is num)
-        ? (data['seat'] as num).toInt()
-        : int.tryParse('${data['seat']}') ?? 0;
+    final instructorName = data['instructor_name']?.toString() ?? (data['instructor_user_id']?.toString() ?? 'Unknown');
+    final seats = (data['seat'] is num) ? (data['seat'] as num).toInt() : int.tryParse('${data['seat']}') ?? 0;
     final timeString = data['slot_time']?.toString() ?? '';
 
     // Costs
@@ -520,11 +475,8 @@ Widget _buildTimeSlotGroup(
         width: cardWidth,
         padding: EdgeInsets.all(padAll),
         decoration: BoxDecoration(
-          color: isSelected ? const Color(0xFF10B981) : Colors.white,
-          border: Border.all(
-            color: isSelected ? const Color(0xFF10B981) : const Color(0xFFE5E7EB),
-            width: 2,
-          ),
+          color: isSelected ? AppColors.success : AppColors.surface,
+          border: Border.all(color: isSelected ? AppColors.success : AppColors.divider, width: 2),
           borderRadius: BorderRadius.circular(8),
         ),
         child: Stack(
@@ -535,43 +487,43 @@ Widget _buildTimeSlotGroup(
                 Text(
                   _formatTimeRange(timeString),
                   textAlign: TextAlign.center,
-                  style: TextStyle(
+                  style: AppText.tileTitle.copyWith(
                     fontSize: timeSize,
                     fontWeight: FontWeight.w600,
-                    color: isSelected ? Colors.white : Colors.black,
+                    color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface,
                   ),
                 ),
                 SizedBox(height: _scale(sw, 4, 6, 8)),
                 Container(
                   padding: EdgeInsets.symmetric(horizontal: badgePadH, vertical: badgePadV),
                   decoration: BoxDecoration(
-                    color: isSelected ? Colors.white.withOpacity(0.2) : const Color(0xFFEFF6FF),
+                    color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.12) : AppColors.brand.withOpacity(0.06),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     vehicleType,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
+                    style: AppText.hintSmall.copyWith(
                       fontSize: vehSize,
                       fontWeight: FontWeight.w500,
-                      color: isSelected ? Colors.white : const Color(0xFF1D4ED8),
+                      color: isSelected ? AppColors.onSurfaceInverse : AppColors.brand,
                     ),
                   ),
                 ),
                 SizedBox(height: _scale(sw, 4, 6, 8)),
                 Text(
                   '$seats seats',
-                  style: TextStyle(
+                  style: AppText.tileSubtitle.copyWith(
                     fontSize: seatsSize,
-                    color: isSelected ? Colors.white.withOpacity(0.9) : Colors.black.withOpacity(0.8),
+                    color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.9) : AppColors.onSurface,
                   ),
                 ),
                 SizedBox(height: _scale(sw, 4, 6, 8)),
                 Text(
                   instructorName.length > 22 ? '${instructorName.substring(0, 22)}…' : instructorName,
-                  style: TextStyle(
+                  style: AppText.hintSmall.copyWith(
                     fontSize: instSize,
-                    color: isSelected ? Colors.white.withOpacity(0.9) : const Color(0xFF6B7280),
+                    color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.9) : AppColors.onSurfaceFaint,
                   ),
                   textAlign: TextAlign.center,
                 ),
@@ -581,10 +533,8 @@ Widget _buildTimeSlotGroup(
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
-                    color: isSelected ? Colors.white.withOpacity(0.12) : const Color(0xFFFAFAFA),
-                    border: Border.all(
-                      color: isSelected ? Colors.white.withOpacity(0.25) : const Color(0xFFE5E7EB),
-                    ),
+                    color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.12) : AppColors.background,
+                    border: Border.all(color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.25) : AppColors.divider),
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Column(
@@ -595,19 +545,11 @@ Widget _buildTimeSlotGroup(
                         children: [
                           Text(
                             'Vehicle Cost',
-                            style: TextStyle(
-                              fontSize: moneySize,
-                              fontWeight: FontWeight.w500,
-                              color: isSelected ? Colors.white.withOpacity(0.95) : const Color(0xFF374151),
-                            ),
+                            style: AppText.tileSubtitle.copyWith(fontSize: moneySize, fontWeight: FontWeight.w500, color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.95) : AppColors.slate),
                           ),
                           Text(
                             _formatCurrency(vehicleCost),
-                            style: TextStyle(
-                              fontSize: moneySize,
-                              fontWeight: FontWeight.w600,
-                              color: isSelected ? Colors.white : const Color(0xFF111827),
-                            ),
+                            style: AppText.tileTitle.copyWith(fontSize: moneySize, fontWeight: FontWeight.w600, color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface),
                           ),
                         ],
                       ),
@@ -618,32 +560,20 @@ Widget _buildTimeSlotGroup(
                         children: [
                           Text(
                             'Additional Cost',
-                            style: TextStyle(
-                              fontSize: moneySize,
-                              fontWeight: FontWeight.w500,
-                              color: isSelected ? Colors.white.withOpacity(0.95) : const Color(0xFF374151),
-                            ),
+                            style: AppText.tileSubtitle.copyWith(fontSize: moneySize, fontWeight: FontWeight.w500, color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.95) : AppColors.slate),
                           ),
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               Text(
                                 _formatCurrency(additionalCost),
-                                style: TextStyle(
-                                  fontSize: moneySize,
-                                  fontWeight: FontWeight.w600,
-                                  color: isSelected ? Colors.white : const Color(0xFF111827),
-                                ),
+                                style: AppText.tileTitle.copyWith(fontSize: moneySize, fontWeight: FontWeight.w600, color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface),
                               ),
                               if (isAdmin) ...[
                                 const SizedBox(width: 6),
                                 InkWell(
                                   onTap: () => _editAdditionalCost(slot.id, additionalCost),
-                                  child: Icon(
-                                    Icons.edit,
-                                    size: 16,
-                                    color: isSelected ? Colors.white : const Color(0xFF1F2937),
-                                  ),
+                                  child: Icon(Icons.edit, size: 16, color: isSelected ? AppColors.onSurfaceInverse : AppColors.slate),
                                 ),
                               ],
                             ],
@@ -657,9 +587,9 @@ Widget _buildTimeSlotGroup(
                 SizedBox(height: _scale(sw, 2, 4, 6)),
                 Text(
                   'Available',
-                  style: TextStyle(
+                  style: AppText.tileSubtitle.copyWith(
                     fontSize: availSize,
-                    color: isSelected ? Colors.white.withOpacity(0.95) : const Color(0xFF10B981),
+                    color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.95) : AppColors.success,
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -676,10 +606,10 @@ Widget _buildTimeSlotGroup(
                   width: deleteBtn,
                   height: deleteBtn,
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFEE2E2),
+                    color: AppColors.errBg,
                     borderRadius: BorderRadius.circular(4),
                   ),
-                  child: Icon(Icons.delete, size: deleteIcon, color: const Color(0xFFDC2626)),
+                  child: Icon(Icons.delete, size: deleteIcon, color: AppColors.danger),
                 ),
               ),
             ),
@@ -698,34 +628,35 @@ Widget _buildTimeSlotGroup(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Edit Additional Cost'),
+        title: Text('Edit Additional Cost', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text('Enter amount (INR):'),
-            ),
+            Align(alignment: Alignment.centerLeft, child: Text('Enter amount (INR):', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface))),
             const SizedBox(height: 8),
             TextField(
               controller: ctrl,
               keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
+              decoration: InputDecoration(
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
                 hintText: 'e.g. 250',
+                hintStyle: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
+                filled: true,
+                fillColor: AppColors.surface,
               ),
+              style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary))),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF6366F1),
-              foregroundColor: Colors.white,
+              backgroundColor: context.c.primary,
+              foregroundColor: context.c.onPrimary,
             ),
-            child: const Text('Save'),
+            child: Text('Save', style: AppText.tileTitle.copyWith(color: context.c.onPrimary)),
           ),
         ],
       ),
@@ -737,7 +668,7 @@ Widget _buildTimeSlotGroup(
     if (newVal == null) {
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Invalid amount')),
+          SnackBar(content: Text('Invalid amount', style: AppText.tileSubtitle.copyWith(color: AppColors.danger))),
         );
       }
       return;
@@ -750,14 +681,12 @@ Widget _buildTimeSlotGroup(
       });
       if (context.mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Additional cost updated')),
+          SnackBar(content: Text('Additional cost updated', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface))),
         );
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e', style: AppText.tileSubtitle.copyWith(color: AppColors.danger))));
       }
     }
   }
@@ -771,17 +700,14 @@ Widget _buildTimeSlotGroup(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Delete Slot'),
-        content: Text('Are you sure you want to delete slot $slotId?'),
+        title: Text('Delete Slot', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
+        content: Text('Are you sure you want to delete slot $slotId?', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: const Text('Cancel')),
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary))),
           ElevatedButton(
             onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
-            ),
-            child: const Text('Delete'),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger, foregroundColor: AppColors.onSurfaceInverse),
+            child: Text('Delete', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
           ),
         ],
       ),
@@ -792,13 +718,13 @@ Widget _buildTimeSlotGroup(
         await slot.reference.delete();
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Slot $slotId deleted successfully')),
+            SnackBar(content: Text('Slot $slotId deleted successfully', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface))),
           );
         }
       } catch (e) {
         if (context.mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error deleting slot: $e')),
+            SnackBar(content: Text('Error deleting slot: $e', style: AppText.tileSubtitle.copyWith(color: AppColors.danger))),
           );
         }
       }
@@ -859,11 +785,11 @@ Widget _buildTimeSlotGroup(
       await deleteInBatches(toDeleteToday);
 
       if (context.mounted && isAdmin) {
-       debugPrint('Expired slots purged');
+        debugPrint('Expired slots purged');
       }
     } catch (e) {
       if (context.mounted && isAdmin) {
-       debugPrint('Purge error: $e');
+        debugPrint('Purge error: $e');
       }
     }
   }

@@ -3,8 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:flutter/material.dart';
-
+import 'theme/app_theme.dart';
 
 class AttendencePage extends StatelessWidget {
   const AttendencePage({super.key});
@@ -12,11 +11,11 @@ class AttendencePage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Mark Attendance'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black,
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.onSurface,
         elevation: 0,
       ),
       body: const SafeArea(child: AttendanceBlock()),
@@ -24,8 +23,6 @@ class AttendencePage extends StatelessWidget {
   }
 }
 
-
-const _kBrand = Color(0xFF4C63D2);
 const _kGap = 12.0;
 
 class AttendanceBlock extends StatefulWidget {
@@ -63,6 +60,12 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
       initialDate: _selectedDate,
       firstDate: DateTime(2023),
       lastDate: DateTime(2030),
+      builder: (context, child) => Theme(
+        data: Theme.of(context).copyWith(
+          colorScheme: Theme.of(context).colorScheme.copyWith(primary: AppColors.brand),
+        ),
+        child: child ?? const SizedBox.shrink(),
+      ),
     );
     if (picked != null) {
       setState(() {
@@ -158,7 +161,7 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
     required String bookingId,
     required String userId,
     required DateTime slotDay, // day of slot
-    required String slotTime,  // time of slot
+    required String slotTime, // time of slot
     required String status,
   }) async {
     final dayAtMidnight = _atMidnight(slotDay);
@@ -234,11 +237,12 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
             controller: _searchCtrl,
             textInputAction: TextInputAction.search,
             decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.search),
+              prefixIcon: Icon(Icons.search, color: AppColors.onSurfaceMuted),
               hintText: 'Search student / phone / booking id',
               border: const OutlineInputBorder(),
               isDense: true,
               filled: true,
+              fillColor: AppColors.surface,
               suffixIcon: (_searchCtrl.text.isEmpty)
                   ? null
                   : IconButton(
@@ -247,7 +251,7 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
                         _searchCtrl.clear();
                         setState(() {});
                       },
-                      icon: const Icon(Icons.close),
+                      icon: Icon(Icons.close, color: AppColors.onSurfaceMuted),
                     ),
             ),
             onChanged: (_) {
@@ -256,6 +260,7 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
                 if (mounted) setState(() {});
               });
             },
+            style: TextStyle(color: AppColors.onSurface),
           ),
         ),
 
@@ -268,23 +273,23 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
               IconButton(
                 tooltip: 'Pick date',
                 onPressed: () => _pickDate(context),
-                icon: const Icon(Icons.calendar_today),
+                icon: Icon(Icons.calendar_today, color: AppColors.onSurface),
               ),
               PopupMenuButton<String>(
                 tooltip: 'Filter',
-                icon: const Icon(Icons.filter_list),
+                icon: Icon(Icons.filter_list, color: AppColors.onSurface),
                 initialValue: _statusFilter,
                 onSelected: (v) => setState(() => _statusFilter = v),
-                itemBuilder: (ctx) => const [
-                  PopupMenuItem(value: 'all', child: Text('All')),
-                  PopupMenuItem(value: 'present', child: Text('Present')),
-                  PopupMenuItem(value: 'absent', child: Text('Absent')),
+                itemBuilder: (ctx) => [
+                  PopupMenuItem(value: 'all', child: Text('All', style: TextStyle(color: AppColors.onSurface))),
+                  PopupMenuItem(value: 'present', child: Text('Present', style: TextStyle(color: AppColors.onSurface))),
+                  PopupMenuItem(value: 'absent', child: Text('Absent', style: TextStyle(color: AppColors.onSurface))),
                 ],
               ),
             ],
           ),
         ),
-        const Divider(height: 1),
+        Divider(height: 1, color: AppColors.divider),
 
         // ── Body ────────────────────────────────────────────
         Expanded(
@@ -341,19 +346,6 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
                       }
                     }
 
-                    // ── Metrics row ───────────────────────────────────────
-                    final metrics = Padding(
-                      padding: const EdgeInsets.fromLTRB(4, 0, 4, 12),
-                      child: SingleChildScrollView(
-                        scrollDirection: Axis.horizontal,
-                        child: Row(
-                          children: const [
-                            _MetricTile(header: 'Present', value: '', color: Colors.green), // placeholders
-                          ],
-                        ),
-                      ),
-                    );
-
                     // Build rows
                     final rows = <List<Widget>>[];
                     for (final s in booked) {
@@ -380,7 +372,7 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
                         // Slot (time + instructor)
                         Text(
                           [slotTime, if (instructorName.isNotEmpty) '· $instructorName'].join(' '),
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.onSurface),
                           overflow: TextOverflow.ellipsis,
                         ),
 
@@ -392,7 +384,7 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
                             Expanded(
                               child: Text(
                                 _displayUser(user),
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: AppColors.onSurface),
                                 overflow: TextOverflow.ellipsis,
                               ),
                             ),
@@ -402,14 +394,14 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
                         // Booking ID
                         Text(
                           bookingId.isEmpty ? '-' : bookingId,
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.onSurface),
                           overflow: TextOverflow.ellipsis,
                         ),
 
                         // Date
                         Text(
                           DateFormat('dd MMM yyyy').format(date),
-                          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.onSurface),
                         ),
 
                         // Status chip
@@ -427,7 +419,7 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
                           children: [
                             IconButton(
                               tooltip: 'Mark Present',
-                              icon: const Icon(Icons.check_circle),
+                              icon: Icon(Icons.check_circle, color: AppColors.success),
                               onPressed: (bookingId.isEmpty || userId.isEmpty || status == 'present')
                                   ? null
                                   : () => _setAttendance(
@@ -440,7 +432,7 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
                             ),
                             IconButton(
                               tooltip: 'Mark Absent',
-                              icon: const Icon(Icons.cancel),
+                              icon: Icon(Icons.cancel, color: AppColors.danger),
                               onPressed: (bookingId.isEmpty || userId.isEmpty || status == 'absent')
                                   ? null
                                   : () => _setAttendance(
@@ -459,14 +451,13 @@ class _AttendanceBlockState extends State<AttendanceBlock> {
                     // Update metric values now that counts are known
                     final metricTiles = Row(
                       children: [
-                        _MetricTile(header: 'Present', value: present.toString(), color: Colors.green),
+                        _MetricTile(header: 'Present', value: present.toString(), color: AppColors.success),
                         const SizedBox(width: 10),
-                        _MetricTile(header: 'Absent', value: absent.toString(), color: Colors.red),
+                        _MetricTile(header: 'Absent', value: absent.toString(), color: AppColors.danger),
                         const SizedBox(width: 10),
-                        _MetricTile(header: 'Unmarked', value: unmarked.toString(), color: Colors.orange),
+                        _MetricTile(header: 'Unmarked', value: unmarked.toString(), color: AppColors.warning),
                         const SizedBox(width: 10),
-                        const _MetricTile(header: 'Total', value: '', color: _kBrand),
-                        _MetricTile(header: 'Total', value: booked.length.toString(), color: _kBrand),
+                        _MetricTile(header: 'Total', value: booked.length.toString(), color: AppColors.brand),
                       ],
                     );
 
@@ -519,12 +510,7 @@ class TableHeader extends StatelessWidget {
         children: [
           Text(
             title,
-            style: const TextStyle(
-              fontSize: 14,
-              letterSpacing: 1.1,
-              fontWeight: FontWeight.w800,
-              color: Colors.black87,
-            ),
+            style: AppText.tileTitle.copyWith(letterSpacing: 1.1, fontWeight: FontWeight.w800, color: AppColors.onSurface),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -533,8 +519,8 @@ class TableHeader extends StatelessWidget {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    _kBrand.withOpacity(0.45),
-                    _kBrand.withOpacity(0.10),
+                    AppColors.brand.withOpacity(0.45),
+                    AppColors.brand.withOpacity(0.10),
                     Colors.transparent
                   ],
                 ),
@@ -555,11 +541,11 @@ class StatusBadge extends StatelessWidget {
   Color get _base {
     switch (type) {
       case 'approved':
-        return Colors.green;
+        return AppColors.success;
       case 'rejected':
-        return Colors.red;
+        return AppColors.danger;
       default:
-        return _kBrand;
+        return AppColors.brand;
     }
   }
 
@@ -609,10 +595,10 @@ class DataTableWrap extends StatelessWidget {
 
     final header = Container(
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
+        color: AppColors.neuBg,
         border: Border(
-          top: BorderSide(color: Colors.grey.shade300),
-          bottom: BorderSide(color: Colors.grey.shade300),
+          top: BorderSide(color: AppColors.divider),
+          bottom: BorderSide(color: AppColors.divider),
         ),
       ),
       child: Row(
@@ -623,7 +609,7 @@ class DataTableWrap extends StatelessWidget {
               columns[i],
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800),
+              style: AppText.tileTitle.copyWith(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.onSurface),
             ),
           );
         }),
@@ -633,7 +619,7 @@ class DataTableWrap extends StatelessWidget {
     final body = Column(
       children: List.generate(rows.length, (rIdx) {
         final row = rows[rIdx];
-        final bg = rIdx % 2 == 0 ? Colors.white : Colors.grey.shade50;
+        final bg = rIdx % 2 == 0 ? AppColors.surface : AppColors.neuBg;
         return Container(
           color: bg,
           child: Row(
@@ -642,7 +628,7 @@ class DataTableWrap extends StatelessWidget {
               return _Cell(
                 width: widths[cIdx],
                 child: DefaultTextStyle.merge(
-                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+                  style: AppText.tileTitle.copyWith(fontSize: 15, fontWeight: FontWeight.w600, color: AppColors.onSurface),
                   child: row[cIdx],
                 ),
               );
@@ -656,7 +642,7 @@ class DataTableWrap extends StatelessWidget {
       borderRadius: BorderRadius.circular(12),
       child: DecoratedBox(
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade300),
+          border: Border.all(color: AppColors.divider),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
@@ -708,9 +694,9 @@ class _MetricTile extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(header, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
+          Text(header, style: AppText.hintSmall.copyWith(fontSize: 12, fontWeight: FontWeight.w600, color: color)),
           const SizedBox(height: 4),
-          Text(value, style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: color)),
+          Text(value, style: AppText.tileTitle.copyWith(fontSize: 20, fontWeight: FontWeight.w800, color: color)),
         ],
       ),
     );
@@ -733,8 +719,8 @@ class _Avatar extends StatelessWidget {
     final label = name.trim().isEmpty ? '?' : _initials(name);
     return CircleAvatar(
       radius: 12,
-      backgroundColor: _kBrand.withOpacity(0.12),
-      child: Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _kBrand)),
+      backgroundColor: AppColors.brand.withOpacity(0.12),
+      child: Text(label, style: AppText.tileTitle.copyWith(fontSize: 12, fontWeight: FontWeight.bold, color: AppColors.brand)),
     );
   }
 }
@@ -744,10 +730,10 @@ class _Loading extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Center(
-      child: Column(mainAxisSize: MainAxisSize.min, children: const [
-        CircularProgressIndicator(),
-        SizedBox(height: 12),
-        Text('Loading…'),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        CircularProgressIndicator(color: AppColors.brand),
+        const SizedBox(height: 12),
+        Text('Loading…', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
       ]),
     );
   }
@@ -763,9 +749,9 @@ class _EmptyState extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(24),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          Icon(icon, size: 40, color: Colors.grey.shade500),
+          Icon(icon, size: 40, color: AppColors.onSurfaceMuted),
           const SizedBox(height: 12),
-          for (final l in lines) Text(l, style: TextStyle(color: Colors.grey.shade700)),
+          for (final l in lines) Text(l, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
         ]),
       ),
     );

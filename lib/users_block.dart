@@ -1,8 +1,11 @@
-// users_block.dart
+// lib/admin/users_block.dart
 import 'dart:async';
 import 'dart:ui' show FontFeature;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+
+// Theme
+import 'package:smart_drive/theme/app_theme.dart';
 
 // 👉 Import your external details pages
 import 'student_details.dart' as details;
@@ -64,7 +67,7 @@ class _UsersBlockState extends State<UsersBlock> {
             onRoleChanged: (v) => setState(() => _roleFilter = v ?? 'all'),
             onStatusChanged: (v) => setState(() => _statusFilter = v ?? 'all'),
           ),
-          const Divider(height: 1),
+          const Divider(height: 1, color: AppColors.divider),
           Expanded(
             child: _TableTheme(
               child: Padding(
@@ -151,7 +154,7 @@ class _UsersBody extends StatelessWidget {
           return Center(
             child: _InfoCard(
               icon: Icons.error_outline,
-              iconColor: Colors.red,
+              iconColor: AppColors.danger,
               title: 'Error loading users',
               subtitle: snapshot.error.toString(),
               ctaText: 'Retry',
@@ -183,7 +186,7 @@ class _UsersBody extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
             child: Text(
               '$shown of $total users',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+              style: const TextStyle(color: AppColors.onSurfaceMuted, fontSize: 12),
             ),
           ),
         );
@@ -229,6 +232,7 @@ class _UsersDataTable extends StatelessWidget {
                 margin: EdgeInsets.zero,
                 elevation: 0,
                 clipBehavior: Clip.antiAlias,
+                color: AppColors.surface,
                 child: DataTable(
                   showCheckboxColumn: false,
                   dividerThickness: 0.6,
@@ -257,17 +261,12 @@ class _UsersDataTable extends StatelessWidget {
                     return DataRow(
                       color: WidgetStateProperty.resolveWith((states) {
                         if (states.contains(WidgetState.hovered)) {
-                          return Theme.of(context).hoverColor.withOpacity(0.35);
+                          return AppColors.brand.withOpacity(0.08);
                         }
+                        // subtle zebra stripe on odd rows
                         return i.isEven
-                            ? Theme.of(context)
-                                .colorScheme
-                                .surface
-                                .withOpacity(0.0)
-                            : Theme.of(context)
-                                .colorScheme
-                                .surfaceContainerHighest
-                                .withOpacity(0.14);
+                            ? Colors.transparent
+                            : AppColors.onSurface.withOpacity(0.02);
                       }),
                       onSelectChanged: (_) => _openDetails(context, role, uid),
                       cells: [
@@ -278,11 +277,13 @@ class _UsersDataTable extends StatelessWidget {
                               children: [
                                 CircleAvatar(
                                   radius: 12,
+                                  backgroundColor: AppColors.brand.withOpacity(0.12),
                                   child: Text(
                                     name.isNotEmpty
                                         ? name.substring(0, 1).toUpperCase()
                                         : '?',
                                     style: const TextStyle(
+                                      color: AppColors.brand,
                                       fontSize: 12,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -294,6 +295,9 @@ class _UsersDataTable extends StatelessWidget {
                                     name,
                                     overflow: TextOverflow.ellipsis,
                                     maxLines: 1,
+                                    style: const TextStyle(
+                                      color: AppColors.onSurface,
+                                    ),
                                   ),
                                 ),
                               ],
@@ -308,6 +312,7 @@ class _UsersDataTable extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               maxLines: 1,
                               style: const TextStyle(
+                                color: AppColors.onSurfaceMuted,
                                 fontFeatures: [FontFeature.tabularFigures()],
                               ),
                             ),
@@ -354,17 +359,21 @@ class _UsersListMobile extends StatelessWidget {
 
         return Card(
           elevation: 0,
+          color: AppColors.surface,
           child: ListTile(
             onTap: () => _openDetails(context, role, uid),
             leading: CircleAvatar(
+              backgroundColor: AppColors.brand.withOpacity(0.12),
               child: Text(
                 name.isNotEmpty ? name.substring(0, 1).toUpperCase() : '?',
+                style: const TextStyle(color: AppColors.brand),
               ),
             ),
             title: Text(
               name,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: AppColors.onSurface),
             ),
             subtitle: Padding(
               padding: const EdgeInsets.only(top: 4),
@@ -376,10 +385,16 @@ class _UsersListMobile extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
+                      color: AppColors.onSurfaceMuted,
                       fontFeatures: [FontFeature.tabularFigures()],
                     ),
                   ),
                   const SizedBox(height: 6),
+                  Row(
+                    children: const [
+                      // Proportional spacing handled by Row
+                    ],
+                  ),
                   Row(
                     children: [
                       _RoleChip(role: role),
@@ -390,7 +405,7 @@ class _UsersListMobile extends StatelessWidget {
                 ],
               ),
             ),
-            trailing: const Icon(Icons.chevron_right),
+            trailing: const Icon(Icons.chevron_right, color: AppColors.onSurfaceFaint),
           ),
         );
       },
@@ -455,16 +470,12 @@ class _FiltersBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     final width = MediaQuery.sizeOf(context).width;
     final isUltraNarrow = width < 420;   // phones portrait
     final isNarrow = width < 560;        // small devices
 
     return Container(
-      color: isDark
-          ? theme.colorScheme.surface
-          : theme.colorScheme.surfaceContainerHighest.withOpacity(0.25),
+      color: AppColors.surface,
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -478,20 +489,22 @@ class _FiltersBar extends StatelessWidget {
                   onChanged: (_) => onSearchChanged(),
                   decoration: InputDecoration(
                     isDense: true,
-                    prefixIcon: const Icon(Icons.search, size: 20),
+                    prefixIcon: const Icon(Icons.search, size: 20, color: AppColors.onSurfaceFaint),
                     hintText: 'Search by name, email, phone…',
+                    hintStyle: const TextStyle(color: AppColors.onSurfaceFaint),
                     suffixIcon: controller.text.isEmpty
                         ? null
                         : IconButton(
                             tooltip: 'Clear',
-                            icon: const Icon(Icons.close),
+                            icon: const Icon(Icons.close, color: AppColors.onSurfaceFaint),
                             onPressed: () {
                               controller.clear();
                               onSearchChanged();
                             },
                           ),
-                    border:
-                        OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.l),
+                    ),
                     contentPadding:
                         const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   ),
@@ -502,9 +515,10 @@ class _FiltersBar extends StatelessWidget {
                 message: compact ? 'Comfortable rows' : 'Compact rows',
                 child: IconButton(
                   onPressed: onCompactToggle,
-                  icon: Icon(compact
-                      ? Icons.format_line_spacing
-                      : Icons.density_medium),
+                  icon: Icon(
+                    compact ? Icons.format_line_spacing : Icons.density_medium,
+                    color: AppColors.onSurface,
+                  ),
                 ),
               ),
               if (!isNarrow) ...[
@@ -513,8 +527,8 @@ class _FiltersBar extends StatelessWidget {
                   message: 'Reset filters',
                   child: TextButton.icon(
                     onPressed: onReset,
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Reset'),
+                    icon: const Icon(Icons.refresh, color: AppColors.onSurface),
+                    label: const Text('Reset', style: TextStyle(color: AppColors.onSurface)),
                   ),
                 ),
               ],
@@ -542,8 +556,9 @@ class _FiltersBar extends StatelessWidget {
                     isDense: true,
                     contentPadding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    border:
-                        OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.m),
+                    ),
                   ),
                   items: const [
                     DropdownMenuItem(value: 'all', child: Text('All')),
@@ -566,8 +581,9 @@ class _FiltersBar extends StatelessWidget {
                     isDense: true,
                     contentPadding:
                         const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                    border:
-                        OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.m),
+                    ),
                   ),
                   items: const [
                     DropdownMenuItem(value: 'all', child: Text('All')),
@@ -582,8 +598,8 @@ class _FiltersBar extends StatelessWidget {
               if (isNarrow)
                 OutlinedButton.icon(
                   onPressed: onReset,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Reset'),
+                  icon: const Icon(Icons.refresh, color: AppColors.onSurface),
+                  label: const Text('Reset', style: TextStyle(color: AppColors.onSurface)),
                 ),
             ],
           ),
@@ -602,16 +618,16 @@ class _TableTheme extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     return DataTableTheme(
       data: DataTableThemeData(
-        headingTextStyle: theme.textTheme.titleSmall?.copyWith(
+        headingTextStyle: const TextStyle(
           fontWeight: FontWeight.w700,
-          color: theme.colorScheme.onSurface,
+          color: AppColors.onSurface,
         ),
-        headingRowColor:
-            WidgetStatePropertyAll(theme.colorScheme.surfaceContainerHighest.withOpacity(0.4)),
-        dataTextStyle: theme.textTheme.bodyMedium,
+        headingRowColor: MaterialStatePropertyAll(
+          AppColors.brand.withOpacity(0.08),
+        ),
+        dataTextStyle: const TextStyle(color: AppColors.onSurface),
         horizontalMargin: 16,
       ),
       child: child,
@@ -626,9 +642,9 @@ class _HeaderLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text(text),
+        Text(text, style: const TextStyle(color: AppColors.onSurface)),
         const SizedBox(width: 6),
-        Icon(Icons.swap_vert_rounded, size: 16, color: Colors.grey.shade500),
+        const Icon(Icons.swap_vert_rounded, size: 16, color: AppColors.onSurfaceFaint),
       ],
     );
   }
@@ -642,9 +658,9 @@ class _StatusLegend extends StatelessWidget {
       spacing: 6,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: const [
-        _LegendDot(color: Colors.green, label: 'Active'),
-        _LegendDot(color: Colors.orange, label: 'Pending'),
-        _LegendDot(color: Colors.red, label: 'Blocked'),
+        _LegendDot(color: AppColors.success, label: 'Active'),
+        _LegendDot(color: AppColors.warning, label: 'Pending'),
+        _LegendDot(color: AppColors.danger,  label: 'Blocked'),
       ],
     );
   }
@@ -661,7 +677,7 @@ class _LegendDot extends StatelessWidget {
       children: [
         Container(width: 10, height: 10, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
         const SizedBox(width: 6),
-        Text(label, style: TextStyle(color: Colors.grey.shade700)),
+        Text(label, style: const TextStyle(color: AppColors.onSurfaceMuted)),
       ],
     );
   }
@@ -688,19 +704,20 @@ class _InfoCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       margin: const EdgeInsets.all(16),
+      color: AppColors.surface,
       child: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           Icon(icon, size: 42, color: iconColor),
           const SizedBox(height: 12),
-          Text(title, style: Theme.of(context).textTheme.titleMedium),
+          Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppColors.onSurface)),
           if (subtitle != null) ...[
             const SizedBox(height: 6),
-            Text(subtitle!, textAlign: TextAlign.center, style: TextStyle(color: Colors.grey.shade700)),
+            Text(subtitle!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.onSurfaceMuted)),
           ],
           if (ctaText != null && onTap != null) ...[
             const SizedBox(height: 12),
-            OutlinedButton(onPressed: onTap, child: Text(ctaText!)),
+            OutlinedButton(onPressed: onTap, child: Text(ctaText!, style: const TextStyle(color: AppColors.onSurface))),
           ],
         ]),
       ),
@@ -724,7 +741,7 @@ class _EmptyState extends StatelessWidget {
     return Center(
       child: _InfoCard(
         icon: Icons.inbox_outlined,
-        iconColor: Colors.grey.shade500,
+        iconColor: AppColors.onSurfaceFaint,
         title: title,
         subtitle: subtitle,
         ctaText: 'Clear filters',
@@ -742,12 +759,12 @@ class _RoleChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final r = role.toLowerCase();
     final isStudent = r == 'student';
-    final color = isStudent ? Colors.blue : Colors.deepPurple;
+    final color = isStudent ? AppColors.info : AppColors.purple;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
+        color: color.withOpacity(0.10),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: color.withOpacity(0.25)),
       ),
@@ -777,18 +794,18 @@ class _StatusChip extends StatelessWidget {
     IconData icon;
     switch (s) {
       case 'active':
-        c = Colors.green; icon = Icons.check_circle; break;
+        c = AppColors.success; icon = Icons.check_circle; break;
       case 'pending':
-        c = Colors.orange; icon = Icons.hourglass_bottom; break;
+        c = AppColors.warning; icon = Icons.hourglass_bottom; break;
       case 'blocked':
-        c = Colors.red; icon = Icons.block; break;
+        c = AppColors.danger; icon = Icons.block; break;
       default:
-        c = Colors.grey; icon = Icons.help_outline;
+        c = AppColors.onSurfaceMuted; icon = Icons.help_outline;
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
       decoration: BoxDecoration(
-        color: c.withOpacity(0.08),
+        color: c.withOpacity(0.10),
         borderRadius: BorderRadius.circular(999),
         border: Border.all(color: c.withOpacity(0.25)),
       ),

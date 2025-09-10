@@ -1,9 +1,10 @@
-// mock_tests_list_page.dart
+// lib/mock_tests_list_page.dart
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'attend_test_page.dart';
 
-const kBrand = Color(0xFF4c63d2);
+// Import your design tokens & theme helpers — adjust the path if needed.
+import 'theme/app_theme.dart';
 
 class MockTestsListPage extends StatelessWidget {
   /// Optionally pass the currently-logged in user/student id (to forward to Attend page)
@@ -21,11 +22,12 @@ class MockTestsListPage extends StatelessWidget {
     final isCompact = MediaQuery.of(context).size.width < 420;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
+      backgroundColor: context.c.background,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: kBrand,
-        title: const Text('Available Mock Tests'),
+        backgroundColor: AppColors.brand,
+        title: Text('Available Mock Tests', style: AppText.sectionTitle.copyWith(color: AppColors.onSurfaceInverse)),
+        foregroundColor: AppColors.onSurfaceInverse,
       ),
       body: SafeArea(
         child: StreamBuilder<QuerySnapshot>(
@@ -70,16 +72,10 @@ class MockTestsListPage extends StatelessWidget {
 
                 return Container(
                   decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.black12.withOpacity(.06)),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(.04),
-                        blurRadius: 10,
-                        offset: const Offset(0, 6),
-                      ),
-                    ],
+                    color: context.c.surface,
+                    borderRadius: BorderRadius.circular(AppRadii.l),
+                    border: Border.all(color: AppColors.divider),
+                    boxShadow: AppShadows.card,
                   ),
                   child: Padding(
                     padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
@@ -93,10 +89,11 @@ class MockTestsListPage extends StatelessWidget {
                             Expanded(
                               child: Text(
                                 title.isEmpty ? '-' : title,
-                                style: const TextStyle(
-                                  fontSize: 16,
+                                style: context.t.titleMedium?.copyWith(
                                   fontWeight: FontWeight.w800,
                                   height: 1.1,
+                                  color: context.c.onSurface,
+                                  fontSize: 16,
                                 ),
                                 maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
@@ -105,10 +102,10 @@ class MockTestsListPage extends StatelessWidget {
                             const SizedBox(width: 10),
                             FilledButton.icon(
                               style: FilledButton.styleFrom(
-                                backgroundColor: kBrand,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 12, vertical: 10),
+                                backgroundColor: AppColors.brand,
+                                foregroundColor: AppColors.onSurfaceInverse,
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
                               ),
                               onPressed: () {
                                 Navigator.of(context).push(
@@ -130,8 +127,8 @@ class MockTestsListPage extends StatelessWidget {
                           const SizedBox(height: 6),
                           Text(
                             desc,
-                            style: TextStyle(
-                              color: Colors.grey.shade700,
+                            style: context.t.bodySmall?.copyWith(
+                              color: AppColors.onSurfaceMuted,
                               height: 1.35,
                             ),
                             maxLines: 3,
@@ -176,16 +173,16 @@ class _MetaChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
+        color: AppColors.neuBg,
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: AppColors.neuBg.withOpacity(0.9)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 14, color: Colors.grey.shade700),
+          Icon(icon, size: 14, color: AppColors.neuFg),
           const SizedBox(width: 6),
-          Text(text, style: const TextStyle(fontWeight: FontWeight.w600)),
+          Text(text, style: context.t.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: context.c.onSurface)),
         ],
       ),
     );
@@ -195,10 +192,12 @@ class _MetaChip extends StatelessWidget {
 class _CenteredLoader extends StatelessWidget {
   const _CenteredLoader();
   @override
-  Widget build(BuildContext context) => const Center(
+  Widget build(BuildContext context) => Center(
         child: Padding(
-          padding: EdgeInsets.all(24.0),
-          child: CircularProgressIndicator(),
+          padding: const EdgeInsets.all(24.0),
+          child: CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation(context.c.primary),
+          ),
         ),
       );
 }
@@ -213,11 +212,11 @@ class _CenteredEmpty extends StatelessWidget {
           padding: const EdgeInsets.all(28.0),
           child: Column(
             children: [
-              Icon(Icons.fact_check_outlined, size: 64, color: Colors.grey.shade500),
+              Icon(Icons.fact_check_outlined, size: 64, color: AppColors.onSurfaceFaint),
               const SizedBox(height: 12),
-              Text(title, style: TextStyle(fontWeight: FontWeight.w700, color: Colors.grey.shade700)),
+              Text(title, style: context.t.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: AppColors.onSurfaceMuted)),
               const SizedBox(height: 6),
-              Text(caption, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              Text(caption, style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceFaint)),
             ],
           ),
         ),
@@ -231,7 +230,7 @@ class _CenteredError extends StatelessWidget {
   Widget build(BuildContext context) => Center(
         child: Padding(
           padding: const EdgeInsets.all(20),
-          child: Text(message, style: const TextStyle(color: Colors.red)),
+          child: Text(message, style: context.t.bodyMedium?.copyWith(color: AppColors.danger)),
         ),
       );
 }

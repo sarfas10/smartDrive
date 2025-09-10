@@ -5,6 +5,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 
+// Import your design tokens & theme helpers
+import 'theme/app_theme.dart'; // <-- adjust this path to match your project
+
 /// Instructor details page (Admin view)
 /// Usage (already wired in users_block.dart):
 /// Navigator.push(
@@ -25,9 +28,9 @@ class InstructorDetailsPage extends StatefulWidget {
 class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
   final _db = FirebaseFirestore.instance;
 
-  String? _uid;                       // from RouteSettings.arguments
+  String? _uid; // from RouteSettings.arguments
   bool _loading = true;
-  Map<String, dynamic> _user = {};    // users/{uid}
+  Map<String, dynamic> _user = {}; // users/{uid}
   Map<String, dynamic> _profile = {}; // instructor_profiles/{uid}
   String _status = 'active';
 
@@ -36,7 +39,7 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
   String _q = '';
   bool _busyDelete = false;
   bool _busyApprove = false; // approve busy
-  bool _busyBlock = false;   // NEW: block busy
+  bool _busyBlock = false; // NEW: block busy
 
   // Cloudinary (same as my_uploads.dart)
   static const String _cloudName = 'dxeunc4vd';
@@ -48,7 +51,9 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
     super.didChangeDependencies();
     if (_uid != null) return;
     final args = ModalRoute.of(context)?.settings.arguments;
-    if (args is Map && args['uid'] is String && (args['uid'] as String).isNotEmpty) {
+    if (args is Map &&
+        args['uid'] is String &&
+        (args['uid'] as String).isNotEmpty) {
       _uid = args['uid'] as String;
       _load();
     } else {
@@ -94,7 +99,11 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
     final phone = (_user['phone'] ?? '').toString().trim();
     final addr = (_profile['address'] as Map<String, dynamic>?) ?? {};
     final hasSomeAddress = [
-      addr['street'], addr['city'], addr['state'], addr['zip'], addr['country']
+      addr['street'],
+      addr['city'],
+      addr['state'],
+      addr['zip'],
+      addr['country']
     ].any((v) => v != null && v.toString().trim().isNotEmpty);
 
     final pay = (_profile['payment'] as Map<String, dynamic>?) ?? {};
@@ -104,9 +113,9 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
     if (method == 'bank') {
       final bank = (pay['bank'] as Map<String, dynamic>?) ?? {};
       payOk = _nonEmpty(bank['bankName']) &&
-              _nonEmpty(bank['accountHolder']) &&
-              _nonEmpty(bank['accountNumber']) &&
-              _nonEmpty(bank['routingNumber']);
+          _nonEmpty(bank['accountHolder']) &&
+          _nonEmpty(bank['accountNumber']) &&
+          _nonEmpty(bank['routingNumber']);
     } else if (method == 'upi') {
       final upi = (pay['upi'] as Map<String, dynamic>?) ?? {};
       payOk = _nonEmpty(upi['id']) && upi['id'].toString().contains('@');
@@ -133,7 +142,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
 
     if (folder.trim().isEmpty || publicIdBase.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Delete failed: missing Cloudinary folder/public_id')),
+        const SnackBar(
+            content: Text('Delete failed: missing Cloudinary folder/public_id')),
       );
       return;
     }
@@ -145,8 +155,12 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
             content: const Text(
                 'This will permanently delete the file from Cloudinary and remove the record from Firestore.'),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-              FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Delete')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel')),
+              FilledButton(
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: const Text('Delete')),
             ],
           ),
         ) ??
@@ -196,7 +210,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
 
   String _resourceTypeFromExt(String ext) {
     final e = ext.toLowerCase();
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'svg'].contains(e)) return 'image';
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'svg']
+        .contains(e)) return 'image';
     if (['mp4', 'mov', 'avi', 'mkv', 'webm'].contains(e)) return 'video';
     return 'raw';
   }
@@ -228,7 +243,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
     required String resourceType, // image|raw|video
     required Map<String, dynamic> signed,
   }) async {
-    final uri = Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/destroy');
+    final uri =
+        Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/destroy');
     final req = http.MultipartRequest('POST', uri)
       ..fields['api_key'] = signed['api_key'].toString()
       ..fields['timestamp'] = signed['timestamp'].toString()
@@ -271,7 +287,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
         throw Exception('Cloudinary destroy unexpected result: {$result}');
       }
     }
-    throw Exception('Cloudinary destroy did not find the asset under any resource_type.');
+    throw Exception(
+        'Cloudinary destroy did not find the asset under any resource_type.');
   }
 
   // ───────────────────── Notifications helper (direct-target) ─────────────────
@@ -285,8 +302,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
     await _db.collection('notifications').add({
       'title': title,
       'message': message,
-      'segments': [segment],     // optional legacy segment
-      'target_uids': [targetUid],// direct target for bell filter
+      'segments': [segment], // optional legacy segment
+      'target_uids': [targetUid], // direct target for bell filter
       'action_url': actionUrl,
       'created_at': FieldValue.serverTimestamp(),
     });
@@ -313,9 +330,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to approve: $e')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Failed to approve: $e')));
       }
     } finally {
       if (mounted) setState(() => _busyApprove = false);
@@ -335,7 +351,9 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
               'You can unblock later from the user management screen.',
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: const Text('Cancel')),
               FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('Block'),
@@ -377,15 +395,19 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
+      backgroundColor: context.c.background,
       appBar: AppBar(
         title: const Text('Instructor Details'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
+        backgroundColor: context.c.surface,
+        foregroundColor: context.c.onSurface,
         elevation: 0.5,
       ),
       body: _loading
-          ? const Center(child: CircularProgressIndicator())
+          ? Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation(context.c.primary),
+              ),
+            )
           : LayoutBuilder(
               builder: (context, c) {
                 final isWide = c.maxWidth >= 980;
@@ -410,31 +432,48 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
                             Container(
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: Colors.orange.shade50,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.orange.shade200),
+                                color: AppColors.warnBg,
+                                borderRadius:
+                                    BorderRadius.circular(AppRadii.m),
+                                border: Border.all(color: AppColors.warnBg.withOpacity(0.9)),
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.hourglass_bottom_rounded, color: Colors.orange),
+                                  Icon(Icons.hourglass_bottom_rounded,
+                                      color: AppColors.warning),
                                   const SizedBox(width: 10),
-                                  const Expanded(
-                                    child: Text('This instructor is pending approval.'),
+                                  Expanded(
+                                    child: Text(
+                                      'This instructor is pending approval.',
+                                      style: context.t.bodyMedium
+                                          ?.copyWith(color: AppColors.warnFg),
+                                    ),
                                   ),
                                   ElevatedButton.icon(
-                                    onPressed: _busyApprove ? null : _approveUser,
+                                    onPressed:
+                                        _busyApprove ? null : _approveUser,
                                     icon: _busyApprove
-                                        ? const SizedBox(
-                                            width: 16, height: 16,
-                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                        ? SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              valueColor:
+                                                  AlwaysStoppedAnimation(
+                                                      context.c.onPrimary),
+                                            ),
                                           )
                                         : const Icon(Icons.check_circle_outline),
-                                    label: Text(_busyApprove ? 'Approving…' : 'Approve User'),
+                                    label: Text(
+                                        _busyApprove ? 'Approving…' : 'Approve User'),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF2E7D32),
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      backgroundColor: AppColors.success,
+                                      foregroundColor: context.c.onPrimary,
+                                      padding:
+                                          const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(AppRadii.m)),
                                     ),
                                   ),
                                 ],
@@ -447,31 +486,44 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
                               margin: const EdgeInsets.only(top: 0),
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
-                                color: Colors.red.shade50,
-                                borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: Colors.red.shade200),
+                                color: AppColors.errBg,
+                                borderRadius:
+                                    BorderRadius.circular(AppRadii.m),
+                                border: Border.all(color: AppColors.errBg.withOpacity(0.9)),
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.verified_user_outlined, color: Color(0xFFB71C1C)),
+                                  Icon(Icons.verified_user_outlined,
+                                      color: AppColors.danger),
                                   const SizedBox(width: 10),
-                                  const Expanded(
-                                    child: Text('This instructor is active. You can block access if needed.'),
+                                  Expanded(
+                                    child: Text(
+                                      'This instructor is active. You can block access if needed.',
+                                      style: context.t.bodyMedium?.copyWith(color: AppColors.errFg),
+                                    ),
                                   ),
                                   ElevatedButton.icon(
                                     onPressed: _busyBlock ? null : _blockUser,
                                     icon: _busyBlock
-                                        ? const SizedBox(
-                                            width: 16, height: 16,
-                                            child: CircularProgressIndicator(strokeWidth: 2),
+                                        ? SizedBox(
+                                            width: 16,
+                                            height: 16,
+                                            child: CircularProgressIndicator(
+                                              strokeWidth: 2,
+                                              valueColor:
+                                                  AlwaysStoppedAnimation(context.c.onPrimary),
+                                            ),
                                           )
                                         : const Icon(Icons.block),
                                     label: Text(_busyBlock ? 'Blocking…' : 'Block User'),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFFD32F2F),
-                                      foregroundColor: Colors.white,
-                                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      backgroundColor: AppColors.danger,
+                                      foregroundColor: context.c.onPrimary,
+                                      padding:
+                                          const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                      shape: RoundedRectangleBorder(
+                                          borderRadius:
+                                              BorderRadius.circular(AppRadii.m)),
                                     ),
                                   ),
                                 ],
@@ -568,15 +620,15 @@ class _HeaderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: context.c.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
           children: [
             CircleAvatar(
               radius: 26,
-              backgroundColor: const Color(0xFF4C63D2),
+              backgroundColor: AppColors.brand,
               child: Text(
                 _initials(name),
                 style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
@@ -587,15 +639,21 @@ class _HeaderCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                  Text(name,
+                      style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
+                  const SizedBox(height: 6),
                   Row(
                     children: [
-                      Flexible(child: Text(email, style: const TextStyle(color: Colors.black54, fontSize: 12))),
+                      Flexible(
+                        child: Text(email,
+                            style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
+                      ),
                       if (phone.isNotEmpty) ...[
                         const SizedBox(width: 10),
-                        Text('•', style: TextStyle(color: Colors.black.withOpacity(.35))),
+                        Text('•', style: TextStyle(color: context.c.onSurface.withOpacity(.35))),
                         const SizedBox(width: 10),
-                        Text(phone, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                        Text(phone,
+                            style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
                       ],
                     ],
                   ),
@@ -604,16 +662,17 @@ class _HeaderCard extends StatelessWidget {
             ),
             Container(
               decoration: BoxDecoration(
-                color: active ? const Color(0xFFEAF7F0) : const Color(0xFFF1F3F6),
+                color: active ? AppColors.okBg : AppColors.neuBg,
                 borderRadius: BorderRadius.circular(999),
               ),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               child: Row(
                 children: [
                   Container(
-                    width: 8, height: 8,
+                    width: 8,
+                    height: 8,
                     decoration: BoxDecoration(
-                      color: active ? const Color(0xFF2E7D32) : Colors.grey,
+                      color: active ? AppColors.success : AppColors.onSurfaceMuted,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -623,7 +682,7 @@ class _HeaderCard extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
-                      color: active ? const Color(0xFF1B5E20) : Colors.black54,
+                      color: active ? AppColors.okFg : AppColors.onSurfaceMuted,
                     ),
                   ),
                 ],
@@ -647,15 +706,16 @@ class _SectionTitle extends StatelessWidget {
     return Row(
       children: [
         Container(
-          decoration: BoxDecoration(color: const Color(0xFFEFF3FF), borderRadius: BorderRadius.circular(10)),
+          decoration:
+              BoxDecoration(color: AppColors.neuBg, borderRadius: BorderRadius.circular(10)),
           padding: const EdgeInsets.all(8),
-          child: Icon(icon, color: const Color(0xFF3559FF), size: 18),
+          child: Icon(icon, color: context.c.primary, size: 18),
         ),
         const SizedBox(width: 8),
-        Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+        Text(title, style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
         const Spacer(),
         if (subtitle != null)
-          Text(subtitle!, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+          Text(subtitle!, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
       ],
     );
   }
@@ -670,15 +730,17 @@ class _BannerWarning extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.orange.shade50,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.orange.shade200),
+        color: AppColors.warnBg,
+        borderRadius: BorderRadius.circular(AppRadii.m),
+        border: Border.all(color: AppColors.warnBg.withOpacity(0.95)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+          Icon(Icons.warning_amber_rounded, color: AppColors.warning),
           const SizedBox(width: 10),
-          Expanded(child: Text(text)),
+          Expanded(
+            child: Text(text, style: context.t.bodyMedium?.copyWith(color: AppColors.warnFg)),
+          ),
         ],
       ),
     );
@@ -701,26 +763,26 @@ class _ProfileCard extends StatelessWidget {
 
     return Card(
       elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: context.c.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Profile', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            Text('Profile', style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
             const SizedBox(height: 10),
             _line('Name', (user['name'] ?? '—').toString()),
             _line('Email', (user['email'] ?? '—').toString()),
             _line('Phone', (user['phone'] ?? '—').toString()),
             const SizedBox(height: 8),
-            const Divider(),
+            Divider(color: AppColors.divider),
             const SizedBox(height: 8),
-            const Text('Address', style: TextStyle(fontWeight: FontWeight.w700)),
+            Text('Address', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
             const SizedBox(height: 8),
             Text(
               _joinLines([street, _joinComma([city, state, zip]), country]),
-              style: const TextStyle(color: Colors.black87),
+              style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
             ),
           ],
         ),
@@ -733,7 +795,10 @@ class _ProfileCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          SizedBox(width: 120, child: Text(label, style: const TextStyle(color: Colors.black54))),
+          SizedBox(
+              width: 120,
+              child:
+                  Text(label, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted))),
           const SizedBox(width: 12),
           Expanded(child: Text(value, style: const TextStyle(fontWeight: FontWeight.w600))),
         ],
@@ -741,8 +806,10 @@ class _ProfileCard extends StatelessWidget {
     );
   }
 
-  String _joinComma(List<String> parts) => parts.where((e) => e.trim().isNotEmpty).join(', ');
-  String _joinLines(List<String> parts) => parts.where((e) => e.trim().isNotEmpty).join('\n');
+  String _joinComma(List<String> parts) =>
+      parts.where((e) => e.trim().isNotEmpty).join(', ');
+  String _joinLines(List<String> parts) =>
+      parts.where((e) => e.trim().isNotEmpty).join('\n');
 }
 
 class _PayoutCard extends StatelessWidget {
@@ -775,14 +842,15 @@ class _PayoutCard extends StatelessWidget {
 
     return Card(
       elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: context.c.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Text('Payout Preference', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+            Text('Payout Preference',
+                style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
             const SizedBox(height: 10),
             _kv('Method', methodText),
             const SizedBox(height: 6),
@@ -801,7 +869,9 @@ class _PayoutCard extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        SizedBox(width: 120, child: Text(k, style: const TextStyle(color: Colors.black54))),
+        SizedBox(
+            width: 120,
+            child: Text(k, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted))),
         const SizedBox(width: 12),
         Expanded(child: Text(v, style: const TextStyle(fontWeight: FontWeight.w600))),
       ],
@@ -830,7 +900,8 @@ class _UploadsList extends StatelessWidget {
   final String filterText;
   final void Function(String url) onView;
   final void Function(String url) onDownload;
-  final void Function(String docId, String folder, String publicIdBase, String fileExt, String fileUrl) onDelete;
+  final void Function(String docId, String folder, String publicIdBase, String fileExt, String fileUrl)
+      onDelete;
   final bool showDelete;
   final bool busy;
 
@@ -858,7 +929,8 @@ class _UploadsList extends StatelessWidget {
         if (snap.hasError) {
           return Padding(
             padding: const EdgeInsets.all(16),
-            child: Text('Could not load uploads: ${snap.error}', style: const TextStyle(color: Colors.red)),
+            child: Text('Could not load uploads: ${snap.error}',
+                style: TextStyle(color: AppColors.danger)),
           );
         }
 
@@ -888,7 +960,7 @@ class _UploadsList extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
               child: Text(
                 '${docs.length} document${docs.length == 1 ? '' : 's'} uploaded',
-                style: const TextStyle(color: Colors.black54, fontSize: 12),
+                style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted),
               ),
             ),
             if (filtered.isEmpty)
@@ -944,18 +1016,18 @@ class _SearchField extends StatelessWidget {
       onChanged: onChanged,
       decoration: InputDecoration(
         hintText: hint,
-        prefixIcon: const Icon(Icons.search),
+        prefixIcon: Icon(Icons.search, color: context.c.onSurface.withOpacity(0.6)),
         isDense: true,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         filled: true,
-        fillColor: Colors.white,
+        fillColor: context.c.surface,
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(AppRadii.m),
+          borderSide: BorderSide(color: AppColors.divider),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300),
+          borderRadius: BorderRadius.circular(AppRadii.m),
+          borderSide: BorderSide(color: AppColors.divider),
         ),
       ),
     );
@@ -996,7 +1068,7 @@ class _UploadCard extends StatelessWidget {
 
     return Card(
       elevation: 0,
-      color: Colors.white,
+      color: context.c.surface,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(14),
@@ -1009,28 +1081,28 @@ class _UploadCard extends StatelessWidget {
               children: [
                 Container(
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEFF3FF),
+                    color: AppColors.neuBg,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   padding: const EdgeInsets.all(8),
-                  child: Icon(icon, size: 20, color: const Color(0xFF3559FF)),
+                  child: Icon(icon, size: 20, color: context.c.primary),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                      Text(name, style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
                       const SizedBox(height: 2),
-                      Text(fileName, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                      Text(fileName, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          const Icon(Icons.calendar_today, size: 14, color: Colors.black54),
+                          Icon(Icons.calendar_today, size: 14, color: AppColors.onSurfaceMuted),
                           const SizedBox(width: 6),
-                          Text(date, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                          Text(date, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
                           const SizedBox(width: 14),
-                          Text(size, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                          Text(size, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
                         ],
                       ),
                     ],
@@ -1043,17 +1115,18 @@ class _UploadCard extends StatelessWidget {
               Container(
                 width: double.infinity,
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF6F8FE),
+                  color: AppColors.neuBg,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Remarks: ',
-                        style: TextStyle(fontWeight: FontWeight.w600, color: Colors.black87)),
+                    Text('Remarks: ',
+                        style: TextStyle(fontWeight: FontWeight.w600, color: context.c.onSurface)),
                     Expanded(
-                      child: Text(remarks, style: const TextStyle(color: Colors.black87, height: 1.2)),
+                      child: Text(remarks,
+                          style: TextStyle(color: context.c.onSurface, height: 1.2)),
                     ),
                   ],
                 ),
@@ -1064,21 +1137,21 @@ class _UploadCard extends StatelessWidget {
               children: [
                 TextButton.icon(
                   onPressed: onView,
-                  icon: const Icon(Icons.visibility_outlined, size: 18),
-                  label: const Text('View'),
+                  icon: Icon(Icons.visibility_outlined, size: 18, color: context.c.primary),
+                  label: Text('View', style: TextStyle(color: context.c.primary)),
                 ),
                 const SizedBox(width: 8),
                 TextButton.icon(
                   onPressed: onDownload,
-                  icon: const Icon(Icons.download_rounded, size: 18),
-                  label: const Text('Download'),
+                  icon: Icon(Icons.download_rounded, size: 18, color: context.c.onSurface),
+                  label: Text('Download', style: TextStyle(color: context.c.onSurface)),
                 ),
                 const Spacer(),
                 if (onDelete != null)
                   TextButton.icon(
                     onPressed: onDelete,
-                    icon: const Icon(Icons.delete_outline, size: 18, color: Color(0xFFD32F2F)),
-                    label: const Text('Delete', style: TextStyle(color: Color(0xFFD32F2F))),
+                    icon: Icon(Icons.delete_outline, size: 18, color: AppColors.danger),
+                    label: Text('Delete', style: TextStyle(color: AppColors.danger)),
                   ),
               ],
             ),
@@ -1143,10 +1216,10 @@ class _EmptyHint extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.folder_open, size: 48, color: Colors.black26),
-            SizedBox(height: 8),
-            Text('No uploads yet', style: TextStyle(color: Colors.black54)),
+          children: [
+            Icon(Icons.folder_open, size: 48, color: AppColors.onSurfaceFaint),
+            const SizedBox(height: 8),
+            Text('No uploads yet', style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
           ],
         ),
       ),

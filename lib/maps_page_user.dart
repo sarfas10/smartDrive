@@ -4,6 +4,9 @@ import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+// Adjust import path to your app_theme.dart location if necessary
+import 'theme/app_theme.dart';
+
 class MapsPageUser extends StatefulWidget {
   final String userId; // required: user document id
 
@@ -45,8 +48,7 @@ class _MapsPageUserState extends State<MapsPageUser> {
   Future<void> _prefillFromUser() async {
     setState(() => _isPrefillLoading = true);
     try {
-      final doc =
-          await _firestore.collection('users').doc(widget.userId).get();
+      final doc = await _firestore.collection('users').doc(widget.userId).get();
 
       final data = doc.data();
       if (data != null && data['boarding'] is Map<String, dynamic>) {
@@ -60,9 +62,8 @@ class _MapsPageUserState extends State<MapsPageUser> {
           _animateTo(pos, zoom: 16);
         }
       }
-    } catch (e) {
+    } catch (_) {
       // non-fatal; user may not have a boarding point yet
-      // ignore
     } finally {
       if (mounted) setState(() => _isPrefillLoading = false);
     }
@@ -135,9 +136,8 @@ class _MapsPageUserState extends State<MapsPageUser> {
 
       _addMarker(current);
       await _animateTo(current, zoom: 16);
-
     } catch (e) {
-      _toast('Error getting location: $e');
+      _toast('Error getting location: $e', error: true);
     } finally {
       if (mounted) setState(() => _isLocationLoading = false);
     }
@@ -178,10 +178,7 @@ class _MapsPageUserState extends State<MapsPageUser> {
         'boarding_updated_at': FieldValue.serverTimestamp(),
       };
 
-      await _firestore
-          .collection('users')
-          .doc(widget.userId)
-          .set(data, SetOptions(merge: true));
+      await _firestore.collection('users').doc(widget.userId).set(data, SetOptions(merge: true));
 
       _toast('Boarding point saved!', success: true);
       setState(() => _hasUnsavedChanges = false);
@@ -200,42 +197,32 @@ class _MapsPageUserState extends State<MapsPageUser> {
           builder: (BuildContext context) {
             return AlertDialog(
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
+                borderRadius: BorderRadius.circular(AppRadii.l),
               ),
-              title: const Row(
+              title: Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded,
-                      color: Colors.orange, size: 28),
-                  SizedBox(width: 12),
-                  Text('Unsaved Changes'),
+                  Icon(Icons.warning_amber_rounded, color: AppColors.warning, size: 28),
+                  const SizedBox(width: 12),
+                  Text('Unsaved Changes', style: context.t.titleMedium?.copyWith(color: context.c.onSurface)),
                 ],
               ),
-              content: const Text(
+              content: Text(
                 'You have unsaved changes to your boarding point. Leave without saving?',
-                style: TextStyle(fontSize: 16),
+                style: context.t.bodyMedium?.copyWith(color: context.c.onSurface),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(false),
-                  child: const Text(
-                    'Cancel',
-                    style: TextStyle(color: Colors.grey, fontSize: 16),
-                  ),
+                  child: Text('Cancel', style: context.t.bodyMedium?.copyWith(color: AppColors.onSurfaceMuted)),
                 ),
                 ElevatedButton(
                   onPressed: () => Navigator.of(context).pop(true),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(8),
-                    ),
+                    backgroundColor: AppColors.danger,
+                    foregroundColor: context.c.onPrimary,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
                   ),
-                  child: const Text(
-                    'Leave',
-                    style:
-                        TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-                  ),
+                  child: Text('Leave', style: context.t.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
                 ),
               ],
             );
@@ -245,18 +232,21 @@ class _MapsPageUserState extends State<MapsPageUser> {
   }
 
   void _toast(String msg, {bool success = false, bool error = false}) {
-    final bg = error
-        ? Colors.red
-        : (success ? Colors.green : Colors.black87);
+    final bg = error ? AppColors.errBg : (success ? AppColors.okBg : context.c.surface);
+    final textColor = error ? AppColors.errFg : (success ? AppColors.okFg : context.c.onSurface);
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), backgroundColor: bg),
+      SnackBar(
+        content: Text(msg, style: TextStyle(color: textColor)),
+        backgroundColor: bg,
+      ),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final showOverlay = _isMapLoading || _isLocationLoading || _isPrefillLoading;
+    final topPadding = MediaQuery.of(context).padding.top;
 
     return PopScope(
       canPop: !_hasUnsavedChanges,
@@ -270,7 +260,10 @@ class _MapsPageUserState extends State<MapsPageUser> {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: const Text('Select Boarding Point'),
+          title: Text('Select Boarding Point', style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
+          backgroundColor: context.c.surface,
+          foregroundColor: context.c.onSurface,
+          elevation: 0,
         ),
         body: Stack(
           children: [
@@ -291,7 +284,6 @@ class _MapsPageUserState extends State<MapsPageUser> {
               onMapCreated: (c) {
                 _onMapCreated(c);
                 // If there was no prefill, we can optionally jump to GPS.
-                // (Leave it manual to avoid extra prompts; user can tap the button.)
               },
               onTap: _onMapTap,
               onLongPress: null,
@@ -305,37 +297,27 @@ class _MapsPageUserState extends State<MapsPageUser> {
                   child: Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
-                          spreadRadius: 2,
-                          blurRadius: 8,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
+                      color: context.c.surface,
+                      borderRadius: BorderRadius.circular(AppRadii.l),
+                      boxShadow: AppShadows.card,
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const SizedBox(
+                        SizedBox(
                           width: 48,
                           height: 48,
-                          child: CircularProgressIndicator(strokeWidth: 3),
+                          child: CircularProgressIndicator(
+                            strokeWidth: 3,
+                            valueColor: AlwaysStoppedAnimation<Color>(context.c.primary),
+                          ),
                         ),
                         const SizedBox(height: 16),
                         Text(
                           _isMapLoading
                               ? 'Loading Map...'
-                              : (_isPrefillLoading
-                                  ? 'Loading saved location...'
-                                  : 'Getting Current Location...'),
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w500,
-                            color: Colors.black87,
-                          ),
+                              : (_isPrefillLoading ? 'Loading saved location...' : 'Getting Current Location...'),
+                          style: context.t.bodyMedium?.copyWith(color: context.c.onSurface),
                         ),
                       ],
                     ),
@@ -346,7 +328,7 @@ class _MapsPageUserState extends State<MapsPageUser> {
             // Back FAB (top-left)
             Positioned(
               left: 16,
-              top: 24,
+              top: topPadding + 8,
               child: _CircleButton(
                 icon: Icons.arrow_back,
                 tooltip: 'Back',
@@ -366,7 +348,7 @@ class _MapsPageUserState extends State<MapsPageUser> {
             // Zoom controls (top-right)
             Positioned(
               right: 16,
-              top: 24,
+              top: topPadding + 8,
               child: Column(
                 children: [
                   _CircleButton(
@@ -395,7 +377,7 @@ class _MapsPageUserState extends State<MapsPageUser> {
               child: _CircleButton(
                 icon: Icons.delete_sweep,
                 tooltip: 'Clear Marker',
-                color: Colors.red,
+                color: AppColors.danger,
                 onPressed: _clearMarker,
               ),
             ),
@@ -407,7 +389,7 @@ class _MapsPageUserState extends State<MapsPageUser> {
               child: _CircleButton(
                 icon: Icons.my_location,
                 tooltip: 'My Location',
-                color: Colors.blue,
+                color: context.c.primary,
                 onPressed: _goToCurrentLocation,
               ),
             ),
@@ -417,25 +399,17 @@ class _MapsPageUserState extends State<MapsPageUser> {
               Positioned(
                 right: 16,
                 left: 100,
-                top: 70,
+                top: topPadding + 20,
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: context.c.surface,
                     borderRadius: BorderRadius.circular(30),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withOpacity(0.2),
-                        spreadRadius: 1,
-                        blurRadius: 6,
-                        offset: const Offset(0, 3),
-                      ),
-                    ],
+                    boxShadow: AppShadows.card,
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.location_on, color: Colors.blue, size: 24),
+                      Icon(Icons.location_on, color: context.c.primary, size: 24),
                       const SizedBox(width: 12),
                       Expanded(
                         child: Column(
@@ -444,26 +418,16 @@ class _MapsPageUserState extends State<MapsPageUser> {
                           children: [
                             Text(
                               'Boarding Point',
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.grey[600],
-                                fontWeight: FontWeight.w500,
-                              ),
+                              style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontWeight: FontWeight.w500),
                             ),
                             const SizedBox(height: 4),
                             Text(
                               'Lat: ${_selectedLocation!.latitude.toStringAsFixed(6)}',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
+                              style: context.t.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: context.c.onSurface),
                             ),
                             Text(
                               'Lng: ${_selectedLocation!.longitude.toStringAsFixed(6)}',
-                              style: const TextStyle(
-                                fontSize: 14,
-                                fontWeight: FontWeight.w600,
-                              ),
+                              style: context.t.bodyMedium?.copyWith(fontWeight: FontWeight.w600, color: context.c.onSurface),
                             ),
                           ],
                         ),
@@ -472,29 +436,21 @@ class _MapsPageUserState extends State<MapsPageUser> {
                       ElevatedButton(
                         onPressed: _isSaving ? null : _saveToDatabase,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blue,
-                          foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
-                          ),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
+                          backgroundColor: context.c.primary,
+                          foregroundColor: context.c.onPrimary,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         ),
                         child: _isSaving
-                            ? const SizedBox(
+                            ? SizedBox(
                                 width: 16,
                                 height: 16,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  valueColor: AlwaysStoppedAnimation<Color>(
-                                      Colors.white),
+                                  valueColor: AlwaysStoppedAnimation<Color>(context.c.onPrimary),
                                 ),
                               )
-                            : const Text(
-                                'Save',
-                                style: TextStyle(
-                                    fontSize: 14, fontWeight: FontWeight.w600),
-                              ),
+                            : Text('Save', style: context.t.bodyMedium?.copyWith(fontWeight: FontWeight.w600)),
                       ),
                     ],
                   ),
@@ -524,24 +480,16 @@ class _CircleButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final c = color ?? Colors.black87;
+    final iconColor = color ?? context.c.onSurface;
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.c.surface,
         borderRadius: BorderRadius.circular(25),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.2),
-            spreadRadius: 1,
-            blurRadius: 4,
-            offset: const Offset(0, 2),
-          ),
-        ],
+        boxShadow: AppShadows.card,
       ),
       child: IconButton(
         onPressed: onPressed,
-        icon: Icon(icon),
-        color: c,
+        icon: Icon(icon, color: iconColor),
         tooltip: tooltip,
       ),
     );

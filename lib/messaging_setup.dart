@@ -8,7 +8,7 @@ Future<void> initPush() async {
   await _fcm.requestPermission(alert: true, badge: true, sound: true);
 
   // Use your small white glyph for Android init
-  const androidInit = AndroidInitializationSettings('@drawable/ic_stat_notify');
+  const androidInit = AndroidInitializationSettings('ic_stat_notify');
   const iosInit = DarwinInitializationSettings(
     requestAlertPermission: false,
     requestBadgePermission: false,
@@ -47,7 +47,7 @@ Future<void> initPush() async {
       channelDescription: 'General push notifications',
       importance: Importance.high,
       priority: Priority.high,
-      icon: '@drawable/ic_stat_notify', // your 48x48 white glyph
+      icon: 'ic_stat_notify', // your 48x48 white glyph
       largeIcon: DrawableResourceAndroidBitmap('logo'), // full-color logo.png in res/drawable
       // styleInformation: BigTextStyleInformation(''), // or BigPictureStyleInformation(...) if you add a banner
       // color: Color(0xFF4C63D2), // optional accent color

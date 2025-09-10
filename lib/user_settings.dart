@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'login.dart';            // your login screen
 import 'maps_page_user.dart';   // user map picker screen
+import 'plans_view.dart';       // NEW: dedicated plans page
 
 // ─── Razorpay config ───────────────────────────────────────────────────────────
 
@@ -342,35 +343,35 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
     }
   }
 
-Future<void> _logout({bool wipeAllPrefs = false}) async {
-  try {
-    if (mounted) setState(() => isLoading = true);
+  Future<void> _logout({bool wipeAllPrefs = false}) async {
+    try {
+      if (mounted) setState(() => isLoading = true);
 
-    // 1) Stop FCM topic subscriptions tied to role/status
-    await unsubscribeRoleStatusTopics(alsoAll: false);
+      // 1) Stop FCM topic subscriptions tied to role/status
+      await unsubscribeRoleStatusTopics(alsoAll: false);
 
-    // 2) Clear saved session + remember-me flags
-    final sp = await SharedPreferences.getInstance();
-    await SessionService().clear();          // removes userId/role/status
-    await sp.remove('sd_saved_email');       // forget saved email
-    await sp.setBool('sd_remember_me', false);
+      // 2) Clear saved session + remember-me flags
+      final sp = await SharedPreferences.getInstance();
+      await SessionService().clear();          // removes userId/role/status
+      await sp.remove('sd_saved_email');       // forget saved email
+      await sp.setBool('sd_remember_me', false);
 
-    // Optional: full wipe of all SharedPreferences (use with care)
-    if (wipeAllPrefs) {
-      await sp.clear();
+      // Optional: full wipe of all SharedPreferences (use with care)
+      if (wipeAllPrefs) {
+        await sp.clear();
+      }
+
+      // 3) Sign out Firebase
+      await _auth.signOut();
+
+      // 4) Go to login
+      _toLogin();
+    } catch (e) {
+      _showErrorDialog('Error logging out: $e');
+    } finally {
+      if (mounted) setState(() => isLoading = false);
     }
-
-    // 3) Sign out Firebase
-    await _auth.signOut();
-
-    // 4) Go to login
-    _toLogin();
-  } catch (e) {
-    _showErrorDialog('Error logging out: $e');
-  } finally {
-    if (mounted) setState(() => isLoading = false);
   }
-}
 
 
   // ─── Boarding selection navigation ──────────────────────────────────────────
@@ -692,112 +693,7 @@ Future<void> _logout({bool wipeAllPrefs = false}) async {
     );
   }
 
-  // ─── Plans sheet with boarding charges notice ───────────────────────────────
-  void _showPlansSheet() {
-    if (!mounted) return;
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const _SheetTitle('Available Plans'),
-                const SizedBox(height: 6),
-                // Notice explaining boarding charges
-                Container(
-                  width: double.infinity,
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: Colors.amber.shade50,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.amber.shade200),
-                  ),
-                  child: Text(
-                    'Note: Additional charges may apply for Boarding pickup beyond the free radius as per plan rules. '
-                    'You can set your boarding point from “Select Boarding Point”.',
-                    style: TextStyle(
-                      color: Colors.amber.shade900,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: availablePlans.length,
-                    itemBuilder: (context, index) {
-                      final plan = availablePlans[index];
-                      final isCurrent = currentPlan?['id'] == plan['id'];
-                      final name = (plan['name'] ?? 'Unnamed Plan').toString();
-                      final description =
-                          (plan['description'] ?? '').toString();
-                      final price = plan['price'];
-                      final priceText =
-                          price is num ? '₹${price.toStringAsFixed(0)}' : '₹—';
-
-                      return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 6),
-                        child: Padding(
-                          padding: const EdgeInsets.all(12),
-                          child: Row(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Icon(Icons.workspace_premium),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(name,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleMedium
-                                            ?.copyWith(
-                                                fontWeight: FontWeight.w600)),
-                                    if (description.isNotEmpty) ...[
-                                      const SizedBox(height: 4),
-                                      Text(description),
-                                    ],
-                                    const SizedBox(height: 4),
-                                    Text(priceText,
-                                        style: const TextStyle(
-                                            fontWeight: FontWeight.bold)),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              isCurrent
-                                  ? Chip(
-                                      label: const Text('Current'),
-                                      backgroundColor: Colors.green.shade100,
-                                    )
-                                  : ElevatedButton(
-                                      onPressed: () {
-                                        Navigator.pop(ctx);
-                                        _presentPaymentSummary(plan);
-                                      },
-                                      child: const Text('Select'),
-                                    ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
+  // ─── Note: _showPlansSheet() REMOVED — navigation goes to PlansView instead ──
 
   // ─── Payment Summary before upgrading (with unused-slots warning) ───────────
   Future<void> _presentPaymentSummary(Map<String, dynamic> plan) async {
@@ -1113,7 +1009,13 @@ Future<void> _logout({bool wipeAllPrefs = false}) async {
                                     Expanded(
                                       child: _RightColumn(
                                         currentPlan: currentPlan,
-                                        onShowPlans: _showPlansSheet,
+                                        onShowPlans: () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(
+                                              builder: (_) => const PlansView(),
+                                            ),
+                                          );
+                                        },
                                         onLogout: _logout,
                                         onSelectBoarding: _goToBoardingSelection,
                                       ),
@@ -1131,7 +1033,13 @@ Future<void> _logout({bool wipeAllPrefs = false}) async {
                                 const SizedBox(height: 16),
                                 _RightColumn(
                                   currentPlan: currentPlan,
-                                  onShowPlans: _showPlansSheet,
+                                  onShowPlans: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(
+                                        builder: (_) => const PlansView(),
+                                      ),
+                                    );
+                                  },
                                   onLogout: _logout,
                                   onSelectBoarding: _goToBoardingSelection,
                                 ),

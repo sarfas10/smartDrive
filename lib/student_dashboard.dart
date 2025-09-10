@@ -1,24 +1,31 @@
-// student_dashboard.dart
+// lib/student_dashboard.dart
 import 'dart:math';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:smart_drive/downloadables.dart';
+import 'package:smart_drive/upload_document_page.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:smart_drive/UserAttendancePanel.dart';
 import 'package:smart_drive/mock_tests_list_page.dart';
-import 'package:smart_drive/onboarding_forms.dart';
 import 'package:smart_drive/user_materials_page.dart';
 import 'package:smart_drive/user_settings.dart';
 import 'package:smart_drive/user_slot_booking.dart';
-import 'package:smart_drive/upload_document_page.dart';
+// removed upload_document_page import — onboarding form used instead
+import 'package:smart_drive/onboarding_forms.dart';
+import 'package:smart_drive/test_booking_page.dart';
+
+// THEME
+import 'package:smart_drive/theme/app_theme.dart';
 
 /// ───────────────────── Background grain painter ─────────────────────
 class _GrainPainter extends CustomPainter {
   final double opacity;
   _GrainPainter({this.opacity = 0.06});
+
   @override
   void paint(Canvas canvas, Size size) {
     final rnd = Random(7);
@@ -61,6 +68,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
   Map<String, dynamic> userData = {};
   bool isLoading = true;
 
+  // local hide flag for onboarding banner (not persisted)
+  bool _hideOnboardingBanner = false;
+
   // anchor for bell menu
   final GlobalKey _bellAnchorKey = GlobalKey();
 
@@ -81,7 +91,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
             userStatus = (userData['status'] ?? 'pending').toString();
             isLoading = false;
           });
-          await _ensurePlanRollOver(user.uid);
         } else {
           setState(() => isLoading = false);
         }
@@ -91,54 +100,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
     } catch (e) {
       debugPrint('Error fetching user data: $e');
       setState(() => isLoading = false);
-    }
-  }
-
-  Future<void> _ensurePlanRollOver(String uid) async {
-    try {
-      final upRef = _firestore.collection('user_plans').doc(uid);
-      final upSnap = await upRef.get();
-      if (!upSnap.exists) {
-        debugPrint('[PlanRollOver] No user_plans doc for $uid');
-        return;
-      }
-      final up = upSnap.data() ?? {};
-      final String? planId = (up['planId'] as String?)?.trim();
-      final int slotsUsed = (up['slots_used'] is num) ? (up['slots_used'] as num).toInt() : 0;
-      if (planId == null || planId.isEmpty) {
-        debugPrint('[PlanRollOver] No planId set for $uid');
-        return;
-      }
-      final planRef = _firestore.collection('plans').doc(planId);
-      final planSnap = await planRef.get();
-      if (!planSnap.exists) {
-        debugPrint('[PlanRollOver] Plan $planId not found for $uid');
-        return;
-      }
-      final plan = planSnap.data() ?? {};
-      final bool isPayPerUse = (plan['isPayPerUse'] == true);
-      final int slots = (plan['slots'] is num) ? (plan['slots'] as num).toInt() : 0;
-
-      if (!isPayPerUse && slots != 0 && slotsUsed >= slots) {
-        final ppuQuery = await _firestore
-            .collection('plans')
-            .where('isPayPerUse', isEqualTo: true)
-            .limit(1)
-            .get();
-        if (ppuQuery.docs.isEmpty) {
-          debugPrint('[PlanRollOver] No pay-per-use plan available. Aborting rollover.');
-          return;
-        }
-        final newPlanId = ppuQuery.docs.first.id;
-        await upRef.update({
-          'planId': newPlanId,
-          'switched_from_plan': planId,
-          'switched_at': FieldValue.serverTimestamp(),
-        });
-        debugPrint('[PlanRollOver] User $uid switched to pay-per-use plan $newPlanId.');
-      }
-    } catch (e) {
-      debugPrint('[PlanRollOver] Error: $e');
     }
   }
 
@@ -152,37 +113,37 @@ class _StudentDashboardState extends State<StudentDashboard> {
         .distinct();
   }
 
-  void _showAccessBlockedSnack() {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Your account isn’t active yet. Complete onboarding to use Quick Actions.'),
-        behavior: SnackBarBehavior.floating,
-      ),
-    );
+  // planId stream from user_plans/{uid}.planId (shown as-is)
+  Stream<String?> _planIdStream(String uid) {
+    return _firestore
+        .collection('user_plans')
+        .doc(uid)
+        .snapshots()
+        .map((snap) => (snap.data()?['planId'] as String?)?.toString())
+        .distinct();
   }
 
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
       return const Scaffold(
-        backgroundColor: Color(0xFFF6F7FB),
+        backgroundColor: AppColors.background,
         body: SafeArea(child: Center(child: CircularProgressIndicator())),
       );
     }
 
     final uid = _auth.currentUser?.uid;
     final role = (userData['role'] ?? 'student').toString();
-    final bool isActive = userStatus.toLowerCase() == 'active';
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
+      backgroundColor: AppColors.background,
       body: SafeArea(
         child: CustomScrollView(
           slivers: [
             // ── Pinned top bar
             SliverAppBar(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.black,
+              backgroundColor: AppColors.surface,
+              foregroundColor: AppColors.onSurface,
               pinned: true,
               elevation: 0,
               title: const Text('Student Dashboard'),
@@ -194,7 +155,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     userStatus: userStatus.toLowerCase(),
                     anchorKey: _bellAnchorKey,
                   ),
-                // transparent icon to hold anchor key
                 IconButton(
                   key: _bellAnchorKey,
                   icon: const Icon(Icons.notifications_none_rounded, color: Colors.transparent),
@@ -208,7 +168,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
               ],
             ),
 
-            // ── Gradient name card with Cloudinary photo
+            // ── Name card with photo + planId string (live)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -220,17 +180,25 @@ class _StudentDashboardState extends State<StudentDashboard> {
                         email: (userData['email'] ?? '').toString(),
                         role: role,
                         photoUrl: null,
+                        planIdString: null,
                       );
                     }
                     return StreamBuilder<String?>(
                       stream: _photoUrlStream(uid),
-                      builder: (context, snap) {
-                        final photoUrl = snap.data;
-                        return _NameCard(
-                          name: (userData['name'] ?? 'Student').toString(),
-                          email: (userData['email'] ?? '').toString(),
-                          role: role,
-                          photoUrl: photoUrl,
+                      builder: (context, photoSnap) {
+                        final photoUrl = photoSnap.data;
+                        return StreamBuilder<String?>(
+                          stream: _planIdStream(uid),
+                          builder: (context, planSnap) {
+                            final planId = planSnap.data;
+                            return _NameCard(
+                              name: (userData['name'] ?? 'Student').toString(),
+                              email: (userData['email'] ?? '').toString(),
+                              role: role,
+                              photoUrl: photoUrl,
+                              planIdString: planId,
+                            );
+                          },
                         );
                       },
                     );
@@ -239,19 +207,23 @@ class _StudentDashboardState extends State<StudentDashboard> {
               ),
             ),
 
-            // ── Onboarding banner if pending (or any non-active status)
-            // When active, keep a small spacer so Quick Actions stay properly positioned
-            if (!isActive)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  child: _PendingBanner(onComplete: _navigateToOnboarding),
+            // ── Onboarding banner (shown for pending users)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Column(
+                  children: [
+                    if (!_hideOnboardingBanner && userStatus.toLowerCase() == 'pending')
+                      _onboardingBanner(),
+                    const SizedBox(height: 8),
+                  ],
                 ),
-              )
-            else
-              const SliverToBoxAdapter(child: SizedBox(height: 8)),
+              ),
+            ),
 
-            // ── Primary navigation options (Quick Actions) — RESTRICTED when not active
+            const SliverToBoxAdapter(child: SizedBox(height: 8)),
+
+            // ── Quick Actions (always enabled)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -261,60 +233,46 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     const _SectionTitle('Quick Actions'),
                     const SizedBox(height: 12),
 
-                    // Row 1
                     Row(
                       children: [
                         Expanded(
                           child: _PrimaryTile(
                             icon: Icons.calendar_month,
-                            color: Colors.orange,
+                            color: AppColors.warning,
                             title: 'Book Slot',
-                            enabled: isActive,
-                            disabledNote: 'Activate to book slots',
                             onTap: _navigateToSlotBooking,
-                            onTapDisabled: _showAccessBlockedSnack,
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: _PrimaryTile(
                             icon: Icons.access_time,
-                            color: const Color(0xFF00695C),
+                            color: AppColors.accentTeal,
                             title: 'Attendance Tracker',
-                            enabled: isActive,
-                            disabledNote: 'Activate to track attendance',
                             onTap: _navigateToAttendance,
-                            onTapDisabled: _showAccessBlockedSnack,
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
 
-                    // Row 2
                     Row(
                       children: [
                         Expanded(
                           child: _PrimaryTile(
                             icon: Icons.menu_book,
-                            color: const Color(0xFF1565C0),
+                            color: AppColors.info,
                             title: 'Study Materials',
-                            enabled: isActive,
-                            disabledNote: 'Activate to view materials',
                             onTap: _navigateToStudyMaterials,
-                            onTapDisabled: _showAccessBlockedSnack,
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: _PrimaryTile(
-                            icon: Icons.quiz,
-                            color: const Color(0xFF6A1B9A),
-                            title: 'Mock Tests',
-                            enabled: isActive,
-                            disabledNote: 'Activate to attempt tests',
-                            onTap: _navigateToMockTests,
-                            onTapDisabled: _showAccessBlockedSnack,
+                            icon: Icons.book_online,
+                            color: AppColors.purple,
+                            title: 'Test Booking',
+                            onTap: _navigateToTestBooking,
                           ),
                         ),
                       ],
@@ -324,7 +282,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
               ),
             ),
 
-            // ── More options (kept accessible)
+            // ── More options
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -333,10 +291,9 @@ class _StudentDashboardState extends State<StudentDashboard> {
                   children: [
                     const _SectionTitle('More Options'),
                     const SizedBox(height: 12),
-
                     _ActionTile(
                       icon: Icons.upload_file_rounded,
-                      iconColor: const Color(0xFF2D5BFF),
+                      iconColor: AppColors.primary,
                       title: 'Upload Documents',
                       subtitle: 'Add or manage KYC and other files',
                       onTap: _navigateToUploadDocuments,
@@ -344,7 +301,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     const SizedBox(height: 12),
                     _ActionTile(
                       icon: Icons.download_rounded,
-                      iconColor: const Color(0xFF455A64),
+                      iconColor: AppColors.slate,
                       title: 'Downloadables',
                       subtitle: 'Forms, PDFs, guides & resources',
                       onTap: _navigateToDownloadables,
@@ -352,16 +309,24 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     const SizedBox(height: 12),
                     _ActionTile(
                       icon: Icons.receipt,
-                      iconColor: const Color(0xFF5D4037),
+                      iconColor: AppColors.brown,
                       title: 'Invoice History',
                       subtitle: 'See your payment receipts and invoices',
                       onTap: _navigateToInvoices,
+                    ),
+                    const SizedBox(height: 12),
+                    // Moved: Questionaries (was Mock Tests)
+                    _ActionTile(
+                      icon: Icons.quiz,
+                      iconColor: AppColors.purple,
+                      title: 'Questionaries',
+                      subtitle: 'Attempt practice questionnaires and previous tests',
+                      onTap: _navigateToQuestionaries,
                     ),
                   ],
                 ),
               ),
             ),
-
             const SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
         ),
@@ -370,10 +335,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
   }
 
   // ── Navigation hooks
-  void _navigateToOnboarding() {
-    Navigator.push(context, MaterialPageRoute(builder: (context) => OnboardingForm()));
-  }
-
   void _navigateToSlotBooking() {
     Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSlotBooking()));
   }
@@ -383,9 +344,19 @@ class _StudentDashboardState extends State<StudentDashboard> {
   }
 
   void _navigateToMockTests() {
+    // kept for backward compatibility
     Navigator.push(context, MaterialPageRoute(builder: (_) => const MockTestsListPage()));
   }
 
+  void _navigateToQuestionaries() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const MockTestsListPage()));
+  }
+
+  void _navigateToTestBooking() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const TestBookingPage()));
+  }
+
+ 
   void _navigateToUploadDocuments() {
     Navigator.push(context, MaterialPageRoute(builder: (_) => const UploadDocumentPage()));
   }
@@ -399,13 +370,74 @@ class _StudentDashboardState extends State<StudentDashboard> {
   }
 
   void _navigateToDownloadables() {
-    // TODO: Wire to your page if available:
-    // Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadablesPage()));
-    debugPrint('Navigate to Downloadables');
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadablesPage()));
   }
 
   void _navigateToSettings() {
     Navigator.push(context, MaterialPageRoute(builder: (_) => UserSettingsScreen()));
+  }
+
+  // CTA used by onboarding banner
+  void _navigateToCompleteOnboarding() {
+    Navigator.push(context, MaterialPageRoute(builder: (_) => const OnboardingForm()));
+  }
+
+  // ── Onboarding banner widget (local dismiss only)
+  Widget _onboardingBanner() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.m),
+      child: Container(
+        color: AppColors.surface,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: Row(
+            children: [
+              // icon / left
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.warning.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(AppRadii.s),
+                ),
+                child: Icon(Icons.info_outline, color: AppColors.warning),
+              ),
+
+              const SizedBox(width: 12),
+
+              // text
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Complete onboarding', style: AppText.tileTitle),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Your account is pending — finish uploading documents to get full access.',
+                      style: AppText.tileSubtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+
+              // action
+              TextButton(
+                onPressed: _navigateToCompleteOnboarding,
+                child: const Text('Complete onboarding', style: TextStyle(fontWeight: FontWeight.w600)),
+              ),
+
+              // dismiss
+              IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                onPressed: () => setState(() => _hideOnboardingBanner = true),
+                tooltip: 'Dismiss',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -419,16 +451,9 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        const Icon(Icons.tune_rounded, size: 18, color: Colors.black87),
+        const Icon(Icons.tune_rounded, size: 18, color: AppColors.onSurface),
         const SizedBox(width: 8),
-        Text(
-          text,
-          style: const TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 16,
-            color: Colors.black87,
-          ),
-        ),
+        Text(text, style: AppText.sectionTitle),
       ],
     );
   }
@@ -439,35 +464,33 @@ class _NameCard extends StatelessWidget {
   final String email;
   final String role;
   final String? photoUrl;
-  const _NameCard({required this.name, required this.email, required this.role, this.photoUrl});
+
+  // plan (plain string)
+  final String? planIdString;
+
+  const _NameCard({
+    required this.name,
+    required this.email,
+    required this.role,
+    this.photoUrl,
+    required this.planIdString,
+  });
 
   @override
   Widget build(BuildContext context) {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(AppRadii.xl),
       child: Container(
         height: 170,
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            begin: Alignment(-0.9, -0.9), end: Alignment(0.9, 0.9),
-            colors: [Color(0xFF2B2B2D), Color(0xFF3A3B3E), Color(0xFF1F2022)],
-            stops: [0.0, 0.55, 1.0],
-          ),
+          gradient: AppGradients.nameCard,
           border: Border.all(color: Colors.white.withOpacity(0.12), width: 0.8),
-          boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.45), blurRadius: 14, offset: const Offset(0, 8)),
-          ],
+          boxShadow: AppShadows.elevatedDark,
         ),
         child: Stack(
           fit: StackFit.expand,
           children: [
             CustomPaint(painter: _GrainPainter(opacity: 0.06)),
-            Container(
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: Colors.white.withOpacity(0.08), width: 0.6),
-              ),
-            ),
             Padding(
               padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),
               child: Row(
@@ -478,31 +501,36 @@ class _NameCard extends StatelessWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Welcome back,', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        const Text('Welcome back,', style: TextStyle(color: AppColors.onSurfaceInverseMuted, fontSize: 13)),
                         const SizedBox(height: 8),
-                        Expanded(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                name,
-                                maxLines: 1, overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.95), fontSize: 20, fontWeight: FontWeight.bold,
-                                  shadows: [
-                                    Shadow(color: Colors.black.withOpacity(0.4), offset: const Offset(0.6, 0.6), blurRadius: 1.2),
-                                    Shadow(color: Colors.white.withOpacity(0.12), offset: const Offset(-0.4, -0.4), blurRadius: 1.0),
-                                  ],
-                                ),
-                              ),
-                              const SizedBox(height: 2),
-                              Text(
-                                '$email | ${role.toLowerCase()}',
-                                maxLines: 1, overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 0.3),
-                              ),
-                            ],
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.onSurfaceInverse,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
                           ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          '$email | ${role.toLowerCase()}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(color: AppColors.onSurfaceInverseMuted, fontSize: 12, letterSpacing: 0.3),
+                        ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            const Icon(Icons.workspace_premium, size: 16, color: AppColors.onSurfaceInverseMuted),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Plan: ${planIdString == null || planIdString!.isEmpty ? '—' : planIdString!}',
+                              style: const TextStyle(color: AppColors.onSurfaceInverse, fontSize: 12, fontWeight: FontWeight.w600),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ],
                         ),
                       ],
                     ),
@@ -520,15 +548,14 @@ class _NameCard extends StatelessWidget {
 class _Avatar extends StatelessWidget {
   final String? photoUrl;
   const _Avatar({this.photoUrl});
-
   @override
   Widget build(BuildContext context) {
-    final bg = Colors.white.withOpacity(0.14);
+    final bg = AppColors.onSurfaceInverse.withOpacity(0.14);
     if (photoUrl == null || photoUrl!.isEmpty) {
       return CircleAvatar(
         radius: 36,
         backgroundColor: bg,
-        child: const Icon(Icons.person, color: Colors.white, size: 38),
+        child: const Icon(Icons.person, color: AppColors.onSurfaceInverse, size: 38),
       );
     }
     return CircleAvatar(
@@ -540,49 +567,6 @@ class _Avatar extends StatelessWidget {
           width: 72,
           height: 72,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const Icon(Icons.person, color: Colors.white, size: 38),
-          frameBuilder: (context, child, frame, wasSyncLoaded) {
-            if (wasSyncLoaded) return child;
-            return AnimatedOpacity(
-              opacity: frame == null ? 0 : 1,
-              duration: const Duration(milliseconds: 250),
-              child: child,
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _PendingBanner extends StatelessWidget {
-  final VoidCallback onComplete;
-  const _PendingBanner({required this.onComplete});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      elevation: 0,
-      color: Colors.orange.shade50,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(
-          children: [
-            const Icon(Icons.warning_amber, color: Color(0xFFF57C00), size: 24),
-            const SizedBox(width: 12),
-            const Expanded(
-              child: Text(
-                'Please complete your profile onboarding to access all features',
-                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: onComplete,
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFF57C00), foregroundColor: Colors.white),
-              child: const Text('Complete'),
-            ),
-          ],
         ),
       ),
     );
@@ -596,124 +580,52 @@ class _PrimaryTile extends StatelessWidget {
   final String title;
   final VoidCallback onTap;
 
-  // Access control + UX
-  final bool enabled;
-  final String? disabledNote;
-  final VoidCallback? onTapDisabled;
-
   const _PrimaryTile({
     required this.icon,
     required this.color,
     required this.title,
     required this.onTap,
-    this.enabled = true,
-    this.disabledNote,
-    this.onTapDisabled,
   });
 
-  static const double _kTileHeight = 150;      // <- fixed height for consistency
-  static const double _kNoteHeight = 30;       // <- reserved space for note (2 lines approx)
+  static const double _kTileHeight = 150;
 
   @override
   Widget build(BuildContext context) {
-    final card = Card(
+    return Card(
       elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-      child: SizedBox(
-        height: _kTileHeight, // enforce consistent tile height
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.start,
-            children: [
-              Container(
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: color.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Icon(icon, color: color, size: 28),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14),
-              ),
-              const SizedBox(height: 6),
-              // Always reserve space for the note; fade it out when enabled
-              SizedBox(
-                height: _kNoteHeight,
-                child: AnimatedOpacity(
-                  opacity: (!enabled && (disabledNote?.isNotEmpty ?? false)) ? 1.0 : 0.0,
-                  duration: const Duration(milliseconds: 180),
-                  child: Align(
-                    alignment: Alignment.topCenter,
-                    child: Text(
-                      (disabledNote?.isNotEmpty ?? false) ? disabledNote! : ' ', // keep space
-                      textAlign: TextAlign.center,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 11, color: Colors.black54),
-                    ),
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(AppRadii.l),
+        onTap: onTap,
+        child: SizedBox(
+          height: _kTileHeight,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.start,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: color.withOpacity(0.10),
+                    borderRadius: BorderRadius.circular(AppRadii.m),
                   ),
+                  child: Icon(icon, color: color, size: 28),
                 ),
-              ),
-            ],
+                const SizedBox(height: 12),
+                Text(
+                  title,
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.tileTitle,
+                ),
+              ],
+            ),
           ),
         ),
       ),
-    );
-
-    return Stack(
-      children: [
-        // Tap handling
-        Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(16),
-            onTap: enabled ? onTap : (onTapDisabled ?? () {}),
-            child: card,
-          ),
-        ),
-        // Lock overlay
-        if (!enabled)
-          Positioned.fill(
-            child: IgnorePointer(
-              child: Container(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(16),
-                  color: Colors.white.withOpacity(0.55),
-                ),
-              ),
-            ),
-          ),
-        if (!enabled)
-          Positioned(
-            right: 10,
-            top: 10,
-            child: Tooltip(
-              message: 'Locked — complete onboarding',
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.75),
-                  borderRadius: BorderRadius.circular(999),
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.lock_rounded, size: 14, color: Colors.white),
-                    SizedBox(width: 4),
-                    Text('Locked', style: TextStyle(fontSize: 11, color: Colors.white)),
-                  ],
-                ),
-              ),
-            ),
-          ),
-      ],
     );
   }
 }
@@ -737,10 +649,10 @@ class _ActionTile extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 0,
-      color: Colors.white,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
       child: InkWell(
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadii.m),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -749,7 +661,7 @@ class _ActionTile extends StatelessWidget {
               Container(
                 decoration: BoxDecoration(
                   color: iconColor.withOpacity(0.08),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadii.m),
                 ),
                 padding: const EdgeInsets.all(10),
                 child: Icon(icon, color: iconColor),
@@ -759,13 +671,13 @@ class _ActionTile extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                    Text(title, style: AppText.tileTitle),
                     const SizedBox(height: 4),
-                    Text(subtitle, style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                    Text(subtitle, style: AppText.tileSubtitle),
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: Colors.black38),
+              const Icon(Icons.chevron_right_rounded, color: AppColors.onSurfaceFaint),
             ],
           ),
         ),
@@ -824,14 +736,12 @@ class NotificationBell extends StatelessWidget {
   Widget build(BuildContext context) {
     final fs = FirebaseFirestore.instance;
 
-    // Reads (to know which are read + when)
     final readsStream = fs
         .collection('users')
         .doc(uid)
         .collection('notif_reads')
         .snapshots();
 
-    // Latest notifications
     final notifsQuery = fs
         .collection('notifications')
         .orderBy('created_at', descending: true)
@@ -841,7 +751,6 @@ class NotificationBell extends StatelessWidget {
     return StreamBuilder<QuerySnapshot>(
       stream: readsStream,
       builder: (context, readsSnap) {
-        // Map of notifId -> readAt timestamp
         final Map<String, DateTime?> readAtMap = {
           if (readsSnap.hasData)
             for (final d in readsSnap.data!.docs)
@@ -865,14 +774,13 @@ class NotificationBell extends StatelessWidget {
               }
             }
 
-            // Hide read notifications after 7 days from readAt
             final now = DateTime.now();
             final sevenDays = const Duration(days: 7);
 
             final List<QueryDocumentSnapshot> visible = targeted.where((d) {
               final readAt = readAtMap[d.id];
-              if (readAt == null) return true; // unread → always show
-              return now.difference(readAt) <= sevenDays; // keep if read ≤ 7d
+              if (readAt == null) return true;
+              return now.difference(readAt) <= sevenDays;
             }).toList();
 
             final int unreadCount =
@@ -886,8 +794,8 @@ class NotificationBell extends StatelessWidget {
                   onPressed: () => _openMenu(
                     context,
                     anchorKey,
-                    visible,                     // pass only visible notifs
-                    readAtMap.keys.toSet(),      // for "isRead" checks
+                    visible,
+                    readAtMap.keys.toSet(),
                   ),
                 ),
                 if (unreadCount > 0)
@@ -897,12 +805,12 @@ class NotificationBell extends StatelessWidget {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFD32F2F),
+                        color: AppColors.danger,
                         borderRadius: BorderRadius.circular(999),
                       ),
                       child: Text(
                         unreadCount > 99 ? '99+' : '$unreadCount',
-                        style: const TextStyle(color: Colors.white, fontSize: 10),
+                        style: const TextStyle(color: AppColors.onSurfaceInverse, fontSize: 10),
                       ),
                     ),
                   ),
@@ -923,7 +831,6 @@ class NotificationBell extends StatelessWidget {
     final RenderBox? box = anchorKey.currentContext?.findRenderObject() as RenderBox?;
     final RenderBox? overlay = Overlay.of(context, rootOverlay: true).context.findRenderObject() as RenderBox?;
     if (box == null || overlay == null) {
-      // fallback
       await showModalBottomSheet(
         context: context,
         builder: (_) => _NotificationsList(
@@ -1059,7 +966,7 @@ class _NotificationsList extends StatelessWidget {
                 Icon(
                   isRead ? Icons.notifications_none : Icons.notifications_active,
                   size: 22,
-                  color: isRead ? Colors.grey : Colors.redAccent,
+                  color: isRead ? AppColors.onSurfaceMuted : AppColors.danger,
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -1086,7 +993,7 @@ class _NotificationsList extends StatelessWidget {
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          Text(whenTxt, style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                          Text(whenTxt, style: AppText.hintSmall),
                           const Spacer(),
                           if (url.isNotEmpty)
                             TextButton(

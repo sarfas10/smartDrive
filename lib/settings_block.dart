@@ -1,3 +1,4 @@
+// lib/settings_block.dart
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -6,11 +7,12 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import 'ui_common.dart';
 import 'package:smart_drive/reusables/vehicle_icons.dart';
-import 'maps_page_admin.dart'; 
+import 'maps_page_admin.dart';
 
-import 'login.dart';                  
-import 'messaging_setup.dart';        
-import 'services/session_service.dart'; 
+import 'login.dart';
+import 'messaging_setup.dart';
+import 'services/session_service.dart';
+import 'package:smart_drive/theme/app_theme.dart';
 
 class SettingsBlock extends StatefulWidget {
   const SettingsBlock({super.key});
@@ -20,64 +22,96 @@ class SettingsBlock extends StatefulWidget {
 }
 
 class _SettingsBlockState extends State<SettingsBlock> {
- 
   final TextEditingController _radiusCtrl = TextEditingController();
   final TextEditingController _perKmCtrl = TextEditingController();
   final TextEditingController _policyCtrl = TextEditingController();
 
-  
+  // separate controllers for 8-type and H-type driving test charges
+  final TextEditingController _testCharge8Ctrl = TextEditingController();
+  final TextEditingController _testChargeHCtrl = TextEditingController();
+
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  
   Map<String, dynamic>? _lastAppliedSettings;
+  bool _drivingTestIncluded = true;
+
+  // numeric values cached for quick access
+  double _testCharge8 = 0.0;
+  double _testChargeH = 0.0;
 
   @override
   void dispose() {
     _radiusCtrl.dispose();
     _perKmCtrl.dispose();
     _policyCtrl.dispose();
+    _testCharge8Ctrl.dispose();
+    _testChargeHCtrl.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    // ===== Responsive metrics =====
     final sw = MediaQuery.of(context).size.width;
     final isDesktop = sw >= 1024;
 
-    double pct(double p) => sw * p; // p in 0..1
-    final pad = pct(0.04).clamp(12.0, 28.0);          // ~4% of width
-    final gap = (pad * 0.75).clamp(8.0, 24.0);        // scaled gaps
-    final cardRadius = (pct(0.02)).clamp(8.0, 14.0);  // 2% radius
-    final maxContentWidth = isDesktop ? sw * 0.78 : sw; // center on large
+    double pct(double p) => sw * p;
+    final pad = pct(0.04).clamp(12.0, 28.0);
+    final gap = (pad * 0.75).clamp(8.0, 24.0);
+    final cardRadius = (pct(0.02)).clamp(8.0, 14.0);
+    final maxContentWidth = isDesktop ? sw * 0.78 : sw;
 
-    // 🔁 FIXED single-doc ID
     final doc = FirebaseFirestore.instance.collection('settings').doc('app_settings');
 
     return Container(
-      color: Colors.white,
+      color: AppColors.background,
       child: StreamBuilder<DocumentSnapshot>(
         stream: doc.snapshots(),
         builder: (context, snap) {
           final m = (snap.data?.data() as Map<String, dynamic>?) ?? {};
 
-          // Initialize once, or when Firestore changes meaningfully
           if (_lastAppliedSettings == null || !_deepEquals(_lastAppliedSettings!, m)) {
             _lastAppliedSettings = Map<String, dynamic>.from(m);
 
-            // Defaults
             final radius = (m['free_radius_km'] ?? 5).toString();
             final perKm = (m['surcharge_per_km'] ?? 10).toString();
-            final policy = (m['cancellation_policy'] ??
-                    'Cancellations within 24 hours incur 20% fee.')
-                .toString();
+            final policy = (m['cancellation_policy'] ?? 'Cancellations within 24 hours incur 20% fee.').toString();
+
+            // load separate charges (defaults to 0.0)
+            final raw8 = m['test_charge_8'];
+            final rawH = m['test_charge_h'];
+            final drivingTestIncluded = (m['driving_test_included'] ?? true) as bool;
 
             if (_radiusCtrl.text != radius) _radiusCtrl.text = radius;
             if (_perKmCtrl.text != perKm) _perKmCtrl.text = perKm;
             if (_policyCtrl.text != policy) _policyCtrl.text = policy;
+
+            // parse 8-type
+            if (raw8 is num) {
+              _testCharge8 = raw8.toDouble();
+            } else if (raw8 != null) {
+              _testCharge8 = double.tryParse(raw8.toString()) ?? 0.0;
+            } else {
+              _testCharge8 = 0.0;
+            }
+            // parse H-type
+            if (rawH is num) {
+              _testChargeH = rawH.toDouble();
+            } else if (rawH != null) {
+              _testChargeH = double.tryParse(rawH.toString()) ?? 0.0;
+            } else {
+              _testChargeH = 0.0;
+            }
+
+            if (_testCharge8Ctrl.text != _testCharge8.toStringAsFixed(2)) {
+              _testCharge8Ctrl.text = _testCharge8.toStringAsFixed(2);
+            }
+            if (_testChargeHCtrl.text != _testChargeH.toStringAsFixed(2)) {
+              _testChargeHCtrl.text = _testChargeH.toStringAsFixed(2);
+            }
+
+            _drivingTestIncluded = drivingTestIncluded;
           }
 
-          // Presence of saved coordinates
           final savedLat = m['latitude'];
           final savedLng = m['longitude'];
           final hasSaved = (savedLat is num) && (savedLng is num);
@@ -128,7 +162,7 @@ class _SettingsBlockState extends State<SettingsBlock> {
   }) {
     final savedText = hasSaved
         ? 'Lat: ${(savedLat as num).toDouble().toStringAsFixed(6)}\n'
-          'Lng: ${(savedLng as num).toDouble().toStringAsFixed(6)}'
+            'Lng: ${(savedLng as num).toDouble().toStringAsFixed(6)}'
         : 'No lat/long saved';
 
     final buttonLabel = hasSaved ? 'Update Location' : 'Add Location';
@@ -136,8 +170,8 @@ class _SettingsBlockState extends State<SettingsBlock> {
     return Container(
       padding: EdgeInsets.all(pad),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
-        border: Border.all(color: Colors.grey[300]!),
+        color: AppColors.neuBg,
+        border: Border.all(color: AppColors.divider),
         borderRadius: BorderRadius.circular(radius),
       ),
       child: Column(
@@ -149,10 +183,10 @@ class _SettingsBlockState extends State<SettingsBlock> {
             width: double.infinity,
             padding: EdgeInsets.all(pad * 0.75),
             decoration: BoxDecoration(
-              color: hasSaved ? Colors.blue[50] : Colors.orange[50],
+              color: hasSaved ? AppColors.brand.withOpacity(0.06) : AppColors.warnBg,
               borderRadius: BorderRadius.circular(radius * 0.75),
               border: Border.all(
-                color: hasSaved ? Colors.blue[200]! : Colors.orange[200]!,
+                color: hasSaved ? AppColors.brand.withOpacity(0.25) : AppColors.warnBg,
               ),
             ),
             child: Row(
@@ -160,16 +194,16 @@ class _SettingsBlockState extends State<SettingsBlock> {
               children: [
                 Icon(
                   hasSaved ? Icons.location_on : Icons.info_outline,
-                  color: hasSaved ? Colors.blue[600] : Colors.orange[700],
+                  color: hasSaved ? AppColors.brand : AppColors.warning,
                   size: (pad * 1.2).clamp(18.0, 28.0),
                 ),
                 SizedBox(width: pad * 0.5),
                 Expanded(
                   child: Text(
                     savedText,
-                    style: TextStyle(
+                    style: AppText.tileSubtitle.copyWith(
                       fontSize: (pad * 0.6).clamp(11.0, 14.0),
-                      color: Colors.grey[800],
+                      color: context.c.onSurface,
                     ),
                   ),
                 ),
@@ -191,18 +225,18 @@ class _SettingsBlockState extends State<SettingsBlock> {
                 if (mounted && result == true) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text(hasSaved ? 'Location updated' : 'Location added'),
-                      backgroundColor: Colors.green,
+                      content: Text(hasSaved ? 'Location updated' : 'Location added', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+                      backgroundColor: AppColors.success,
                       behavior: SnackBarBehavior.floating,
                     ),
                   );
                 }
               },
-              icon: const Icon(Icons.map),
-              label: Text(buttonLabel),
+              icon: Icon(Icons.map, color: AppColors.onSurfaceInverse),
+              label: Text(buttonLabel, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: hasSaved ? Colors.blue : Colors.orange,
-                foregroundColor: Colors.white,
+                backgroundColor: hasSaved ? AppColors.brand : AppColors.warning,
+                foregroundColor: AppColors.onSurfaceInverse,
                 padding: EdgeInsets.symmetric(
                   vertical: (pad * 0.6).clamp(10.0, 16.0),
                 ),
@@ -215,24 +249,17 @@ class _SettingsBlockState extends State<SettingsBlock> {
   }
 
   /// Vehicles card
-  Widget _buildVehicleManagementCard(
-      double pad, double gap, double radius, double sw) {
+  Widget _buildVehicleManagementCard(double pad, double gap, double radius, double sw) {
     final iconBox = (sw * 0.12).clamp(44.0, 64.0);
     final iconSize = (iconBox * 0.56).clamp(22.0, 36.0);
 
     return Container(
       padding: EdgeInsets.all(pad),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: Colors.grey[200]!),
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.divider),
         borderRadius: BorderRadius.circular(radius),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withOpacity(0.05),
-            blurRadius: 6,
-            offset: const Offset(0, 3),
-          ),
-        ],
+        boxShadow: AppShadows.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -240,25 +267,21 @@ class _SettingsBlockState extends State<SettingsBlock> {
           // Header Row
           Row(
             children: [
-              Icon(Icons.directions_car, color: Colors.blue[600], size: 22),
+              Icon(Icons.directions_car, color: AppColors.brand, size: 22),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   "Vehicles",
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.grey[800],
-                  ),
+                  style: AppText.sectionTitle.copyWith(color: context.c.onSurface),
                 ),
               ),
               ElevatedButton.icon(
                 onPressed: () => _showAddVehicleDialog(context),
-                icon: const Icon(Icons.add, size: 18),
-                label: const Text('Add'),
+                icon: Icon(Icons.add, size: 18, color: AppColors.onSurfaceInverse),
+                label: Text('Add', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.blue,
-                  foregroundColor: Colors.white,
+                  backgroundColor: AppColors.brand,
+                  foregroundColor: AppColors.onSurfaceInverse,
                   padding: EdgeInsets.symmetric(
                     horizontal: (pad * 0.8).clamp(10.0, 16.0),
                     vertical: (pad * 0.4).clamp(6.0, 12.0),
@@ -272,34 +295,30 @@ class _SettingsBlockState extends State<SettingsBlock> {
 
           // Vehicle List
           StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance
-                .collection('vehicles')
-                .orderBy('created_at', descending: true)
-                .snapshots(),
+            stream: FirebaseFirestore.instance.collection('vehicles').orderBy('created_at', descending: true).snapshots(),
             builder: (context, vehicleSnap) {
               if (vehicleSnap.connectionState == ConnectionState.waiting) {
                 return Padding(
                   padding: EdgeInsets.all(pad),
-                  child: const Center(child: CircularProgressIndicator()),
+                  child: Center(child: CircularProgressIndicator(color: context.c.primary)),
                 );
               }
               if (!vehicleSnap.hasData || vehicleSnap.data!.docs.isEmpty) {
                 return Container(
                   padding: EdgeInsets.all(pad * 1.2),
                   decoration: BoxDecoration(
-                    color: Colors.grey[50],
+                    color: AppColors.neuBg,
                     borderRadius: BorderRadius.circular(radius),
-                    border: Border.all(color: Colors.grey[200]!),
+                    border: Border.all(color: AppColors.divider),
                   ),
                   child: Column(
                     children: [
-                      Icon(Icons.directions_car_filled,
-                          size: 40, color: Colors.grey[400]),
+                      Icon(Icons.directions_car_filled, size: 40, color: AppColors.onSurfaceFaint),
                       const SizedBox(height: 8),
-                      const Text(
+                      Text(
                         'No vehicles added yet.\nClick "Add" to get started.',
                         textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.grey),
+                        style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
                       ),
                     ],
                   ),
@@ -317,15 +336,9 @@ class _SettingsBlockState extends State<SettingsBlock> {
                     margin: EdgeInsets.only(bottom: gap),
                     padding: EdgeInsets.all(pad),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: AppColors.surface,
                       borderRadius: BorderRadius.circular(radius),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
-                          blurRadius: 4,
-                          offset: const Offset(0, 2),
-                        ),
-                      ],
+                      boxShadow: AppShadows.card,
                     ),
                     child: Row(
                       children: [
@@ -333,10 +346,10 @@ class _SettingsBlockState extends State<SettingsBlock> {
                           width: iconBox,
                           height: iconBox,
                           decoration: BoxDecoration(
-                            color: Colors.blue[50],
+                            color: AppColors.brand.withOpacity(0.06),
                             borderRadius: BorderRadius.circular(radius * 0.75),
                           ),
-                          child: Icon(icon, color: Colors.blue[600], size: iconSize),
+                          child: Icon(icon, color: AppColors.brand, size: iconSize),
                         ),
                         SizedBox(width: pad),
                         Expanded(
@@ -345,24 +358,18 @@ class _SettingsBlockState extends State<SettingsBlock> {
                             children: [
                               Text(
                                 carType,
-                                style: TextStyle(
-                                  fontSize: (iconBox * 0.32).clamp(14.0, 18.0),
-                                  fontWeight: FontWeight.w600,
-                                ),
+                                style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600),
                               ),
                               SizedBox(height: (gap * 0.25)),
                               Text(
                                 '₹${charge.toString()} per session',
-                                style: TextStyle(
-                                  fontSize: (iconBox * 0.28).clamp(12.0, 16.0),
-                                  color: Colors.grey[600],
-                                ),
+                                style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted),
                               ),
                             ],
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.delete_outline, color: Colors.red),
+                          icon: Icon(Icons.delete_outline, color: AppColors.danger),
                           onPressed: () async => await vehicleDoc.reference.delete(),
                         ),
                       ],
@@ -377,13 +384,12 @@ class _SettingsBlockState extends State<SettingsBlock> {
     );
   }
 
-  Widget _buildPaymentSettingsCard(
-      DocumentReference doc, double pad, double radius) {
+  Widget _buildPaymentSettingsCard(DocumentReference doc, double pad, double radius) {
     return Container(
       padding: EdgeInsets.all(pad),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
-        border: Border.all(color: Colors.grey[300]!),
+        color: AppColors.neuBg,
+        border: Border.all(color: AppColors.divider),
         borderRadius: BorderRadius.circular(radius),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -394,21 +400,78 @@ class _SettingsBlockState extends State<SettingsBlock> {
         field('Surcharge per km (₹)', _perKmCtrl, number: true),
         SizedBox(height: pad * 0.5),
         area('Cancellation Policy', _policyCtrl),
+        SizedBox(height: pad * 0.5),
+
+        // UPDATED: separate fields for 8-type and H-type test charges
+        Text('Driving Test Charge — 8 type (₹)', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _testCharge8Ctrl,
+          keyboardType: TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
+          decoration: InputDecoration(
+            labelText: '8 type charge',
+            prefixText: '₹',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
+            filled: true,
+            fillColor: AppColors.surface,
+          ),
+          style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
+        ),
+        SizedBox(height: pad * 0.5),
+
+        Text('Driving Test Charge — H type (₹)', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700)),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _testChargeHCtrl,
+          keyboardType: TextInputType.numberWithOptions(decimal: true),
+          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
+          decoration: InputDecoration(
+            labelText: 'H type charge',
+            prefixText: '₹',
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
+            filled: true,
+            fillColor: AppColors.surface,
+          ),
+          style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
+        ),
+
+        SizedBox(height: pad * 0.5),
+        CheckboxListTile(
+          value: _drivingTestIncluded,
+          onChanged: (val) => setState(() => _drivingTestIncluded = val ?? true),
+          title: const Text('Driving Test Included'),
+          controlAffinity: ListTileControlAffinity.leading,
+        ),
+
         SizedBox(height: pad * 0.75),
         SizedBox(
           width: double.infinity,
           child: ElevatedButton(
             onPressed: () async {
+              final test8 = double.tryParse(_testCharge8Ctrl.text.trim()) ?? _testCharge8;
+              final testH = double.tryParse(_testChargeHCtrl.text.trim()) ?? _testChargeH;
+
               await doc.set({
                 'free_radius_km': double.tryParse(_radiusCtrl.text.trim()) ?? 5,
                 'surcharge_per_km': double.tryParse(_perKmCtrl.text.trim()) ?? 10,
                 'cancellation_policy': _policyCtrl.text.trim(),
+                // write both charges
+                'test_charge_8': test8,
+                'test_charge_h': testH,
+                'driving_test_included': _drivingTestIncluded,
                 'updated_at': FieldValue.serverTimestamp(),
               }, SetOptions(merge: true));
+
+              setState(() {
+                _testCharge8 = test8;
+                _testChargeH = testH;
+              });
+
               ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(
-                  content: Text('Payment settings saved'),
-                  backgroundColor: Colors.green,
+                SnackBar(
+                  content: Text('Payment settings saved', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+                  backgroundColor: AppColors.success,
                   behavior: SnackBarBehavior.floating,
                 ),
               );
@@ -417,8 +480,10 @@ class _SettingsBlockState extends State<SettingsBlock> {
               padding: EdgeInsets.symmetric(
                 vertical: (pad * 0.6).clamp(10.0, 16.0),
               ),
+              backgroundColor: context.c.primary,
+              foregroundColor: context.c.onPrimary,
             ),
-            child: const Text('Save Payment Settings'),
+            child: Text('Save Payment Settings', style: AppText.tileTitle.copyWith(color: context.c.onPrimary)),
           ),
         ),
       ]),
@@ -430,8 +495,8 @@ class _SettingsBlockState extends State<SettingsBlock> {
     return Container(
       padding: EdgeInsets.all(pad),
       decoration: BoxDecoration(
-        color: Colors.grey[50],
-        border: Border.all(color: Colors.grey[300]!),
+        color: AppColors.neuBg,
+        border: Border.all(color: AppColors.divider),
         borderRadius: BorderRadius.circular(radius),
       ),
       child: Column(
@@ -441,7 +506,7 @@ class _SettingsBlockState extends State<SettingsBlock> {
           SizedBox(height: pad * 0.75),
           Text(
             'Sign out from this device.',
-            style: TextStyle(color: Colors.grey[700]),
+            style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
           ),
           SizedBox(height: pad * 0.75),
           SizedBox(
@@ -451,12 +516,12 @@ class _SettingsBlockState extends State<SettingsBlock> {
                 showDialog(
                   context: context,
                   builder: (_) => AlertDialog(
-                    title: const Text('Logout'),
-                    content: const Text('Are you sure you want to logout?'),
+                    title: Text('Logout', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
+                    content: Text('Are you sure you want to logout?', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context),
-                        child: const Text('Cancel'),
+                        child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary)),
                       ),
                       ElevatedButton(
                         onPressed: () {
@@ -464,20 +529,20 @@ class _SettingsBlockState extends State<SettingsBlock> {
                           _logout();
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.red,
-                          foregroundColor: Colors.white,
+                          backgroundColor: AppColors.danger,
+                          foregroundColor: AppColors.onSurfaceInverse,
                         ),
-                        child: const Text('Logout'),
+                        child: Text('Logout', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
                       ),
                     ],
                   ),
                 );
               },
-              icon: const Icon(Icons.logout),
-              label: const Text('Logout'),
+              icon: Icon(Icons.logout, color: AppColors.onSurfaceInverse),
+              label: Text('Logout', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
+                backgroundColor: AppColors.danger,
+                foregroundColor: AppColors.onSurfaceInverse,
               ),
             ),
           ),
@@ -488,10 +553,7 @@ class _SettingsBlockState extends State<SettingsBlock> {
 
   Text _title(String s) => Text(
         s,
-        style: Theme.of(context)
-            .textTheme
-            .titleLarge
-            ?.copyWith(fontWeight: FontWeight.bold),
+        style: AppText.sectionTitle.copyWith(color: context.c.onSurface, fontWeight: FontWeight.bold),
       );
 
   // ---------------- Vehicles: Add dialogs ----------------
@@ -534,15 +596,14 @@ class _SettingsBlockState extends State<SettingsBlock> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Text('Add Vehicle Type',
-                        style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
+                    Text('Add Vehicle Type', style: AppText.sectionTitle.copyWith(color: context.c.onSurface, fontWeight: FontWeight.bold)),
                     IconButton(
                       onPressed: () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close),
+                      icon: Icon(Icons.close, color: context.c.onSurface),
                     ),
                   ]),
                   SizedBox(height: pad * 0.75),
-                  Text('Select a vehicle type to add:', style: TextStyle(color: Colors.grey[600])),
+                  Text('Select a vehicle type to add:', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
                   SizedBox(height: pad * 0.75),
                   Flexible(
                     child: ListView.builder(
@@ -564,7 +625,7 @@ class _SettingsBlockState extends State<SettingsBlock> {
                             child: Container(
                               padding: EdgeInsets.all(pad),
                               decoration: BoxDecoration(
-                                border: Border.all(color: Colors.grey[300]!),
+                                border: Border.all(color: AppColors.divider),
                                 borderRadius: BorderRadius.circular((sw * 0.02).clamp(8.0, 14.0)),
                               ),
                               child: Row(
@@ -573,28 +634,23 @@ class _SettingsBlockState extends State<SettingsBlock> {
                                     width: iconBox,
                                     height: iconBox,
                                     decoration: BoxDecoration(
-                                      color: Colors.blue[50],
+                                      color: AppColors.brand.withOpacity(0.06),
                                       borderRadius: BorderRadius.circular((sw * 0.02).clamp(8.0, 14.0)),
                                     ),
-                                    child: Icon(icon, color: Colors.blue[600], size: iconSize),
+                                    child: Icon(icon, color: AppColors.brand, size: iconSize),
                                   ),
                                   SizedBox(width: pad),
                                   Expanded(
                                     child: Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text(carType,
-                                            style: const TextStyle(
-                                                fontSize: 16, fontWeight: FontWeight.w600)),
+                                        Text(carType, style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
                                         SizedBox(height: pad * 0.25),
-                                        Text(
-                                          vehicle['description'] as String,
-                                          style: TextStyle(fontSize: 14, color: Colors.grey[600]),
-                                        ),
+                                        Text(vehicle['description'] as String, style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
                                       ],
                                     ),
                                   ),
-                                  Icon(Icons.arrow_forward_ios, color: Colors.grey[400], size: 16),
+                                  Icon(Icons.arrow_forward_ios, color: AppColors.onSurfaceFaint, size: 16),
                                 ],
                               ),
                             ),
@@ -616,18 +672,14 @@ class _SettingsBlockState extends State<SettingsBlock> {
     final sw = MediaQuery.of(context).size.width;
     final sh = MediaQuery.of(context).size.height;
     final isDesktop = sw >= 1024;
-    final feeController =
-        TextEditingController(text: vehicle['defaultFee'].toString());
+    final feeController = TextEditingController(text: vehicle['defaultFee'].toString());
 
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          insetPadding: EdgeInsets.symmetric(
-            horizontal: (sw * 0.06).clamp(16.0, 60.0),
-            vertical: (sh * 0.06).clamp(16.0, 60.0),
-          ),
-          title: Text('Set Fee for ${vehicle['type']}'),
+          insetPadding: EdgeInsets.symmetric(horizontal: (sw * 0.06).clamp(16.0, 60.0), vertical: (sh * 0.06).clamp(16.0, 60.0)),
+          title: Text('Set Fee for ${vehicle['type']}', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
           content: SizedBox(
             width: sw * (isDesktop ? 0.4 : 0.9), // % width
             child: Column(
@@ -639,11 +691,15 @@ class _SettingsBlockState extends State<SettingsBlock> {
                   inputFormatters: [
                     FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
                   ],
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: 'Fee (₹)',
-                    border: OutlineInputBorder(),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
                     prefixText: '₹',
+                    labelStyle: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
+                    filled: true,
+                    fillColor: AppColors.surface,
                   ),
+                  style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
                 ),
               ],
             ),
@@ -651,7 +707,7 @@ class _SettingsBlockState extends State<SettingsBlock> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
+              child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary)),
             ),
             ElevatedButton(
               onPressed: () async {
@@ -670,7 +726,8 @@ class _SettingsBlockState extends State<SettingsBlock> {
                 Navigator.of(context).pop(); // fee dialog
                 Navigator.of(context).pop(); // list dialog
               },
-              child: const Text('Add Vehicle'),
+              style: ElevatedButton.styleFrom(backgroundColor: context.c.primary, foregroundColor: context.c.onPrimary),
+              child: Text('Add Vehicle', style: AppText.tileTitle.copyWith(color: context.c.onPrimary)),
             ),
           ],
         );
@@ -681,40 +738,39 @@ class _SettingsBlockState extends State<SettingsBlock> {
   // ---------------- Logout logic ----------------
 
   Future<void> _logout({bool wipeAllPrefs = false}) async {
-  try {
-    // 1) Stop role/status notifications (set alsoAll: true to silence everything)
-    await unsubscribeRoleStatusTopics(alsoAll: false);
+    try {
+      // 1) Stop role/status notifications (set alsoAll: true to silence everything)
+      await unsubscribeRoleStatusTopics(alsoAll: false);
 
-    // 2) Clear saved session
-    await SessionService().clear(); // removes userId/role/status
+      // 2) Clear saved session
+      await SessionService().clear(); // removes userId/role/status
 
-    // 3) Clear remember-me prefs so auto-redirect won’t happen
-    final sp = await SharedPreferences.getInstance();
-    await sp.remove('sd_saved_email');
-    await sp.setBool('sd_remember_me', false);
+      // 3) Clear remember-me prefs so auto-redirect won’t happen
+      final sp = await SharedPreferences.getInstance();
+      await sp.remove('sd_saved_email');
+      await sp.setBool('sd_remember_me', false);
 
-    // Optional: nuke ALL prefs if you ever want a hard logout
-    if (wipeAllPrefs) {
-      await sp.clear();
+      // Optional: nuke ALL prefs if you ever want a hard logout
+      if (wipeAllPrefs) {
+        await sp.clear();
+      }
+
+      // 4) Firebase sign out
+      await _auth.signOut();
+
+      // 5) Navigate to Login (reset stack)
+      if (!mounted) return;
+      Navigator.of(context).pushAndRemoveUntil(
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (_) => false,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error logging out: $e', style: AppText.tileSubtitle.copyWith(color: AppColors.danger))),
+      );
     }
-
-    // 4) Firebase sign out
-    await _auth.signOut();
-
-    // 5) Navigate to Login (reset stack)
-    if (!mounted) return;
-    Navigator.of(context).pushAndRemoveUntil(
-      MaterialPageRoute(builder: (_) => const LoginScreen()),
-      (_) => false,
-    );
-  } catch (e) {
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Error logging out: $e')),
-    );
   }
-}
-
 
   // ---------------- Utils ----------------
 

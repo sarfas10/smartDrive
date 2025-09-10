@@ -3,7 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'attend_test_page.dart';
 
-const kBrand = Color(0xFF4c63d2);
+// Use design tokens
+import 'theme/app_theme.dart';
 
 enum QuestionTypeResult { mcq, paragraph }
 
@@ -79,10 +80,10 @@ class TestResultPage extends StatelessWidget {
             (i.typedAnswer ?? '').trim().isNotEmpty)).length;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF6F7FB),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: kBrand,
+        backgroundColor: AppColors.brand,
         title: const Text('Test Results'),
       ),
       body: SafeArea(
@@ -130,8 +131,8 @@ class TestResultPage extends StatelessWidget {
               final finishBtn = Expanded(
                 child: FilledButton.icon(
                   style: FilledButton.styleFrom(
-                    backgroundColor: kBrand,
-                    foregroundColor: Colors.white,
+                    backgroundColor: AppColors.brand,
+                    foregroundColor: AppColors.onSurfaceInverse,
                     padding:
                         const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   ),
@@ -249,9 +250,9 @@ class _SummaryCard extends StatelessWidget {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.black12.withOpacity(.06)),
+        border: Border.all(color: const Color(0x11000000)),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withOpacity(.04),
@@ -278,7 +279,7 @@ class _SummaryCard extends StatelessWidget {
                   runSpacing: 8,
                   children: [
                     _Meta('Result', pass ? 'PASS' : 'FAIL',
-                        color: pass ? Colors.green : Colors.red),
+                        color: pass ? AppColors.success : AppColors.danger),
                     _Meta('Passing', '$passingPct%'),
                     _Meta('Total', '$total'),
                     _Meta('Attempted', '$attempted'),
@@ -301,6 +302,8 @@ class _ScoreDonut extends StatelessWidget {
   const _ScoreDonut({required this.score, required this.pass});
   @override
   Widget build(BuildContext context) {
+    final fg = pass ? AppColors.success : AppColors.danger;
+    final fgDark = pass ? const Color(0xFF065F46) : const Color(0xFFB00020);
     return SizedBox(
       width: 84,
       height: 84,
@@ -310,13 +313,13 @@ class _ScoreDonut extends StatelessWidget {
           CircularProgressIndicator(
             value: score / 100.0,
             strokeWidth: 10,
-            color: pass ? Colors.green : Colors.red,
+            color: fg,
             backgroundColor: const Color(0xFFE9ECEF),
           ),
           Text('$score%',
               style: TextStyle(
                 fontWeight: FontWeight.w800,
-                color: pass ? Colors.green.shade800 : Colors.red.shade800,
+                color: fgDark,
               )),
         ],
       ),
@@ -333,14 +336,14 @@ class _Meta extends StatelessWidget {
   Widget build(BuildContext context) {
     final valStyle = TextStyle(
       fontWeight: FontWeight.w800,
-      color: color ?? Colors.black87,
+      color: color ?? AppColors.onSurface,
     );
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.grey.shade100,
+        color: AppColors.neuBg,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.grey.shade300),
+        border: Border.all(color: AppColors.divider),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -348,7 +351,7 @@ class _Meta extends StatelessWidget {
           Text(label.toUpperCase(),
               style: TextStyle(
                 fontSize: 10,
-                color: Colors.grey.shade700,
+                color: AppColors.onSurfaceMuted,
                 letterSpacing: .5,
               )),
           const SizedBox(height: 2),
@@ -372,12 +375,12 @@ class _ResultItemCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: good
-              ? Colors.green.withOpacity(.35)
-              : Colors.red.withOpacity(.35),
+              ? AppColors.success.withOpacity(.35)
+              : AppColors.danger.withOpacity(.35),
         ),
       ),
       child: Padding(
@@ -391,22 +394,23 @@ class _ResultItemCard extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: (good ? Colors.green : Colors.red).withOpacity(.08),
+                    color:
+                        (good ? AppColors.success : AppColors.danger).withOpacity(.08),
                     borderRadius: BorderRadius.circular(999),
                     border: Border.all(
-                        color: (good ? Colors.green : Colors.red)
+                        color: (good ? AppColors.success : AppColors.danger)
                             .withOpacity(.35)),
                   ),
                   child: Row(
                     children: [
                       Icon(good ? Icons.check_circle : Icons.cancel,
                           size: 16,
-                          color: good ? Colors.green : Colors.red),
+                          color: good ? AppColors.success : AppColors.danger),
                       const SizedBox(width: 6),
                       Text(
                         good ? 'CORRECT' : 'WRONG',
                         style: TextStyle(
-                          color: good ? Colors.green : Colors.red,
+                          color: good ? AppColors.success : AppColors.danger,
                           fontWeight: FontWeight.w800,
                           fontSize: 10.5,
                         ),
@@ -428,17 +432,16 @@ class _ResultItemCard extends StatelessWidget {
                   padding:
                       const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.deepPurple.withOpacity(.08),
+                    color: AppColors.purple.withOpacity(.08),
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(
-                        color: Colors.deepPurple.withOpacity(.25)),
+                    border: Border.all(color: AppColors.purple.withOpacity(.25)),
                   ),
                   child: Text(
                     item.type == QuestionTypeResult.mcq
                         ? 'MCQ'
                         : 'PARAGRAPH',
                     style: const TextStyle(
-                      color: Colors.deepPurple,
+                      color: AppColors.purple,
                       fontWeight: FontWeight.w800,
                       fontSize: 11,
                     ),
@@ -472,10 +475,10 @@ class _ResultItemCard extends StatelessWidget {
                   IconData? icon;
 
                   if (isCorrect) {
-                    textColor = Colors.green.shade800;
+                    textColor = const Color(0xFF065F46); // dark green
                     icon = Icons.check_circle;
                   } else if (isSelected && !isCorrect) {
-                    textColor = Colors.red.shade800;
+                    textColor = const Color(0xFFB00020); // dark red
                     icon = Icons.cancel;
                   }
 
@@ -485,16 +488,16 @@ class _ResultItemCard extends StatelessWidget {
                         horizontal: 10, vertical: 10),
                     decoration: BoxDecoration(
                       color: isCorrect
-                          ? Colors.green.withOpacity(.06)
+                          ? AppColors.success.withOpacity(.06)
                           : isSelected && !isCorrect
-                              ? Colors.red.withOpacity(.06)
-                              : Colors.grey.shade50,
+                              ? AppColors.danger.withOpacity(.06)
+                              : AppColors.neuBg,
                       border: Border.all(
                         color: isCorrect
-                            ? Colors.green.withOpacity(.35)
+                            ? AppColors.success.withOpacity(.35)
                             : isSelected && !isCorrect
-                                ? Colors.red.withOpacity(.35)
-                                : Colors.grey.shade300,
+                                ? AppColors.danger.withOpacity(.35)
+                                : AppColors.divider,
                       ),
                       borderRadius: BorderRadius.circular(8),
                     ),
@@ -509,7 +512,7 @@ class _ResultItemCard extends StatelessWidget {
                             '${String.fromCharCode(65 + i)}) $option',
                             style: TextStyle(
                               fontWeight: FontWeight.w600,
-                              color: textColor ?? Colors.black87,
+                              color: textColor ?? AppColors.onSurface,
                             ),
                           ),
                         ),
@@ -532,13 +535,13 @@ class _ResultItemCard extends StatelessWidget {
               Row(
                 children: [
                   Icon(Icons.info_outline,
-                      size: 16, color: Colors.grey.shade700),
+                      size: 16, color: AppColors.onSurfaceMuted),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       item.explanation,
                       style: TextStyle(
-                          fontSize: 12, color: Colors.grey.shade700),
+                          fontSize: 12, color: AppColors.onSurfaceMuted),
                     ),
                   ),
                 ],
@@ -560,20 +563,20 @@ class _KV extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final col = good
-        ? Colors.green.shade800
+        ? const Color(0xFF065F46)
         : bad
-            ? Colors.red.shade800
-            : Colors.black87;
+            ? const Color(0xFFB00020)
+            : AppColors.onSurface;
     final bg = good
-        ? Colors.green.withOpacity(.06)
+        ? AppColors.success.withOpacity(.06)
         : bad
-            ? Colors.red.withOpacity(.06)
-            : Colors.grey.shade50;
+            ? AppColors.danger.withOpacity(.06)
+            : AppColors.neuBg;
     final br = good
-        ? Colors.green.withOpacity(.35)
+        ? AppColors.success.withOpacity(.35)
         : bad
-            ? Colors.red.withOpacity(.35)
-            : Colors.grey.shade300;
+            ? AppColors.danger.withOpacity(.35)
+            : AppColors.divider;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
       decoration: BoxDecoration(
@@ -588,7 +591,7 @@ class _KV extends StatelessWidget {
             child: Text(k.toUpperCase(),
                 style: TextStyle(
                     fontSize: 10,
-                    color: Colors.grey.shade700,
+                    color: AppColors.onSurfaceMuted,
                     letterSpacing: .5)),
           ),
           const SizedBox(width: 8),

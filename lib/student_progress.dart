@@ -3,16 +3,6 @@
 // Student profile + progress page.
 // - Overview: contact/personal info + documents (no separate Documents tab)
 // - Progress: attendance pie + test metrics driven by your test_attempts schema
-//
-// Firestore (as per your screenshots):
-// users/{uid}: displayName|name, email, phone|mobile, dob, courseName|course,
-//              plan, enrolledAt|createdAt (Timestamp/String)
-// attendance:  { userId|uid, date|day (Timestamp), status: 'present'|'absent' }
-// test_attempts:
-//   { student_id, pool_id, score (0..100), total (int), correct (int),
-//     status ('completed'...), started_at, completed_at }
-// test_pool/{pool_id}: { title, passing_score_pct, ... }
-// documents:   { userId, name|title, url|link, type|category('kyc'|'other'), verified(bool) }
 
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -21,6 +11,9 @@ import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+// Use your app theme tokens
+import 'theme/app_theme.dart';
 
 class StudentProgressPage extends StatefulWidget {
   const StudentProgressPage({super.key, this.studentId});
@@ -32,8 +25,6 @@ class StudentProgressPage extends StatefulWidget {
 
 class _StudentProgressPageState extends State<StudentProgressPage>
     with SingleTickerProviderStateMixin {
-  static const _kBrand = Color(0xFF4C63D2);
-
   late final TabController _tab;
 
   String? _uid;
@@ -136,87 +127,86 @@ class _StudentProgressPageState extends State<StudentProgressPage>
   }
 
   Future<void> _loadTestsFromSchema() async {
-  final attemptsCol = FirebaseFirestore.instance.collection('test_attempts');
+    final attemptsCol = FirebaseFirestore.instance.collection('test_attempts');
 
-  QuerySnapshot<Map<String, dynamic>> q;
-  try {
-    q = await attemptsCol
-        .where('student_id', isEqualTo: _uid)
-        .orderBy('completed_at', descending: true)
-        .get();
-  } on FirebaseException catch (e) {
-    if (e.code == 'failed-precondition') {
-      // No composite index yet — fetch without order and sort locally.
-      q = await attemptsCol.where('student_id', isEqualTo: _uid).get();
-    } else {
-      rethrow;
-    }
-  }
-
-  // If we didn’t get server-side ordering, sort here.
-  final docs = q.docs..sort((a, b) {
-    final da = _ts(a.data()['completed_at']) ?? DateTime.fromMillisecondsSinceEpoch(0);
-    final db = _ts(b.data()['completed_at']) ?? DateTime.fromMillisecondsSinceEpoch(0);
-    return db.compareTo(da); // desc
-  });
-
-  int count = 0;
-  double scoreSum = 0;
-  int sumCorrect = 0;
-  int sumTotal = 0;
-
-  final poolIds = <String>{};
-  final recent = <_Attempt>[];
-
-  for (final d in docs) {
-    final m = d.data();
-    if ((m['status'] ?? '').toString().toLowerCase() != 'completed') continue;
-
-    final score = (m['score'] ?? 0);
-    final total = (m['total'] ?? 0);
-    final correct = (m['correct'] ?? 0);
-    final poolId = (m['pool_id'] ?? '').toString();
-    final completedAt = _ts(m['completed_at']) ?? _ts(m['ended_at']) ?? DateTime.now();
-
-    count++;
-    scoreSum += (score is num ? score.toDouble() : 0.0);
-    sumCorrect += (correct is num ? correct.toInt() : 0);
-    sumTotal += (total is num ? total.toInt() : 0);
-
-    if (poolId.isNotEmpty) poolIds.add(poolId);
-    if (recent.length < 5) {
-      recent.add(_Attempt(
-        poolId: poolId,
-        poolTitle: '',
-        scorePct: (score is num) ? score.toDouble() : 0,
-        completedAt: completedAt,
-      ));
-    }
-  }
-
-  // Resolve pool titles
-  final titles = <String, String>{};
-  for (final id in poolIds) {
+    QuerySnapshot<Map<String, dynamic>> q;
     try {
-      final p = await FirebaseFirestore.instance.collection('test_pool').doc(id).get();
-      final data = p.data();
-      if (data != null) titles[id] = (data['title'] ?? '').toString();
-    } catch (_) {}
-  }
-  for (var i = 0; i < recent.length; i++) {
-    final r = recent[i];
-    recent[i] = r.copyWith(poolTitle: titles[r.poolId] ?? r.poolId);
-  }
+      q = await attemptsCol
+          .where('student_id', isEqualTo: _uid)
+          .orderBy('completed_at', descending: true)
+          .get();
+    } on FirebaseException catch (e) {
+      if (e.code == 'failed-precondition') {
+        // No composite index yet — fetch without order and sort locally.
+        q = await attemptsCol.where('student_id', isEqualTo: _uid).get();
+      } else {
+        rethrow;
+      }
+    }
 
-  setState(() {
-    _attempts = count;
-    _avgScore = count == 0 ? 0 : (scoreSum / count);
-    _sumCorrect = sumCorrect;
-    _sumQuestions = sumTotal;
-    _recent = recent;
-  });
-}
+    // If we didn’t get server-side ordering, sort here.
+    final docs = q.docs..sort((a, b) {
+      final da = _ts(a.data()['completed_at']) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final db = _ts(b.data()['completed_at']) ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return db.compareTo(da); // desc
+    });
 
+    int count = 0;
+    double scoreSum = 0;
+    int sumCorrect = 0;
+    int sumTotal = 0;
+
+    final poolIds = <String>{};
+    final recent = <_Attempt>[];
+
+    for (final d in docs) {
+      final m = d.data();
+      if ((m['status'] ?? '').toString().toLowerCase() != 'completed') continue;
+
+      final score = (m['score'] ?? 0);
+      final total = (m['total'] ?? 0);
+      final correct = (m['correct'] ?? 0);
+      final poolId = (m['pool_id'] ?? '').toString();
+      final completedAt = _ts(m['completed_at']) ?? _ts(m['ended_at']) ?? DateTime.now();
+
+      count++;
+      scoreSum += (score is num ? score.toDouble() : 0.0);
+      sumCorrect += (correct is num ? correct.toInt() : 0);
+      sumTotal += (total is num ? total.toInt() : 0);
+
+      if (poolId.isNotEmpty) poolIds.add(poolId);
+      if (recent.length < 5) {
+        recent.add(_Attempt(
+          poolId: poolId,
+          poolTitle: '',
+          scorePct: (score is num) ? score.toDouble() : 0,
+          completedAt: completedAt,
+        ));
+      }
+    }
+
+    // Resolve pool titles
+    final titles = <String, String>{};
+    for (final id in poolIds) {
+      try {
+        final p = await FirebaseFirestore.instance.collection('test_pool').doc(id).get();
+        final data = p.data();
+        if (data != null) titles[id] = (data['title'] ?? '').toString();
+      } catch (_) {}
+    }
+    for (var i = 0; i < recent.length; i++) {
+      final r = recent[i];
+      recent[i] = r.copyWith(poolTitle: titles[r.poolId] ?? r.poolId);
+    }
+
+    setState(() {
+      _attempts = count;
+      _avgScore = count == 0 ? 0 : (scoreSum / count);
+      _sumCorrect = sumCorrect;
+      _sumQuestions = sumTotal;
+      _recent = recent;
+    });
+  }
 
   Future<void> _loadDocuments() async {
     final q = await FirebaseFirestore.instance
@@ -285,11 +275,11 @@ class _StudentProgressPageState extends State<StudentProgressPage>
     final course = (_user?['courseName'] ?? _user?['course'] ?? '—').toString();
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF7F8FA),
+      backgroundColor: AppColors.background,
       appBar: AppBar(
         title: const Text('Student Profile'),
-        backgroundColor: Colors.white,
-        foregroundColor: Colors.black87,
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.onSurface,
         elevation: 0.5,
       ),
       body: _loading
@@ -301,12 +291,12 @@ class _StudentProgressPageState extends State<StudentProgressPage>
                     _buildHeaderCard(theme, name, course),
                     const SizedBox(height: 8),
                     Container(
-                      color: Colors.white,
+                      color: AppColors.surface,
                       child: TabBar(
                         controller: _tab,
-                        labelColor: _kBrand,
-                        unselectedLabelColor: Colors.black54,
-                        indicatorColor: _kBrand,
+                        labelColor: AppColors.brand,
+                        unselectedLabelColor: AppColors.onSurfaceMuted,
+                        indicatorColor: AppColors.brand,
                         tabs: const [Tab(text: 'Overview'), Tab(text: 'Progress')],
                       ),
                     ),
@@ -331,9 +321,9 @@ class _StudentProgressPageState extends State<StudentProgressPage>
     return Container(
       margin: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
-        boxShadow: const [BoxShadow(color: Color(0x14000000), blurRadius: 10, offset: Offset(0, 4))],
+        boxShadow: AppShadows.card,
       ),
       child: Padding(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 16),
@@ -350,10 +340,10 @@ class _StudentProgressPageState extends State<StudentProgressPage>
                       Text(name,
                           style: theme.textTheme.titleMedium!.copyWith(fontWeight: FontWeight.w600)),
                       const SizedBox(height: 2),
-                      Text(course, style: theme.textTheme.bodySmall!.copyWith(color: Colors.black54)),
+                      Text(course, style: theme.textTheme.bodySmall!.copyWith(color: AppColors.onSurfaceMuted)),
                       const SizedBox(height: 2),
                       Text('Enrolled: ${_fmtDate(_enrolledAt)}',
-                          style: theme.textTheme.bodySmall!.copyWith(color: Colors.black45)),
+                          style: theme.textTheme.bodySmall!.copyWith(color: AppColors.onSurfaceFaint)),
                     ],
                   ),
                 ),
@@ -502,7 +492,7 @@ class _StudentProgressPageState extends State<StudentProgressPage>
         trailing: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: const Color(0xFFF3F6FF),
+            color: AppColors.brand.withOpacity(0.08),
             borderRadius: BorderRadius.circular(999),
           ),
           child: Text('${a.scorePct.toStringAsFixed(0)}%',
@@ -522,9 +512,9 @@ class _StudentProgressPageState extends State<StudentProgressPage>
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(12),
-        boxShadow: const [BoxShadow(color: Color(0x0F000000), blurRadius: 10, offset: Offset(0, 4))],
+        boxShadow: AppShadows.card,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -560,7 +550,7 @@ class _StudentProgressPageState extends State<StudentProgressPage>
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFFF3F6FF),
+        color: AppColors.neuBg,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: const Color(0xFFE0E6FF)),
       ),
@@ -602,7 +592,7 @@ class _StudentProgressPageState extends State<StudentProgressPage>
             contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
             title: Text(d.name, style: const TextStyle(fontSize: 14)),
             subtitle: Text(d.verified ? 'Verified' : 'Unverified',
-                style: TextStyle(fontSize: 12, color: d.verified ? const Color(0xFF2E7D32) : Colors.black45)),
+                style: TextStyle(fontSize: 12, color: d.verified ? AppColors.okFg : Colors.black45)),
             trailing: IconButton(
               icon: const Icon(Icons.open_in_new, size: 20),
               onPressed: d.url.isEmpty ? null : () => _openUrl(d.url),
@@ -647,9 +637,9 @@ class _AvatarInitials extends StatelessWidget {
             .take(2).map((s) => s[0].toUpperCase()).join();
     return CircleAvatar(
       radius: 22,
-      backgroundColor: const Color(0xFFE9EDFF),
+      backgroundColor: AppColors.neuBg,
       child: Text(initials,
-          style: const TextStyle(color: Color(0xFF4C63D2), fontWeight: FontWeight.w700)),
+          style: const TextStyle(color: AppColors.brand, fontWeight: FontWeight.w700)),
     );
   }
 }
@@ -682,7 +672,7 @@ class _GreenProgressBar extends StatelessWidget {
                     Container(color: const Color(0xFFE8F8EC)),
                     FractionallySizedBox(
                       widthFactor: value.clamp(0, 1),
-                      child: Container(color: const Color(0xFFB5E3C1)),
+                      child: Container(color: AppColors.success),
                     ),
                   ],
                 ),
@@ -738,8 +728,8 @@ class _PiePainter extends CustomPainter {
     final radius = math.min(size.width, size.height) / 2;
 
     final bg = Paint()..style = PaintingStyle.stroke..strokeWidth = 18..color = const Color(0xFFEDEFF4);
-    final pPaint = Paint()..style = PaintingStyle.stroke..strokeCap = StrokeCap.round..strokeWidth = 18..color = const Color(0xFF4CAF50);
-    final aPaint = Paint()..style = PaintingStyle.stroke..strokeCap = StrokeCap.round..strokeWidth = 18..color = const Color(0xFFEF5350);
+    final pPaint = Paint()..style = PaintingStyle.stroke..strokeCap = StrokeCap.round..strokeWidth = 18..color = AppColors.success;
+    final aPaint = Paint()..style = PaintingStyle.stroke..strokeCap = StrokeCap.round..strokeWidth = 18..color = AppColors.danger;
 
     canvas.drawCircle(center, radius, bg);
 
@@ -752,8 +742,8 @@ class _PiePainter extends CustomPainter {
     if (absent > 0)  canvas.drawArc(rect, start + pSweep, aSweep, false, aPaint);
 
     final legendY = size.height - 14;
-    _legend(canvas, Offset(8, legendY), const Color(0xFF4CAF50), 'Present');
-    _legend(canvas, Offset(size.width / 2, legendY), const Color(0xFFEF5350), 'Absent');
+    _legend(canvas, Offset(8, legendY), AppColors.success, 'Present');
+    _legend(canvas, Offset(size.width / 2, legendY), AppColors.danger, 'Absent');
   }
 
   void _legend(Canvas canvas, Offset at, Color color, String label) {

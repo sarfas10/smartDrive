@@ -1,15 +1,15 @@
+// lib/ui_common.dart
 import 'package:flutter/material.dart';
+import 'package:smart_drive/theme/app_theme.dart';
 
-/// ─────────────────────────────────────────────────────────────────────────────
-/// Brand
-/// ─────────────────────────────────────────────────────────────────────────────
-const Color kBrand = Color(0xFF4c63d2);
+/// Backward-compatible brand alias (prefer AppColors.brand going forward)
+const Color kBrand = AppColors.brand;
 
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 /// % Helpers (use screen width/height/shortest side as percentage units)
 /// Usage: context.wp(30) => 30% of width, context.hp(10) => 10% of height,
 ///        context.sp(2)  => 2% of shortest side (good for fonts / radii)
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 extension Pct on BuildContext {
   Size get _sz => MediaQuery.of(this).size;
   double wp(double percent) => _sz.width * percent / 100.0;
@@ -18,20 +18,15 @@ extension Pct on BuildContext {
 }
 double _clamp(double v, double min, double max) => v.clamp(min, max).toDouble();
 
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 /// Background & Glass
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 class BgGradient extends StatelessWidget {
   const BgGradient({super.key});
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft, end: Alignment.bottomRight,
-          colors: [Color(0xFF667eea), Color(0xFF764ba2)],
-        ),
-      ),
+      decoration: const BoxDecoration(gradient: AppGradients.brandHero),
     );
   }
 }
@@ -53,8 +48,8 @@ class Glass extends StatelessWidget {
         duration: const Duration(milliseconds: 160),
         decoration: BoxDecoration(
           color: const Color(0xF5FFFFFF),
-          border: Border.all(color: Colors.white.withOpacity(0.20)),
-          boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.08), blurRadius: _clamp(context.sp(2.0), 8, 22))],
+          border: Border.all(color: AppColors.onSurfaceInverse.withOpacity(0.20)),
+          boxShadow: AppShadows.card,
         ),
         child: Padding(padding: pad, child: child),
       ),
@@ -62,9 +57,9 @@ class Glass extends StatelessWidget {
   }
 }
 
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 /// Header Bar
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 class HeaderBar extends StatelessWidget {
   final String title;
   final Widget? trailing;
@@ -85,7 +80,7 @@ class HeaderBar extends StatelessWidget {
             child: Text(
               title,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: titleSize, fontWeight: FontWeight.w700, color: Colors.black87),
+              style: AppText.sectionTitle.copyWith(fontSize: titleSize, color: context.c.onSurface),
             ),
           ),
           SizedBox(width: _clamp(context.wp(2), 8, 14)),
@@ -97,12 +92,26 @@ class HeaderBar extends StatelessWidget {
                     width: chip, height: chip, alignment: Alignment.center,
                     decoration: const BoxDecoration(
                       shape: BoxShape.circle,
-                      gradient: LinearGradient(colors: [Color(0xFF4c63d2), Color(0xFF764ba2)]),
+                      gradient: AppGradients.brandChip,
                     ),
-                    child: Text('A', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: _clamp(context.sp(1.8), 11, 16))),
+                    child: Text(
+                      'A',
+                      style: AppText.tileTitle.copyWith(
+                        color: AppColors.onSurfaceInverse,
+                        fontWeight: FontWeight.bold,
+                        fontSize: _clamp(context.sp(1.8), 11, 16),
+                      ),
+                    ),
                   ),
                   SizedBox(width: _clamp(context.wp(1.8), 6, 12)),
-                  Text('Admin User', style: TextStyle(fontWeight: FontWeight.w600, fontSize: nameSize)),
+                  Text(
+                    'Admin User',
+                    style: AppText.tileSubtitle.copyWith(
+                      color: context.c.onSurface,
+                      fontWeight: FontWeight.w600,
+                      fontSize: nameSize,
+                    ),
+                  ),
                 ],
               ),
         ],
@@ -111,9 +120,9 @@ class HeaderBar extends StatelessWidget {
   }
 }
 
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 /// Section & Table Headers
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 class SectionHeader extends StatelessWidget {
   final String title;
   const SectionHeader({super.key, required this.title});
@@ -128,7 +137,7 @@ class SectionHeader extends StatelessWidget {
             child: Text(
               title,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontWeight: FontWeight.w700, fontSize: fs),
+              style: AppText.sectionTitle.copyWith(fontSize: fs, color: context.c.onSurface),
             ),
           ),
         ],
@@ -148,12 +157,7 @@ class TableHeader extends StatelessWidget {
     final trailingFs = _clamp(context.sp(1.8), 12, 16);
 
     return Padding(
-      padding: EdgeInsets.fromLTRB(
-        context.wp(3),
-        context.hp(1.2),
-        context.wp(3),
-        context.hp(0.8),
-      ),
+      padding: EdgeInsets.fromLTRB(context.wp(3), context.hp(1.2), context.wp(3), context.hp(0.8)),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
@@ -161,18 +165,14 @@ class TableHeader extends StatelessWidget {
             child: Text(
               title,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontWeight: FontWeight.w700,
-                fontSize: fs,
-                color: Colors.black87, // title always black87
-              ),
+              style: AppText.tileTitle.copyWith(fontSize: fs, color: context.c.onSurface),
             ),
           ),
           if (trailing != null)
             DefaultTextStyle.merge(
-              style: TextStyle(fontSize: trailingFs, color: Colors.black87),
+              style: AppText.tileSubtitle.copyWith(fontSize: trailingFs, color: context.c.onSurface),
               child: IconTheme.merge(
-                data: const IconThemeData(color: Colors.black87),
+                data: IconThemeData(color: context.c.onSurface),
                 child: trailing!,
               ),
             ),
@@ -182,10 +182,9 @@ class TableHeader extends StatelessWidget {
   }
 }
 
-
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 /// Data Table (horizontal scroll on small screens)
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 class DataTableWrap extends StatelessWidget {
   final List<String> columns;
   final List<List<Widget>> rows;
@@ -201,24 +200,22 @@ class DataTableWrap extends StatelessWidget {
     final cellPadV = _clamp(context.hp(0.9), 4, 10);
 
     final table = DataTable(
-      headingRowColor: const WidgetStatePropertyAll(Color(0x1A4C63D2)),
+      headingRowColor: MaterialStatePropertyAll(AppColors.brand.withOpacity(0.10)),
       columnSpacing: colSpacing,
       dataRowMinHeight: rowMinH,
       dataRowMaxHeight: rowMaxH,
       columns: columns
-          .map(
-            (c) => DataColumn(
-              label: Text(
-                c,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: kBrand, // brand color for headers
-                  fontSize: headingFs,
+          .map((c) => DataColumn(
+                label: Text(
+                  c,
+                  overflow: TextOverflow.ellipsis,
+                  style: AppText.tileTitle.copyWith(
+                    color: AppColors.brand, // brand color for headers
+                    fontSize: headingFs,
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-              ),
-            ),
-          )
+              ))
           .toList(),
       rows: rows
           .map(
@@ -227,18 +224,13 @@ class DataTableWrap extends StatelessWidget {
                   .map(
                     (w) => DataCell(
                       ConstrainedBox(
-                        constraints: BoxConstraints(
-                          minWidth: _clamp(context.wp(8), 40, 120),
-                        ),
+                        constraints: BoxConstraints(minWidth: _clamp(context.wp(8), 40, 120)),
                         child: Padding(
                           padding: EdgeInsets.symmetric(vertical: cellPadV),
                           child: DefaultTextStyle.merge(
-                            style: TextStyle(
-                              fontSize: cellFs,
-                              color: Colors.black54,
-                            ),
+                            style: AppText.tileSubtitle.copyWith(fontSize: cellFs, color: AppColors.onSurfaceMuted),
                             child: IconTheme.merge(
-                              data: const IconThemeData(color: Colors.black87),
+                              data: IconThemeData(color: context.c.onSurface),
                               child: w,
                             ),
                           ),
@@ -259,10 +251,9 @@ class DataTableWrap extends StatelessWidget {
   }
 }
 
-
-/// ─────────────────────────────────────────────────────────────────────────────
-/// Cards & Stats (percentage-based sizing; no overflow)
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
+/// Cards & Stats
+///// ───────────────────────────────────────────────────────────────────────────
 class AppCard extends StatelessWidget {
   final String? title;
   final Widget child;
@@ -278,9 +269,9 @@ class AppCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (title != null) ...[
-              Text(title!, style: TextStyle(fontSize: titleFs, fontWeight: FontWeight.w700, color: Colors.black87)),
+              Text(title!, style: AppText.tileTitle.copyWith(fontSize: titleFs, color: context.c.onSurface)),
               SizedBox(height: gap),
-              const Divider(height: 1),
+              const Divider(height: 1, color: AppColors.divider),
               SizedBox(height: gap),
             ],
             child,
@@ -292,8 +283,6 @@ class AppCard extends StatelessWidget {
 }
 
 /// Grid where tile width/height are driven by screen %.
-/// - targetTileWidthPct: desired width per card as % of screen width
-/// - tileHeightPct:      desired height per card as % of screen height
 class StatsGrid extends StatelessWidget {
   final List<Widget> cards;
   final double targetTileWidthPct;
@@ -355,7 +344,7 @@ class StatCard extends StatelessWidget {
     required this.value,
     required this.label,
     this.icon,
-    this.tint = kBrand,
+    this.tint = AppColors.brand,
   });
 
   @override
@@ -401,7 +390,7 @@ class StatCard extends StatelessWidget {
                   Text(
                     label,
                     maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.black54, fontSize: lFs, fontWeight: FontWeight.w400),
+                    style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted, fontSize: lFs, fontWeight: FontWeight.w400),
                   ),
                 ],
               ),
@@ -413,9 +402,9 @@ class StatCard extends StatelessWidget {
   }
 }
 
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 /// Badges & Pills
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 class StatusBadge extends StatelessWidget {
   final String text;
   final String? type; // 'pending' | 'approved' | 'rejected' | 'active'
@@ -424,11 +413,11 @@ class StatusBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     Color bg, fg;
     switch (type) {
-      case 'pending':  bg = const Color(0xFFFFF3CD); fg = const Color(0xFF856404); break;
+      case 'pending':  bg = AppColors.warnBg; fg = AppColors.warnFg; break;
       case 'approved':
-      case 'active':   bg = const Color(0xFFD4EDDA); fg = const Color(0xFF155724); break;
-      case 'rejected': bg = const Color(0xFFF8D7DA); fg = const Color(0xFF721C24); break;
-      default:         bg = const Color(0xFFE9ECEF); fg = const Color(0xFF495057);
+      case 'active':   bg = AppColors.okBg;   fg = AppColors.okFg;   break;
+      case 'rejected': bg = AppColors.errBg;  fg = AppColors.errFg;  break;
+      default:         bg = AppColors.neuBg;  fg = AppColors.neuFg;
     }
     final padH = _clamp(context.wp(2.2), 8, 12);
     final padV = _clamp(context.hp(0.5), 3, 6);
@@ -438,7 +427,7 @@ class StatusBadge extends StatelessWidget {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(radius)),
-      child: Text(text.toUpperCase(), style: TextStyle(color: fg, fontSize: fs, fontWeight: FontWeight.w700)),
+      child: Text(text.toUpperCase(), style: AppText.hintSmall.copyWith(color: fg, fontSize: fs, fontWeight: FontWeight.w700)),
     );
   }
 }
@@ -451,9 +440,9 @@ class RoleBadge extends StatelessWidget {
     final isInstructor = role == 'instructor';
     final isAdmin = role == 'admin';
     Color bg, fg;
-    if (isAdmin)      { bg = const Color(0xFFEDE7F6); fg = const Color(0xFF5E35B1); }
-    else if (isInstructor) { bg = const Color(0xFFE3F2FD); fg = const Color(0xFF1565C0); }
-    else              { bg = const Color(0xFFFFF8E1); fg = const Color(0xFFCC6E00); }
+    if (isAdmin)      { bg = AppColors.roleAdminBg;      fg = AppColors.roleAdminFg; }
+    else if (isInstructor) { bg = AppColors.roleInstructorBg; fg = AppColors.roleInstructorFg; }
+    else              { bg = AppColors.roleStudentBg;    fg = AppColors.roleStudentFg; }
 
     final padH = _clamp(context.wp(2.2), 8, 12);
     final padV = _clamp(context.hp(0.5), 3, 6);
@@ -465,7 +454,7 @@ class RoleBadge extends StatelessWidget {
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(radius)),
       child: Text(
         role.isEmpty ? '-' : role[0].toUpperCase() + role.substring(1),
-        style: TextStyle(color: fg, fontSize: fs, fontWeight: FontWeight.w700),
+        style: AppText.hintSmall.copyWith(color: fg, fontSize: fs, fontWeight: FontWeight.w700),
       ),
     );
   }
@@ -491,14 +480,14 @@ class FilterPill extends StatelessWidget {
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: padH, vertical: padV),
         decoration: BoxDecoration(
-          border: Border.all(color: kBrand, width: borderW),
-          color: selected ? kBrand : Colors.transparent,
+          border: Border.all(color: AppColors.brand, width: borderW),
+          color: selected ? AppColors.brand : Colors.transparent,
           borderRadius: BorderRadius.circular(radius),
         ),
         child: Text(
           label,
-          style: TextStyle(
-            color: selected ? Colors.white : kBrand,
+          style: AppText.tileSubtitle.copyWith(
+            color: selected ? AppColors.onSurfaceInverse : AppColors.brand,
             fontWeight: FontWeight.w600,
             fontSize: fs,
           ),
@@ -508,16 +497,20 @@ class FilterPill extends StatelessWidget {
   }
 }
 
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 /// Inputs & Dialogs
-/// ─────────────────────────────────────────────────────────────────────────────
+///// ───────────────────────────────────────────────────────────────────────────
 Widget field(String label, TextEditingController c, {bool number = false}) {
   return TextField(
     controller: c,
     keyboardType: number ? TextInputType.number : TextInputType.text,
+    style: TextStyle(color: AppColors.onSurface),
     decoration: InputDecoration(
       labelText: label,
-      border: const OutlineInputBorder(),
+      labelStyle: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted),
+      filled: true,
+      fillColor: AppColors.surface,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
       contentPadding: EdgeInsets.symmetric(
         horizontal: _clamp(c.context?.wp(3) ?? 12, 10, 18),
         vertical: _clamp(c.context?.hp(1) ?? 10, 8, 14),
@@ -530,9 +523,13 @@ Widget area(String label, TextEditingController c) {
   return TextField(
     controller: c,
     maxLines: 3,
+    style: TextStyle(color: AppColors.onSurface),
     decoration: InputDecoration(
       labelText: label,
-      border: const OutlineInputBorder(),
+      labelStyle: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted),
+      filled: true,
+      fillColor: AppColors.surface,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
       contentPadding: EdgeInsets.symmetric(
         horizontal: _clamp(c.context?.wp(3) ?? 12, 10, 18),
         vertical: _clamp(c.context?.hp(1) ?? 10, 8, 14),
@@ -545,7 +542,7 @@ Widget area(String label, TextEditingController c) {
 /// If unavailable, defaults are used above.
 extension _CtrlCtx on TextEditingController {
   BuildContext? get context {
-    // This is a convenience: when used inside build trees, the ambient context is available.
+    // Convenience: when used inside build trees, the ambient context may be available.
     // If not, callers fall back to sane defaults via ?? in field()/area().
     return WidgetsBinding.instance.focusManager.primaryFocus?.context;
   }
@@ -556,11 +553,16 @@ Future<bool> confirmDialog({required BuildContext context, required String messa
   final res = await showDialog<bool>(
     context: context,
     builder: (_) => AlertDialog(
-      title: const Text('Confirm'),
-      content: Text(message),
+      title: Text('Confirm', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
+      content: Text(message, style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
       actions: [
-        TextButton(onPressed: () => Navigator.pop(context, false), child: Text('No', style: TextStyle(fontSize: btnFs))),
-        ElevatedButton(onPressed: () => Navigator.pop(context, true), child: Text('Yes', style: TextStyle(fontSize: btnFs))),
+        TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text('No', style: AppText.tileSubtitle.copyWith(fontSize: btnFs, color: context.c.primary))),
+        ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: context.c.primary, foregroundColor: context.c.onPrimary),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Yes', style: AppText.tileTitle.copyWith(fontSize: btnFs, color: context.c.onPrimary))),
       ],
     ),
   );

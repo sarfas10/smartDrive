@@ -15,8 +15,9 @@ import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:http/http.dart' as http;
+import 'theme/app_theme.dart';
 
-const Color _kAccent = Color(0xFF4C63D2);
+const Color _kAccent = AppColors.brand;
 
 // Set via --dart-define (public key only!)
 const String _razorpayKeyId = String.fromEnvironment('RAZORPAY_KEY_ID');
@@ -115,11 +116,14 @@ class _BookingPageState extends State<BookingPage> {
     ScaffoldMessenger.of(context).hideCurrentSnackBar();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(message),
-        backgroundColor: color ?? Colors.black87,
+        content: Text(
+          message,
+          style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse),
+        ),
+        backgroundColor: color ?? AppColors.onSurface,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 3),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
         margin: const EdgeInsets.all(12),
       ),
     );
@@ -155,7 +159,7 @@ class _BookingPageState extends State<BookingPage> {
         }
       }
     } catch (e) {
-      _snack('Could not load saved boarding point: $e');
+      _snack('Could not load saved boarding point: $e', color: AppColors.danger);
       if (mounted) setState(() => _isLocationLoading = false);
     }
   }
@@ -227,7 +231,7 @@ class _BookingPageState extends State<BookingPage> {
       setState(() => _isDataLoading = false);
     } catch (e) {
       setState(() => _isDataLoading = false);
-      _snack('Error loading data: $e');
+      _snack('Error loading data: $e', color: AppColors.danger);
     }
   }
 
@@ -243,8 +247,8 @@ class _BookingPageState extends State<BookingPage> {
             circleId: const CircleId('free_radius'),
             center: _officeLocation!,
             radius: _freeRadiusKm * 1000,
-            fillColor: Colors.blue.withOpacity(0.08),
-            strokeColor: Colors.blue.withOpacity(0.4),
+            fillColor: AppColors.brand.withOpacity(0.08),
+            strokeColor: AppColors.brand.withOpacity(0.4),
             strokeWidth: 2,
             consumeTapEvents: true,
             // NOTE: google_maps_flutter Circle has no onTap; handled via map tap.
@@ -366,7 +370,7 @@ class _BookingPageState extends State<BookingPage> {
       _showBubbleHint();
       _snack(
         'Tip: Hide the free-radius overlay for easier selection inside it.',
-        color: Colors.orange.shade700,
+        color: AppColors.warning,
       );
     }
     _addBoardingPointMarker(position);
@@ -418,7 +422,7 @@ class _BookingPageState extends State<BookingPage> {
         );
       }
     } catch (e) {
-      _snack('Error getting location: $e');
+      _snack('Error getting location: $e', color: AppColors.danger);
     } finally {
       if (mounted) setState(() => _isLocationLoading = false);
     }
@@ -504,7 +508,7 @@ class _BookingPageState extends State<BookingPage> {
 
   Future<void> _proceedToPay() async {
     if (_selectedLocation == null) {
-      _snack('Please select a boarding point');
+      _snack('Please select a boarding point', color: AppColors.warning);
       return;
     }
 
@@ -525,17 +529,17 @@ class _BookingPageState extends State<BookingPage> {
       _lastOrderId = await _createOrderOnServer(amountPaise: amountPaise);
       _openRazorpayCheckout(orderId: _lastOrderId!, amountPaise: amountPaise);
     } catch (e) {
-      _snack('Could not start payment: $e', color: Colors.red);
+      _snack('Could not start payment: $e', color: AppColors.danger);
     }
   }
 
   void _openRazorpayCheckout({required String orderId, required int amountPaise}) {
     if (_razorpay == null) {
-      _snack('Payment is unavailable right now. Please try again.');
+      _snack('Payment is unavailable right now. Please try again.', color: AppColors.danger);
       return;
     }
     if (_razorpayKeyId.isEmpty) {
-      _snack('Razorpay key missing. Pass --dart-define=RAZORPAY_KEY_ID=your_key');
+      _snack('Razorpay key missing. Pass --dart-define=RAZORPAY_KEY_ID=your_key', color: AppColors.danger);
       return;
     }
 
@@ -579,14 +583,14 @@ class _BookingPageState extends State<BookingPage> {
     try {
       _razorpay!.open(options);
     } catch (e) {
-      _snack('Unable to open payment: $e', color: Colors.red);
+      _snack('Unable to open payment: $e', color: AppColors.danger);
     }
   }
 
   Future<void> _onPaymentSuccess(PaymentSuccessResponse r) async {
     // Guard: we must have created an order
     if (r.orderId == null || r.paymentId == null || r.signature == null) {
-      _snack('Payment success response incomplete', color: Colors.red);
+      _snack('Payment success response incomplete', color: AppColors.danger);
       return;
     }
 
@@ -602,12 +606,12 @@ class _BookingPageState extends State<BookingPage> {
         expectedAmountPaise: amountPaise,
       );
     } catch (e) {
-      _snack('Verification error: $e', color: Colors.red);
+      _snack('Verification error: $e', color: AppColors.danger);
       return;
     }
 
     if (!valid) {
-      _snack('Payment verification failed. Please contact support.', color: Colors.red);
+      _snack('Payment verification failed. Please contact support.', color: AppColors.danger);
       return;
     }
 
@@ -625,7 +629,7 @@ class _BookingPageState extends State<BookingPage> {
 
   void _onPaymentError(PaymentFailureResponse r) {
     final msg = r.message?.toString().trim();
-    _snack('Payment failed${msg != null && msg.isNotEmpty ? ': $msg' : ''}', color: Colors.red);
+    _snack('Payment failed${msg != null && msg.isNotEmpty ? ': $msg' : ''}', color: AppColors.danger);
 
     // Optional: log failed attempt
     // FirebaseFirestore.instance.collection('payment_attempts').add({
@@ -717,16 +721,16 @@ class _BookingPageState extends State<BookingPage> {
         status == 'paid'
             ? 'Payment successful. Booking created.'
             : 'Booking created successfully (FREE under your plan)!',
-        color: Colors.green,
+        color: AppColors.success,
       );
       if (mounted) Navigator.of(context).pop();
     } catch (e) {
       // If anything fails inside the transaction, no writes were committed.
       final msg = e.toString();
       if (msg.contains('already booked')) {
-        _snack('Sorry, this slot was just booked by someone else.', color: Colors.red);
+        _snack('Sorry, this slot was just booked by someone else.', color: AppColors.danger);
       } else {
-        _snack('Error creating booking: $e', color: Colors.red);
+        _snack('Error creating booking: $e', color: AppColors.danger);
       }
     } finally {
       if (mounted) setState(() => _isBooking = false);
@@ -738,7 +742,7 @@ class _BookingPageState extends State<BookingPage> {
   @override
   Widget build(BuildContext context) {
     if (_isDataLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return Scaffold(body: Center(child: CircularProgressIndicator(color: AppColors.brand)));
     }
     return Scaffold(
       body: Column(
@@ -783,12 +787,14 @@ class _BookingPageState extends State<BookingPage> {
                         onPressed: () => _mapController?.animateCamera(CameraUpdate.zoomIn()),
                         icon: const Icon(Icons.add),
                         tooltip: 'Zoom In',
+                        color: AppColors.onSurface,
                       ),
                       const SizedBox(height: 8),
                       IconButton(
                         onPressed: () => _mapController?.animateCamera(CameraUpdate.zoomOut()),
                         icon: const Icon(Icons.remove),
                         tooltip: 'Zoom Out',
+                        color: AppColors.onSurface,
                       ),
                     ],
                   ),
@@ -803,7 +809,7 @@ class _BookingPageState extends State<BookingPage> {
                       IconButton(
                         onPressed: _clearBoardingPoint,
                         icon: const Icon(Icons.clear),
-                        color: Colors.red,
+                        color: AppColors.danger,
                         tooltip: 'Clear Boarding Point',
                       ),
                     ],
@@ -827,7 +833,7 @@ class _BookingPageState extends State<BookingPage> {
                           }
                         },
                         icon: const Icon(Icons.apartment),
-                        color: Colors.indigo,
+                        color: AppColors.brand,
                         tooltip: 'Go to Office',
                       ),
                     ],
@@ -843,7 +849,7 @@ class _BookingPageState extends State<BookingPage> {
                       IconButton(
                         onPressed: _goToCurrentLocation,
                         icon: const Icon(Icons.my_location),
-                        color: Colors.blue,
+                        color: AppColors.info,
                         tooltip: 'Use Current Location',
                       ),
                     ],
@@ -886,26 +892,26 @@ class _LoadingOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      color: Colors.black.withOpacity(0.30),
+      color: AppColors.onSurface.withOpacity(0.30),
       child: Center(
         child: Material(
-          color: Colors.white,
+          color: AppColors.surface,
           elevation: 6,
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(AppRadii.l),
           child: Padding(
             padding: const EdgeInsets.all(20),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const SizedBox(
+                SizedBox(
                   width: 28,
                   height: 28,
-                  child: CircularProgressIndicator(strokeWidth: 3),
+                  child: CircularProgressIndicator(strokeWidth: 3, color: AppColors.brand),
                 ),
                 const SizedBox(width: 14),
                 Text(
                   text,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  style: AppText.tileTitle.copyWith(fontSize: 16, fontWeight: FontWeight.w600, color: AppColors.onSurface),
                 ),
               ],
             ),
@@ -923,9 +929,9 @@ class _RoundedButtonsColumn extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Material(
-      color: Colors.white,
+      color: AppColors.surface,
       elevation: 2,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadii.s),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
         child: Column(
@@ -955,12 +961,12 @@ class _RadiusToggleButton extends StatelessWidget {
       clipBehavior: Clip.none,
       children: [
         Material(
-          color: _kAccent,
+          color: AppColors.brand,
           elevation: 3,
-          borderRadius: BorderRadius.circular(10),
+          borderRadius: BorderRadius.circular(AppRadii.s),
           child: InkWell(
             onTap: onPressed,
-            borderRadius: BorderRadius.circular(10),
+            borderRadius: BorderRadius.circular(AppRadii.s),
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               child: Row(
@@ -969,14 +975,13 @@ class _RadiusToggleButton extends StatelessWidget {
                   Icon(
                     isVisible ? Icons.visibility_off : Icons.visibility,
                     size: 16,
-                    color: Colors.white,
+                    color: AppColors.onSurfaceInverse,
                   ),
                   const SizedBox(width: 6),
                   Text(
                     isVisible ? 'Hide Radius' : 'Show Radius',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: Colors.white,
+                    style: AppText.hintSmall.copyWith(
+                      color: AppColors.onSurfaceInverse,
                       fontWeight: FontWeight.w600,
                       letterSpacing: .2,
                     ),
@@ -993,8 +998,8 @@ class _RadiusToggleButton extends StatelessWidget {
             child: Container(
               width: 8,
               height: 8,
-              decoration: const BoxDecoration(
-                color: Colors.red,
+              decoration: BoxDecoration(
+                color: AppColors.danger,
                 shape: BoxShape.circle,
               ),
             ),
@@ -1008,8 +1013,8 @@ class _SpeechBubble extends StatelessWidget {
   const _SpeechBubble({
     super.key,
     required this.text,
-    this.background = const Color(0xFFFFF6D6),
-    this.textColor = const Color(0xFF7A4D00),
+    this.background = AppColors.warnBg,
+    this.textColor = AppColors.warnFg,
   });
 
   final String text;
@@ -1021,7 +1026,7 @@ class _SpeechBubble extends StatelessWidget {
     return Material(
       color: background,
       elevation: 4,
-      borderRadius: BorderRadius.circular(12),
+      borderRadius: BorderRadius.circular(AppRadii.m),
       child: Stack(
         clipBehavior: Clip.none,
         children: [
@@ -1029,7 +1034,7 @@ class _SpeechBubble extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             child: Text(
               text,
-              style: TextStyle(fontSize: 12, color: textColor, fontWeight: FontWeight.w600),
+              style: AppText.tileSubtitle.copyWith(color: textColor, fontWeight: FontWeight.w600),
             ),
           ),
           Positioned(
@@ -1102,10 +1107,10 @@ class _SummarySheet extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.1),
+            color: AppColors.onSurface.withOpacity(0.1),
             blurRadius: 10,
             offset: const Offset(0, -5),
           ),
@@ -1122,12 +1127,12 @@ class _SummarySheet extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text(
+                  Text(
                     'Booking Summary',
-                    style: TextStyle(
+                    style: AppText.sectionTitle.copyWith(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
-                      color: Colors.black87,
+                      color: AppColors.onSurface,
                     ),
                   ),
                   _RadiusToggleButton(
@@ -1140,9 +1145,9 @@ class _SummarySheet extends StatelessWidget {
 
               if (showHintBubble) ...[
                 const SizedBox(height: 8),
-                const Row(
+                Row(
                   children: [
-                    Spacer(),
+                    const Spacer(),
                     _SpeechBubble(
                       text: 'Tip: Hide the radius to select points inside the free area.',
                     ),
@@ -1156,22 +1161,18 @@ class _SummarySheet extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.green[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.green[200]!),
+                    color: AppColors.okBg,
+                    borderRadius: BorderRadius.circular(AppRadii.s),
+                    border: Border.all(color: AppColors.okBg),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.card_membership, size: 16, color: Colors.green[800]),
+                      Icon(Icons.card_membership, size: 16, color: AppColors.okFg),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Free under your plan: ${planSlots - slotsUsed} of $planSlots slots remaining after this booking.',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Colors.green[800],
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: AppText.tileSubtitle.copyWith(color: AppColors.okFg, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ],
@@ -1183,20 +1184,16 @@ class _SummarySheet extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: Colors.grey[50],
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey[200]!),
+                  color: AppColors.neuBg,
+                  borderRadius: BorderRadius.circular(AppRadii.l),
+                  border: Border.all(color: AppColors.divider),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       'Cost Breakdown',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey[800],
-                      ),
+                      style: AppText.tileTitle.copyWith(color: AppColors.onSurface),
                     ),
                     const SizedBox(height: 12),
 
@@ -1224,27 +1221,19 @@ class _SummarySheet extends StatelessWidget {
                     ],
 
                     const SizedBox(height: 12),
-                    Container(height: 1, color: Colors.grey[300]),
+                    Container(height: 1, color: AppColors.divider),
                     const SizedBox(height: 12),
 
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        const Text(
+                        Text(
                           'Total Amount',
-                          style: TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.black87,
-                          ),
+                          style: AppText.sectionTitle.copyWith(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.onSurface),
                         ),
                         Text(
                           isFreeByPlan ? 'FREE' : '₹${totalCost.toStringAsFixed(2)}',
-                          style: const TextStyle(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.green,
-                          ),
+                          style: AppText.tileTitle.copyWith(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.success),
                         ),
                       ],
                     ),
@@ -1259,29 +1248,26 @@ class _SummarySheet extends StatelessWidget {
                 child: ElevatedButton(
                   onPressed: isBooking ? null : onProceed,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.green,
-                    foregroundColor: Colors.white,
+                    backgroundColor: AppColors.brand,
+                    foregroundColor: AppColors.onSurfaceInverse,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(AppRadii.l),
                     ),
                     elevation: 2,
                   ),
                   child: isBooking
-                      ? const SizedBox(
+                      ? SizedBox(
                           width: 24,
                           height: 24,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                            valueColor: AlwaysStoppedAnimation<Color>(AppColors.onSurfaceInverse),
                           ),
                         )
                       : Text(
                           isFreeByPlan ? 'Confirm Booking' : 'Proceed to Pay',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                          ),
+                          style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse, fontSize: 16),
                         ),
                 ),
               ),
@@ -1291,22 +1277,18 @@ class _SummarySheet extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.amber[50],
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.amber[200]!),
+                    color: AppColors.warnBg,
+                    borderRadius: BorderRadius.circular(AppRadii.s),
+                    border: Border.all(color: AppColors.warnBg),
                   ),
                   child: Row(
                     children: [
-                      Icon(Icons.info_outline, size: 16, color: Colors.amber[800]),
+                      Icon(Icons.info_outline, size: 16, color: AppColors.warnFg),
                       const SizedBox(width: 8),
-                      const Expanded(
+                      Expanded(
                         child: Text(
                           'Tap on the map to select your boarding point',
-                          style: TextStyle(
-                            fontSize: 13,
-                            color: Color(0xFF7A4D00),
-                            fontWeight: FontWeight.w500,
-                          ),
+                          style: AppText.tileSubtitle.copyWith(color: AppColors.warnFg, fontWeight: FontWeight.w500),
                         ),
                       ),
                     ],
@@ -1323,27 +1305,29 @@ class _SummarySheet extends StatelessWidget {
   Widget _costRow(String label, double amount,
       {bool isHighlight = false, bool strike = false}) {
     final valueText = '₹${amount.toStringAsFixed(2)}';
+    final highlightColor = isHighlight ? AppColors.warning : AppColors.onSurfaceMuted;
+    final valueColor = isHighlight ? AppColors.warning : AppColors.onSurface;
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Flexible(
           child: Text(
             label,
-            style: TextStyle(
-              fontSize: 14,
-              color: isHighlight ? Colors.orange[700] : Colors.grey[700],
+            style: AppText.tileSubtitle.copyWith(
+              color: highlightColor,
               fontWeight: FontWeight.w500,
+              fontSize: 14,
             ),
           ),
         ),
         Text(
           valueText,
-          style: TextStyle(
+          style: AppText.tileTitle.copyWith(
             fontSize: 14,
             fontWeight: FontWeight.w600,
-            color: isHighlight ? Colors.orange[700] : Colors.black87,
+            color: valueColor,
             decoration: strike ? TextDecoration.lineThrough : TextDecoration.none,
-            decorationColor: Colors.redAccent,
+            decorationColor: AppColors.danger,
             decorationThickness: 2,
           ),
         ),
@@ -1354,16 +1338,12 @@ class _SummarySheet extends StatelessWidget {
   Widget _noteRow(String text) {
     return Row(
       children: [
-        Icon(Icons.check_circle, size: 16, color: Colors.green[700]),
+        Icon(Icons.check_circle, size: 16, color: AppColors.success),
         const SizedBox(width: 6),
         Expanded(
           child: Text(
             text,
-            style: TextStyle(
-              fontSize: 13,
-              color: Colors.green[800],
-              fontWeight: FontWeight.w600,
-            ),
+            style: AppText.tileSubtitle.copyWith(color: AppColors.success, fontWeight: FontWeight.w600),
           ),
         ),
       ],

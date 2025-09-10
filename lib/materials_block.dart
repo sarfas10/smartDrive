@@ -12,6 +12,7 @@ import 'package:http_parser/http_parser.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'ui_common.dart'; // AppCard, SectionHeader, DataTableWrap, field(...), area(...), confirmDialog(...)
+import 'package:smart_drive/theme/app_theme.dart';
 
 /// MaterialsBlock (Signed Cloudinary upload for ANY file type; stored under smartDrive/materials)
 class MaterialsBlock extends StatefulWidget {
@@ -269,10 +270,10 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
             stream: q.snapshots(),
             builder: (context, snap) {
               if (snap.connectionState == ConnectionState.waiting) {
-                return const Center(
+                return Center(
                   child: Padding(
-                    padding: EdgeInsets.all(24.0),
-                    child: CircularProgressIndicator(),
+                    padding: const EdgeInsets.all(24.0),
+                    child: CircularProgressIndicator(color: context.c.primary),
                   ),
                 );
               }
@@ -283,7 +284,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                     padding: const EdgeInsets.all(16),
                     child: Text(
                       'Failed to load materials: ${snap.error}',
-                      style: const TextStyle(color: Colors.red),
+                      style: TextStyle(color: AppColors.danger),
                     ),
                   ),
                 );
@@ -304,7 +305,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                     children: [
                       Text(
                         _asText(m['title']),
-                        style: const TextStyle(fontWeight: FontWeight.w800),
+                        style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w800, color: context.c.onSurface),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -313,7 +314,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                           padding: const EdgeInsets.only(top: 2.0),
                           child: Text(
                             _asText(m['description']),
-                            style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                            style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted, fontSize: 12),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             softWrap: true,
@@ -330,15 +331,15 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                     (m['created_at'] is Timestamp)
                         ? (m['created_at'] as Timestamp).toDate().toString().split(' ').first
                         : '-',
-                    style: const TextStyle(fontSize: 12),
+                    style: AppText.hintSmall,
                   ),
 
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.download, size: 16, color: Colors.green),
+                      Icon(Icons.download, size: 16, color: AppColors.success),
                       const SizedBox(width: 4),
-                      Text('${m['downloads'] ?? 0}', style: const TextStyle(fontWeight: FontWeight.w600)),
+                      Text('${m['downloads'] ?? 0}', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
                     ],
                   ),
 
@@ -354,6 +355,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                             onPressed: () => _openUrl(_asText(m['file_url']), docId: d.id),
                             icon: const Icon(Icons.open_in_new),
                             visualDensity: VisualDensity.compact,
+                            color: context.c.onSurface,
                           ),
                         ),
                         Tooltip(
@@ -362,6 +364,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                             onPressed: () => _editMaterial(d),
                             icon: const Icon(Icons.edit),
                             visualDensity: VisualDensity.compact,
+                            color: context.c.primary,
                           ),
                         ),
                         Tooltip(
@@ -369,7 +372,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                           child: IconButton(
                             onPressed: () => _deleteMaterial(d),
                             icon: const Icon(Icons.delete_forever),
-                            color: Colors.red.shade600,
+                            color: AppColors.danger,
                             visualDensity: VisualDensity.compact,
                           ),
                         ),
@@ -433,7 +436,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
         const SizedBox(height: 6),
         field('e.g. 1.0 or 2.1.3', _versionCtrl),
         const SizedBox(height: 8),
-        const _HintRow(
+        _HintRow(
           icon: Icons.info_outline,
           text: 'Version is shown to students; use semantic versions like 1.0, 1.1, 2.0.',
         ),
@@ -450,10 +453,10 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
       width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: selected ? Colors.green.shade200 : Colors.grey.shade300,
+          color: selected ? AppColors.success.withOpacity(0.6) : AppColors.divider,
           width: 1.2,
         ),
         boxShadow: [
@@ -473,24 +476,20 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
               Icon(
                 selected ? _iconForName(name) : Icons.cloud_upload_outlined,
                 size: 42,
-                color: selected ? Colors.green : Colors.grey.shade600,
+                color: selected ? AppColors.success : AppColors.onSurfaceMuted,
               ),
               const SizedBox(width: 10),
               if (selected)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: Colors.deepPurple.withOpacity(0.08),
+                    color: AppColors.brand.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: Colors.deepPurple.withOpacity(0.25)),
+                    border: Border.all(color: AppColors.brand.withOpacity(0.18)),
                   ),
                   child: Text(
                     kind.name.toUpperCase(),
-                    style: const TextStyle(
-                      color: Colors.deepPurple,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 12,
-                    ),
+                    style: AppText.tileSubtitle.copyWith(color: AppColors.brand, fontWeight: FontWeight.w700, fontSize: 12),
                   ),
                 ),
             ],
@@ -499,10 +498,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
           Text(
             selected ? name : 'Drop a file here or use the button below',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: selected ? Colors.black87 : Colors.grey.shade700,
-              fontWeight: FontWeight.w600,
-            ),
+            style: AppText.tileTitle.copyWith(color: selected ? context.c.onSurface : AppColors.onSurfaceMuted, fontWeight: FontWeight.w600),
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 12),
@@ -515,6 +511,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                 onPressed: _isUploading ? null : _pickFile,
                 icon: const Icon(Icons.folder_open),
                 label: Text(selected ? 'Change file' : 'Select file'),
+                style: OutlinedButton.styleFrom(foregroundColor: context.c.primary),
               ),
               if (selected)
                 TextButton.icon(
@@ -526,6 +523,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                           }),
                   icon: const Icon(Icons.clear),
                   label: const Text('Clear'),
+                  style: TextButton.styleFrom(foregroundColor: AppColors.onSurfaceMuted),
                 ),
             ],
           ),
@@ -545,12 +543,13 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
       children: [
         LinearProgressIndicator(
           value: _progress > 0 ? _progress / 100 : null,
-          backgroundColor: Colors.grey.shade300,
+          backgroundColor: AppColors.neuBg,
+          valueColor: AlwaysStoppedAnimation<Color>(context.c.primary),
         ),
         const SizedBox(height: 8),
         Text(
           _progress > 0 ? 'Uploading: ${_progress.toStringAsFixed(1)}%' : 'Uploading…',
-          style: const TextStyle(fontWeight: FontWeight.w600),
+          style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600, color: context.c.onSurface),
         ),
       ],
     );
@@ -562,16 +561,16 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
         padding: const EdgeInsets.all(32.0),
         child: Column(
           children: [
-            Icon(Icons.library_books, size: 64, color: Colors.grey.shade500),
+            Icon(Icons.library_books, size: 64, color: AppColors.onSurfaceFaint),
             const SizedBox(height: 12),
-            const Text(
+            Text(
               'No study materials uploaded yet',
-              style: TextStyle(fontWeight: FontWeight.w700),
+              style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 6),
             Text(
               'Upload your first file to get started!',
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+              style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
             ),
           ],
         ),
@@ -605,16 +604,19 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     final title = _titleCtrl.text.trim();
     if (title.isEmpty) {
       _snack('Title is required', isError: true);
-      _saving = false; return;
+      _saving = false;
+      return;
     }
     final vErr = _validateVersion(_versionCtrl.text);
     if (vErr != null) {
       _snack(vErr, isError: true);
-      _saving = false; return;
+      _saving = false;
+      return;
     }
     if (_editingRef == null && _picked == null) {
       _snack('Please select a file', isError: true);
-      _saving = false; return;
+      _saving = false;
+      return;
     }
 
     setState(() {
@@ -818,11 +820,11 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Row(children: [
-          Icon(isError ? Icons.error_outline : Icons.check_circle_outline, color: Colors.white),
+          Icon(isError ? Icons.error_outline : Icons.check_circle_outline, color: AppColors.onSurfaceInverse),
           const SizedBox(width: 8),
-          Expanded(child: Text(message)),
+          Expanded(child: Text(message, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse))),
         ]),
-        backgroundColor: isError ? Colors.red : Colors.green,
+        backgroundColor: isError ? AppColors.danger : AppColors.success,
         duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
       ),
@@ -910,23 +912,23 @@ class _HeaderCard extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: gradient,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.white.withOpacity(0.6)),
+        border: Border.all(color: AppColors.surface.withOpacity(0.6)),
         boxShadow: [BoxShadow(color: Colors.black26.withOpacity(0.06), blurRadius: 12, offset: const Offset(0, 6))],
       ),
       child: Row(
         children: [
-          Icon(isEditing ? Icons.edit_note : Icons.cloud_upload_outlined, color: Colors.deepPurple),
+          Icon(isEditing ? Icons.edit_note : Icons.cloud_upload_outlined, color: AppColors.purple),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               title,
-              style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 18),
+              style: AppText.sectionTitle.copyWith(fontWeight: FontWeight.w800, color: AppColors.onSurface),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           Tooltip(
             message: 'Uploads go to Cloudinary with correct resource_type. Large files supported.',
-            child: Icon(Icons.info_outline, color: Colors.deepPurple.shade400),
+            child: Icon(Icons.info_outline, color: AppColors.purple.withOpacity(0.9)),
           ),
         ],
       ),
@@ -985,6 +987,11 @@ class _ActionsBar extends StatelessWidget {
                     )
                   : const Icon(Icons.cloud_upload),
               label: Text(isUploading ? 'Uploading…' : (isEditing ? 'Update Material' : 'Save Study Material')),
+              style: FilledButton.styleFrom(
+                backgroundColor: context.c.primary,
+                foregroundColor: AppColors.onSurfaceInverse,
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              ),
             ),
           ],
         ),
@@ -1000,7 +1007,7 @@ class _FieldLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: const TextStyle(fontWeight: FontWeight.w700, color: Colors.black87),
+      style: AppText.tileTitle.copyWith(color: context.c.onSurface, fontWeight: FontWeight.w700),
     );
   }
 }
@@ -1013,9 +1020,9 @@ class _HintRow extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, size: 16, color: Colors.grey.shade700),
+        Icon(icon, size: 16, color: AppColors.onSurfaceMuted),
         const SizedBox(width: 6),
-        Expanded(child: Text(text, style: TextStyle(fontSize: 12, color: Colors.grey.shade700))),
+        Expanded(child: Text(text, style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted))),
       ],
     );
   }
@@ -1030,30 +1037,30 @@ class _CategoryChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(color: _colorForCategory(category), borderRadius: BorderRadius.circular(12)),
-      child: Text(category, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+      child: Text(category, style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceInverse, fontWeight: FontWeight.bold)),
     );
   }
 
   Color _colorForCategory(String c) {
     switch (c) {
       case 'Theory':
-        return Colors.blue;
+        return AppColors.info;
       case 'Practical Driving':
-        return Colors.orange;
+        return AppColors.warning;
       case 'Traffic Rules':
-        return Colors.red;
+        return AppColors.danger;
       case 'Road Signs':
-        return Colors.amber;
+        return AppColors.warning;
       case 'Safety Guidelines':
-        return Colors.green;
+        return AppColors.success;
       case 'Vehicle Maintenance':
-        return Colors.purple;
+        return AppColors.purple;
       case 'Mock Tests':
-        return Colors.teal;
+        return AppColors.accentTeal;
       case 'Highway Code':
-        return Colors.indigo;
+        return AppColors.primary;
       default:
-        return Colors.grey;
+        return AppColors.slate;
     }
   }
 }
@@ -1078,7 +1085,7 @@ class _DetectedTypeBadge extends StatelessWidget {
         children: [
           Icon(icon, size: 16, color: color),
           const SizedBox(width: 6),
-          Text(kind.toUpperCase(), style: TextStyle(color: color, fontWeight: FontWeight.bold, fontSize: 12)),
+          Text(kind.toUpperCase(), style: AppText.hintSmall.copyWith(color: color, fontWeight: FontWeight.bold)),
         ],
       ),
     );
@@ -1106,19 +1113,19 @@ class _DetectedTypeBadge extends StatelessWidget {
   Color _color(String k) {
     switch (k) {
       case 'pdf':
-        return Colors.red;
+        return AppColors.danger;
       case 'image':
-        return Colors.blueGrey;
+        return AppColors.brand;
       case 'video':
-        return Colors.blue;
+        return AppColors.info;
       case 'audio':
-        return Colors.deepPurple;
+        return AppColors.purple;
       case 'archive':
-        return Colors.brown;
+        return AppColors.brown;
       case 'doc':
-        return Colors.green;
+        return AppColors.success;
       default:
-        return Colors.grey;
+        return AppColors.slate;
     }
   }
 }
@@ -1131,8 +1138,8 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: Colors.grey.shade200, borderRadius: BorderRadius.circular(8)),
-      child: Text(text, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12)),
+      decoration: BoxDecoration(color: AppColors.neuBg, borderRadius: BorderRadius.circular(8)),
+      child: Text(text, style: AppText.hintSmall.copyWith(fontWeight: FontWeight.w500, color: AppColors.onSurface)),
     );
   }
 }

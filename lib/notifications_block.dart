@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'ui_common.dart';
+import 'package:smart_drive/theme/app_theme.dart';
 
 class NotificationsBlock extends StatefulWidget {
   const NotificationsBlock({super.key});
@@ -72,9 +73,9 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                         Expanded(
                           child: Text(
                             _segmentSummary(),
-                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                                  color: Theme.of(context).colorScheme.onSurface.withOpacity(.75),
-                                ),
+                            style: AppText.tileSubtitle.copyWith(
+                              color: AppColors.onSurfaceMuted,
+                            ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -84,6 +85,9 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                             onPressed: () => setState(_segments.clear),
                             icon: const Icon(Icons.close_rounded, size: 18),
                             label: const Text('Clear'),
+                            style: TextButton.styleFrom(
+                              foregroundColor: AppColors.brand,
+                            ),
                           ),
                       ],
                     ),
@@ -99,10 +103,12 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                           textInputAction: TextInputAction.next,
                           maxLength: 60,
                           validator: (v) => (v == null || v.trim().isEmpty) ? 'Title required' : null,
-                          decoration: const InputDecoration(
-                            border: OutlineInputBorder(),
+                          decoration: InputDecoration(
+                            border: const OutlineInputBorder(),
                             hintText: 'Eg. New Test Available',
+                            hintStyle: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
                           ),
+                          style: AppText.tileTitle.copyWith(color: context.c.onSurface),
                         ),
                       ),
                       right: _Labeled(
@@ -111,10 +117,12 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                           controller: _urlCtrl,
                           textInputAction: TextInputAction.next,
                           keyboardType: TextInputType.url,
-                          decoration: const InputDecoration(
-                            border: OutlineInputBorder(),
+                          decoration: InputDecoration(
+                            border: const OutlineInputBorder(),
                             hintText: 'https://example.com',
+                            hintStyle: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
                           ),
+                          style: AppText.tileTitle.copyWith(color: context.c.onSurface),
                         ),
                       ),
                     ),
@@ -128,10 +136,12 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                         maxLines: 4,
                         maxLength: 240,
                         validator: (v) => (v == null || v.trim().isEmpty) ? 'Message required' : null,
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
+                        decoration: InputDecoration(
+                          border: const OutlineInputBorder(),
                           hintText: 'Write the push message…',
+                          hintStyle: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
                         ),
+                        style: AppText.tileTitle.copyWith(color: context.c.onSurface),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -157,8 +167,12 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                       right: (_schedule == 'Schedule for Later')
                           ? OutlinedButton.icon(
                               icon: const Icon(Icons.calendar_today_outlined),
-                              label: Text(_when == null ? 'Pick Date & Time' : _format(_when!)),
+                              label: Text(_when == null ? 'Pick Date & Time' : _format(_when!),
+                                  style: AppText.hintSmall.copyWith(color: context.c.onSurface)),
                               onPressed: _pickDateTime,
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: context.c.primary,
+                              ),
                             )
                           : const SizedBox.shrink(),
                     ),
@@ -170,22 +184,27 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                         Expanded(
                           child: ElevatedButton.icon(
                             icon: _busy
-                                ? const SizedBox(
+                                ? SizedBox(
                                     width: 16,
                                     height: 16,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onSurfaceInverse),
                                   )
                                 : const Icon(Icons.send_outlined),
                             label: const Text('Send / Schedule'),
                             onPressed: _busy ? null : _submit,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppColors.primary,
+                              foregroundColor: AppColors.onSurfaceInverse,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.orange,
-                              foregroundColor: Colors.white,
+                              backgroundColor: AppColors.warning,
+                              foregroundColor: AppColors.onSurfaceInverse,
                             ),
                             icon: const Icon(Icons.drafts_outlined),
                             label: const Text('Save Draft (Firestore only)'),
@@ -195,7 +214,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                                     await _saveHistoryFirestore(status: 'draft');
                                     if (mounted) {
                                       ScaffoldMessenger.of(context).showSnackBar(
-                                        const SnackBar(content: Text('Draft saved.')),
+                                        SnackBar(content: const Text('Draft saved.'), backgroundColor: AppColors.success),
                                       );
                                     }
                                   },
@@ -222,22 +241,22 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                     .snapshots(),
                 builder: (context, snap) {
                   if (snap.connectionState == ConnectionState.waiting) {
-                    return const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Center(child: CircularProgressIndicator()),
+                    return Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Center(child: CircularProgressIndicator(color: context.c.primary)),
                     );
                   }
                   if (snap.hasError) {
                     return Padding(
                       padding: const EdgeInsets.all(16),
-                      child: Text('Error loading history: ${snap.error}'),
+                      child: Text('Error loading history: ${snap.error}', style: AppText.tileSubtitle.copyWith(color: AppColors.danger)),
                     );
                   }
                   final docs = snap.data?.docs ?? const [];
                   if (docs.isEmpty) {
-                    return const Padding(
-                      padding: EdgeInsets.all(16),
-                      child: Text('No notifications yet.'),
+                    return Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Text('No notifications yet.', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceFaint)),
                     );
                   }
 
@@ -258,7 +277,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
 
                         return Card(
                           elevation: 0,
-                          color: Theme.of(context).colorScheme.surfaceContainerHighest.withOpacity(.25),
+                          color: AppColors.neuBg,
                           child: Padding(
                             padding: const EdgeInsets.all(12),
                             child: Column(
@@ -269,12 +288,12 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                                   style: Theme.of(context)
                                       .textTheme
                                       .titleMedium
-                                      ?.copyWith(fontWeight: FontWeight.w600),
+                                      ?.copyWith(fontWeight: FontWeight.w600, color: context.c.onSurface),
                                 ),
                                 const SizedBox(height: 4),
-                                Text('Target: $segs', maxLines: 1, overflow: TextOverflow.ellipsis),
+                                Text('Target: $segs', maxLines: 1, overflow: TextOverflow.ellipsis, style: AppText.tileSubtitle),
                                 const SizedBox(height: 2),
-                                Text('When: $when'),
+                                Text('When: $when', style: AppText.hintSmall),
                                 const SizedBox(height: 6),
                                 Row(
                                   children: [
@@ -283,6 +302,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                                     TextButton(
                                       onPressed: () => _preview(context, m),
                                       child: const Text('View'),
+                                      style: TextButton.styleFrom(foregroundColor: context.c.primary),
                                     ),
                                   ],
                                 ),
@@ -299,14 +319,15 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                   for (final d in docs) {
                     final m = (d.data() as Map).cast<String, dynamic>();
                     rows.add([
-                      Text(m['title'] ?? '-', overflow: TextOverflow.ellipsis),
-                      Text((m['segments'] as List?)?.join(', ') ?? 'all', overflow: TextOverflow.ellipsis),
+                      Text(m['title'] ?? '-', overflow: TextOverflow.ellipsis, style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
+                      Text((m['segments'] as List?)?.join(', ') ?? 'all', overflow: TextOverflow.ellipsis, style: AppText.tileSubtitle),
                       Text(_format((m['scheduled_at'] as Timestamp?)?.toDate() ??
-                          (m['created_at'] as Timestamp?)?.toDate())),
+                          (m['created_at'] as Timestamp?)?.toDate()), style: AppText.hintSmall),
                       _StatusPill(m['status']?.toString() ?? '-'),
                       TextButton(
                         onPressed: () => _preview(context, m),
                         child: const Text('View'),
+                        style: TextButton.styleFrom(foregroundColor: context.c.primary),
                       ),
                     ]);
                   }
@@ -408,13 +429,13 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const SizedBox(height: 6),
-              Text('Choose target segments', style: Theme.of(ctx).textTheme.titleMedium),
+              Text('Choose target segments', style: Theme.of(ctx).textTheme.titleMedium?.copyWith(color: context.c.onSurface)),
               const SizedBox(height: 8),
               ..._segmentOptions.map((s) {
                 final checked = localSelections.contains(s) || (localSelections.isEmpty && s == 'all');
                 return CheckboxListTile(
                   value: checked,
-                  title: Text(s),
+                  title: Text(s, style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
                   onChanged: (v) {
                     if (v == null) return;
                     if (s == 'all') {
@@ -443,6 +464,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                     child: OutlinedButton(
                       onPressed: () => Navigator.pop(ctx),
                       child: const Text('Cancel'),
+                      style: OutlinedButton.styleFrom(foregroundColor: context.c.onSurface),
                     ),
                   ),
                   const SizedBox(width: 12),
@@ -513,13 +535,13 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
     if (!_formKey.currentState!.validate()) return;
     if (_segments.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pick at least one segment (or “all”)')),
+        SnackBar(content: const Text('Pick at least one segment (or “all”)'), backgroundColor: AppColors.warning),
       );
       return;
     }
     if (_schedule == 'Schedule for Later' && _when == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Pick a schedule date & time')),
+        SnackBar(content: const Text('Pick a schedule date & time'), backgroundColor: AppColors.warning),
       );
       return;
     }
@@ -534,7 +556,6 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
         if (_schedule == 'Schedule for Later') 'scheduled_at': _when!.toIso8601String(),
       };
 
-     
       final uri = Uri.parse(
         '$_apiBase/${_schedule == "Send Now" ? "notify_send.php" : "notify_schedule.php"}',
       );
@@ -549,7 +570,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
         await _saveHistoryFirestore(status: _schedule == 'Send Now' ? 'queued' : 'scheduled');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(_schedule == 'Send Now' ? 'Queued to send now.' : 'Scheduled.')),
+            SnackBar(content: Text(_schedule == 'Send Now' ? 'Queued to send now.' : 'Scheduled.'), backgroundColor: AppColors.success),
           );
         }
         _titleCtrl.clear();
@@ -565,7 +586,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.danger));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -589,23 +610,25 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
     showDialog(
       context: ctx,
       builder: (_) => AlertDialog(
-        title: Text(m['title'] ?? '-'),
+        title: Text(m['title'] ?? '-', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
         content: SingleChildScrollView(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(m['message'] ?? ''),
+              Text(m['message'] ?? '', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
               const SizedBox(height: 8),
               if ((m['action_url'] ?? '').toString().isNotEmpty)
-                SelectableText('URL: ${m['action_url']}'),
+                SelectableText('URL: ${m['action_url']}', style: AppText.hintSmall),
               const SizedBox(height: 8),
-              Text('Segments: ${(m['segments'] as List?)?.join(", ") ?? "all"}'),
-              Text('Status: ${m['status']}'),
+              Text('Segments: ${(m['segments'] as List?)?.join(", ") ?? "all"}', style: AppText.hintSmall),
+              Text('Status: ${m['status']}', style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
             ],
           ),
         ),
-        actions: [TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'))],
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close'), style: TextButton.styleFrom(foregroundColor: context.c.primary)),
+        ],
       ),
     );
   }
@@ -628,7 +651,7 @@ class _Labeled extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       Padding(
         padding: const EdgeInsets.only(bottom: 6),
-        child: Text(label, style: const TextStyle(fontWeight: FontWeight.w600)),
+        child: Text(label, style: AppText.tileTitle.copyWith(color: context.c.onSurface, fontWeight: FontWeight.w600)),
       ),
       child,
     ]);
@@ -641,12 +664,12 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Color c = switch (status) {
-      'draft' => Colors.grey,
-      'queued' => Colors.blue,
-      'scheduled' => Colors.amber,
-      'sent' => Colors.green,
-      'error' => Colors.red,
-      _ => Colors.black54,
+      'draft' => AppColors.slate,
+      'queued' => AppColors.info,
+      'scheduled' => AppColors.warning,
+      'sent' => AppColors.success,
+      'error' => AppColors.danger,
+      _ => AppColors.onSurfaceMuted,
     };
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -655,7 +678,7 @@ class _StatusPill extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: c.withOpacity(.35)),
       ),
-      child: Text(status, style: TextStyle(color: c, fontWeight: FontWeight.w600)),
+      child: Text(status, style: AppText.hintSmall.copyWith(color: c, fontWeight: FontWeight.w600)),
     );
   }
 }

@@ -1,12 +1,12 @@
-// My Bookings page: shows user's bookings grouped by Upcoming / Past,
-// with UI styling similar to UserSlotBooking and efficient batched slot lookups.
-// Uses client-side sort to avoid Firestore composite index.
-
+// lib/my_bookings_page.dart
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+
+// Adjust this import to your real path for app_theme.dart
+import 'theme/app_theme.dart';
 
 class MyBookingsPage extends StatefulWidget {
   const MyBookingsPage({super.key});
@@ -28,16 +28,16 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       return Scaffold(
-        backgroundColor: const Color(0xFFF8F9FA),
+        backgroundColor: context.c.background,
         appBar: _appBar(context, sw, ts),
-        body: const Center(
-          child: Text('Please log in to view your bookings'),
+        body: Center(
+          child: Text('Please log in to view your bookings', style: context.t.bodyMedium?.copyWith(color: context.c.onSurface)),
         ),
       );
     }
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FA),
+      backgroundColor: context.c.background,
       appBar: _appBar(context, sw, ts),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
@@ -47,10 +47,10 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
             .snapshots(),
         builder: (context, snap) {
           if (snap.hasError) {
-            return Center(child: Text('Error: ${snap.error}'));
+            return Center(child: Text('Error: ${snap.error}', style: context.t.bodyMedium?.copyWith(color: AppColors.danger)));
           }
           if (snap.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator());
+            return Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)));
           }
 
           // Copy and locally sort by created_at (desc)
@@ -59,9 +59,9 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
             final ad = _toDate((a.data() as Map<String, dynamic>)['created_at']);
             final bd = _toDate((b.data() as Map<String, dynamic>)['created_at']);
             if (ad == null && bd == null) return 0;
-            if (ad == null) return 1;   // nulls go last
+            if (ad == null) return 1; // nulls go last
             if (bd == null) return -1;
-            return bd.compareTo(ad);    // newest first
+            return bd.compareTo(ad); // newest first
           });
 
           if (docs.isEmpty) {
@@ -90,7 +90,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                   bookingId: b.id,
                   bookingData: bData,
                   slotData: slot,
-                  startEnd: _parseTimeRange(slot?['slot_time']),
+                  startEnd: _parseTimeRange(slot?['slot_time'], day: _slotDayDate(slot?['slot_day'])),
                   slotDay: _slotDayDate(slot?['slot_day']),
                   status: status,
                 );
@@ -107,10 +107,8 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                   ListView(
                     padding: EdgeInsets.all(_scale(sw, 12, 20, 28)),
                     children: [
-                      if (upcoming.isNotEmpty)
-                        _groupSection(context, sw, 'Upcoming', upcoming),
-                      if (past.isNotEmpty)
-                        _groupSection(context, sw, 'Past', past),
+                      if (upcoming.isNotEmpty) _groupSection(context, sw, 'Upcoming', upcoming),
+                      if (past.isNotEmpty) _groupSection(context, sw, 'Past', past),
                     ],
                   ),
 
@@ -120,17 +118,17 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                       top: 8,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 6)],
-                          border: Border.all(color: Color(0xFFE5E7EB)),
+                          color: context.c.surface,
+                          borderRadius: BorderRadius.circular(AppRadii.l),
+                          boxShadow: AppShadows.card,
+                          border: Border.all(color: AppColors.divider),
                         ),
-                        child: const Padding(
-                          padding: EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           child: SizedBox(
                             width: 16,
                             height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2),
+                            child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(context.c.primary)),
                           ),
                         ),
                       ),
@@ -145,46 +143,41 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
   }
 
   PreferredSizeWidget _appBar(BuildContext context, double sw, double ts) {
-  return AppBar(
-    elevation: 0,
-    centerTitle: false,
-    backgroundColor: Colors.transparent,
-    flexibleSpace: Container(
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          colors: [Color(0xFF10B981), Color(0xFF059669)],
-          begin: Alignment.centerLeft,
-          end: Alignment.centerRight,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 4,
-            offset: Offset(0, 2),
+    return AppBar(
+      elevation: 0,
+      centerTitle: false,
+      backgroundColor: Colors.transparent,
+      flexibleSpace: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Color(0xFF10B981), Color(0xFF059669)],
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
           ),
-        ],
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black12,
+              blurRadius: 4,
+              offset: Offset(0, 2),
+            ),
+          ],
+        ),
       ),
-    ),
-    leading: IconButton(
-      icon: Icon(
-        Icons.arrow_back_ios_new,
-        color: Colors.white,
-        size: _scale(sw, 18, 22, 26),
+      leading: IconButton(
+        icon: Icon(
+          Icons.arrow_back_ios_new,
+          color: AppColors.onSurfaceInverse,
+          size: _scale(sw, 18, 22, 26),
+        ),
+        onPressed: () => Navigator.maybePop(context),
+        tooltip: 'Back',
       ),
-      onPressed: () => Navigator.maybePop(context),
-      tooltip: 'Back',
-    ),
-    title: Text(
-      '🧾 My Bookings',
-      style: TextStyle(
-        color: Colors.white,
-        fontWeight: FontWeight.w600,
-        fontSize: _scale(sw, 16, 18, 20) * ts,
+      title: Text(
+        '🧾 My Bookings',
+        style: AppText.sectionTitle.copyWith(color: AppColors.onSurfaceInverse, fontSize: _scale(sw, 16, 18, 20) * ts),
       ),
-    ),
-  );
-}
-
+    );
+  }
 
   // ------- Batched slot fetch for all bookings in view -------
   Future<Map<String, Map<String, dynamic>>> _fetchSlotsForBookings(
@@ -240,32 +233,29 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
     return Container(
       margin: EdgeInsets.only(bottom: _scale(sw, 12, 18, 24)),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(8),
-        boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 3, offset: Offset(0, 1)),
-        ],
+        color: context.c.surface,
+        borderRadius: BorderRadius.circular(AppRadii.m),
+        boxShadow: AppShadows.card,
       ),
       child: Column(
         children: [
           Container(
             padding: EdgeInsets.all(headerPad),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF8F9FA),
-              borderRadius: BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
-              border: Border(bottom: BorderSide(color: Color(0xFFE5E7EB))),
+            decoration: BoxDecoration(
+              color: context.c.background,
+              borderRadius: const BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
+              border: Border(bottom: BorderSide(color: AppColors.divider)),
             ),
             child: Row(
               children: [
-                Text(title == 'Upcoming' ? '🗓️' : '📜',
-                    style: TextStyle(fontSize: _scale(sw, 14, 16, 18))),
+                Text(title == 'Upcoming' ? '🗓️' : '📜', style: TextStyle(fontSize: _scale(sw, 14, 16, 18))),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     '$title (${items.length})',
-                    style: TextStyle(
+                    style: context.t.bodyMedium?.copyWith(
                       fontSize: _scale(sw, 12, 13, 14),
-                      color: const Color(0xFF6B7280),
+                      color: AppColors.onSurfaceMuted,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -310,8 +300,8 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
       onTap: () => _showBookingSheet(context, v),
       child: Container(
         padding: EdgeInsets.all(pad),
-        decoration: const BoxDecoration(
-          border: Border(bottom: BorderSide(color: Color(0xFFF3F4F6))),
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: AppColors.neuBg)),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -327,10 +317,10 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                       Expanded(
                         child: Text(
                           vehicleType,
-                          style: TextStyle(
+                          style: context.t.titleSmall?.copyWith(
                             fontSize: _scale(sw, 14, 15, 16),
                             fontWeight: FontWeight.w700,
-                            color: Colors.black87,
+                            color: context.c.onSurface,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -342,9 +332,9 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                   const SizedBox(height: 6),
                   Text(
                     instructorName,
-                    style: TextStyle(
+                    style: context.t.bodySmall?.copyWith(
                       fontSize: _scale(sw, 11, 12, 13),
-                      color: const Color(0xFF6B7280),
+                      color: AppColors.onSurfaceMuted,
                       fontWeight: FontWeight.w500,
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -352,14 +342,14 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                   const SizedBox(height: 6),
                   Row(
                     children: [
-                      Icon(Icons.schedule, size: _scale(sw, 13, 14, 16), color: const Color(0xFF6B7280)),
+                      Icon(Icons.schedule, size: _scale(sw, 13, 14, 16), color: AppColors.onSurfaceMuted),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           timeLine.isEmpty ? '—' : timeLine,
-                          style: TextStyle(
+                          style: context.t.bodyMedium?.copyWith(
                             fontSize: _scale(sw, 12, 13, 14),
-                            color: const Color(0xFF374151),
+                            color: context.c.onSurface,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
@@ -369,14 +359,14 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      Icon(Icons.calendar_today, size: _scale(sw, 13, 14, 16), color: const Color(0xFF6B7280)),
+                      Icon(Icons.calendar_today, size: _scale(sw, 13, 14, 16), color: AppColors.onSurfaceMuted),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
                           dateLine,
-                          style: TextStyle(
+                          style: context.t.bodyMedium?.copyWith(
                             fontSize: _scale(sw, 12, 13, 14),
-                            color: const Color(0xFF374151),
+                            color: context.c.onSurface,
                           ),
                         ),
                       ),
@@ -391,18 +381,18 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
               children: [
                 Text(
                   freeByPlan ? 'FREE' : '₹${total.toStringAsFixed(0)}',
-                  style: TextStyle(
+                  style: context.t.bodyMedium?.copyWith(
                     fontSize: _scale(sw, 13, 14, 16),
                     fontWeight: FontWeight.w700,
-                    color: freeByPlan ? const Color(0xFF10B981) : Colors.black,
+                    color: freeByPlan ? AppColors.success : context.c.onSurface,
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   createdAt != null ? DateFormat('dd/MM').format(createdAt) : '',
-                  style: TextStyle(
+                  style: context.t.bodySmall?.copyWith(
                     fontSize: _scale(sw, 10, 11, 12),
-                    color: const Color(0xFF6B7280),
+                    color: AppColors.onSurfaceMuted,
                   ),
                 ),
               ],
@@ -420,15 +410,15 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Text('🧾', style: TextStyle(fontSize: _scale(sw, 56, 64, 72), color: Colors.grey)),
+            Text('🧾', style: TextStyle(fontSize: _scale(sw, 56, 64, 72), color: AppColors.onSurfaceFaint)),
             const SizedBox(height: 16),
             Text(
               'You don’t have any bookings yet',
-              style: TextStyle(fontSize: _scale(sw, 16, 18, 20), color: Colors.grey),
+              style: context.t.bodyLarge?.copyWith(fontSize: _scale(sw, 16, 18, 20), color: AppColors.onSurfaceMuted),
               textAlign: TextAlign.center,
             ),
             const SizedBox(height: 8),
-            const Text('Go back and book a slot to see it here', style: TextStyle(color: Colors.grey)),
+            Text('Go back and book a slot to see it here', style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted)),
           ],
         ),
       ),
@@ -463,10 +453,8 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
     showModalBottomSheet(
       context: context,
       isScrollControlled: false,
-      backgroundColor: Colors.white,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      backgroundColor: context.c.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(AppRadii.l))),
       builder: (ctx) {
         return Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
@@ -476,7 +464,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
             children: [
               Row(
                 children: [
-                  const Text('Booking Details', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                  Text('Booking Details', style: context.t.titleMedium?.copyWith(fontSize: 18, fontWeight: FontWeight.w700, color: context.c.onSurface)),
                   const Spacer(),
                   _statusChip(status, freeByPlan),
                 ],
@@ -487,20 +475,19 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
               _kv('Vehicle', (slot['vehicle_type'] ?? data['vehicle_type'] ?? '—').toString()),
               _kv('Instructor', (slot['instructor_name'] ?? data['instructor_name'] ?? '—').toString()),
               const SizedBox(height: 10),
-              const Divider(height: 1),
+              Divider(color: AppColors.divider),
               const SizedBox(height: 10),
               _kv('Vehicle Cost', '₹${vehicleCost.toStringAsFixed(2)}', strike: freeByPlan),
               _kv('Additional Cost', '₹${additionalCost.toStringAsFixed(2)}', strike: freeByPlan),
-              if (!freeByPlan && surcharge > 0)
-                _kv('Distance Surcharge', '₹${surcharge.toStringAsFixed(2)}'),
+              if (!freeByPlan && surcharge > 0) _kv('Distance Surcharge', '₹${surcharge.toStringAsFixed(2)}'),
               const SizedBox(height: 6),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Text('Total Amount', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+                  Text('Total Amount', style: context.t.bodyMedium?.copyWith(fontSize: 16, fontWeight: FontWeight.w700, color: context.c.onSurface)),
                   Text(
                     freeByPlan ? 'FREE' : '₹${total.toStringAsFixed(2)}',
-                    style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Colors.green),
+                    style: context.t.titleMedium?.copyWith(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.success),
                   ),
                 ],
               ),
@@ -524,17 +511,18 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
           Expanded(
             child: Text(
               k,
-              style: const TextStyle(fontSize: 13, color: Color(0xFF6B7280), fontWeight: FontWeight.w600),
+              style: context.t.bodySmall?.copyWith(fontSize: 13, color: AppColors.onSurfaceMuted, fontWeight: FontWeight.w600),
             ),
           ),
           Text(
             v,
-            style: TextStyle(
+            style: context.t.bodyMedium?.copyWith(
               fontSize: 13,
               fontWeight: FontWeight.w700,
               decoration: strike ? TextDecoration.lineThrough : TextDecoration.none,
               decorationThickness: 2,
-              decorationColor: Colors.redAccent,
+              decorationColor: AppColors.errFg,
+              color: context.c.onSurface,
             ),
           ),
         ],
@@ -556,15 +544,15 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
         width: _scale(sw, 54, 60, 66),
         padding: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: const Color(0xFFF3F4F6),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: const Color(0xFFE5E7EB)),
+          color: AppColors.neuBg,
+          borderRadius: BorderRadius.circular(AppRadii.m),
+          border: Border.all(color: AppColors.divider),
         ),
         child: Column(
-          children: const [
-            Text('--', style: TextStyle(fontSize: 12, color: Colors.grey)),
-            SizedBox(height: 4),
-            Text('--', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),
+          children: [
+            Text('--', style: context.t.bodySmall?.copyWith(fontSize: 12, color: AppColors.onSurfaceFaint)),
+            const SizedBox(height: 4),
+            Text('--', style: context.t.titleSmall?.copyWith(fontSize: 16, fontWeight: FontWeight.w700, color: context.c.onSurface)),
           ],
         ),
       );
@@ -574,20 +562,20 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
       width: _scale(sw, 54, 60, 66),
       padding: const EdgeInsets.symmetric(vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF0FDF4),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF10B981).withOpacity(0.2)),
+        color: AppColors.okBg,
+        borderRadius: BorderRadius.circular(AppRadii.m),
+        border: Border.all(color: AppColors.okBg.withOpacity(0.5)),
       ),
       child: Column(
         children: [
           Text(
             DateFormat('MMM').format(d).toUpperCase(),
-            style: const TextStyle(fontSize: 12, color: Color(0xFF10B981), fontWeight: FontWeight.w700),
+            style: context.t.bodySmall?.copyWith(fontSize: 12, color: AppColors.okFg, fontWeight: FontWeight.w700),
           ),
           const SizedBox(height: 4),
           Text(
             DateFormat('d').format(d),
-            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.black87),
+            style: context.t.titleSmall?.copyWith(fontSize: 16, fontWeight: FontWeight.w800, color: context.c.onSurface),
           ),
         ],
       ),
@@ -595,22 +583,22 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
   }
 
   Widget _statusChip(String status, bool freeByPlan) {
-    Color bg = const Color(0xFFE5E7EB);
-    Color fg = const Color(0xFF374151);
+    Color bg = AppColors.neuBg;
+    Color fg = AppColors.neuFg;
     String label = status.isEmpty ? 'confirmed' : status;
 
     switch (label.toLowerCase()) {
       case 'paid':
-        bg = const Color(0xFFD1FAE5);
-        fg = const Color(0xFF065F46);
+        bg = AppColors.okBg;
+        fg = AppColors.okFg;
         break;
       case 'confirmed':
-        bg = const Color(0xFFE0E7FF);
-        fg = const Color(0xFF1E3A8A);
+        bg = AppColors.neuBg;
+        fg = AppColors.brand;
         break;
       case 'cancelled':
-        bg = const Color(0xFFFEE2E2);
-        fg = const Color(0xFF991B1B);
+        bg = AppColors.errBg;
+        fg = AppColors.errFg;
         break;
     }
 
@@ -623,7 +611,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
       decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
       child: Text(
         label.toUpperCase(),
-        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: fg, letterSpacing: .6),
+        style: context.t.bodySmall?.copyWith(fontSize: 10, fontWeight: FontWeight.w800, color: fg, letterSpacing: .6),
       ),
     );
   }

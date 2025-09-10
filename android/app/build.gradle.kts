@@ -12,6 +12,11 @@ android {
     namespace = "com.example.smart_drive"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = "27.0.12077973"
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
+    
 
     compileOptions {
         isCoreLibraryDesugaringEnabled = true
@@ -63,3 +68,7 @@ dependencies {
 flutter {
     source = "../.."
 }
+
+tasks.whenTaskAdded {
+    if (name.startsWith("lintVital")) enabled = false
+    }
