@@ -53,7 +53,6 @@ class _GrainPainter extends CustomPainter {
   bool shouldRepaint(covariant _GrainPainter oldDelegate) => oldDelegate.opacity != opacity;
 }
 
-/// ───────────────────────────────── Student Dashboard ────────────────────────────────
 class StudentDashboard extends StatefulWidget {
   const StudentDashboard({super.key});
   @override
@@ -87,7 +86,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
         final doc = await _firestore.collection('users').doc(user.uid).get();
         if (doc.exists) {
           setState(() {
-            userData = doc.data() as Map<String, dynamic>;
+            userData = (doc.data() as Map<String, dynamic>?) ?? {};
             userStatus = (userData['status'] ?? 'pending').toString();
             isLoading = false;
           });
@@ -327,6 +326,24 @@ class _StudentDashboardState extends State<StudentDashboard> {
                 ),
               ),
             ),
+            // ── Contact Section
+SliverToBoxAdapter(
+  child: Padding(
+    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        _SectionTitle('Contact Us'),
+        SizedBox(height: 12),
+        _ContactTile(
+          phone: '+91 98765 43210',
+          email: 'support@smartdrive.com',
+        ),
+      ],
+    ),
+  ),
+),
+
             const SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
         ),
@@ -440,8 +457,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
     );
   }
 }
-
-/// ──────────────────── UI pieces ────────────────────
 
 class _SectionTitle extends StatelessWidget {
   final String text;
@@ -686,8 +701,51 @@ class _ActionTile extends StatelessWidget {
   }
 }
 
+class _ContactTile extends StatelessWidget {
+  final String phone;
+  final String email;
+
+  const _ContactTile({required this.phone, required this.email});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      elevation: 0,
+      color: AppColors.surface,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Container(
+              decoration: BoxDecoration(
+                color: AppColors.accentTeal.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(AppRadii.m),
+              ),
+              padding: const EdgeInsets.all(10),
+              child: const Icon(Icons.support_agent, color: AppColors.accentTeal),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text("Contact Us", style: AppText.tileTitle),
+                  const SizedBox(height: 4),
+                  Text("Phone: $phone", style: AppText.tileSubtitle),
+                  Text("Email: $email", style: AppText.tileSubtitle),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// ===============================
-/// Notification bell
+/// Notification bell (client-side sort, no composite index required)
 /// ===============================
 class NotificationBell extends StatelessWidget {
   final String uid;
@@ -704,117 +762,192 @@ class NotificationBell extends StatelessWidget {
   });
 
   bool _isTargeted(Map<String, dynamic> m) {
-    final List segs = (m['segments'] as List?) ?? const ['all'];
-    final Set<String> S = segs.map((e) => e.toString().toLowerCase()).toSet();
+    try {
+      final List segs = (m['segments'] as List?) ?? const ['all'];
+      final Set<String> S = segs.map((e) => e.toString().toLowerCase()).toSet();
 
-    final List targets = (m['target_uids'] as List?) ?? const [];
-    final bool direct = targets.map((e) => e.toString()).contains(uid);
+      final List targets = (m['target_uids'] as List?) ?? const [];
+      final bool direct = targets.map((e) => e.toString()).contains(uid);
 
-    DateTime? asDt(dynamic v) {
-      if (v == null) return null;
-      if (v is Timestamp) return v.toDate();
-      if (v is DateTime) return v;
-      return null;
+      DateTime? asDt(dynamic v) {
+        if (v == null) return null;
+        if (v is Timestamp) return v.toDate();
+        if (v is DateTime) return v;
+        return null;
+      }
+
+      final now = DateTime.now();
+      final scheduledAt = asDt(m['scheduled_at']) ?? asDt(m['created_at']);
+      final expiresAt = asDt(m['expires_at']);
+      final withinTime = (scheduledAt == null || !scheduledAt.isAfter(now)) &&
+          (expiresAt == null || expiresAt.isAfter(now));
+
+      final bool segmentHit = S.contains('all') ||
+          (S.contains('students') && role == 'student') ||
+          (S.contains('instructors') && role == 'instructor') ||
+          (S.contains('active') && userStatus == 'active') ||
+          (S.contains('pending') && userStatus == 'pending');
+
+      return withinTime && (direct || segmentHit);
+    } catch (e, st) {
+      debugPrint('NBELL: _isTargeted error: $e\n$st');
+      return false;
     }
-    final now = DateTime.now();
-    final scheduledAt = asDt(m['scheduled_at']) ?? asDt(m['created_at']);
-    final expiresAt   = asDt(m['expires_at']);
-    final withinTime  = (scheduledAt == null || !scheduledAt.isAfter(now)) &&
-                        (expiresAt == null   ||  expiresAt.isAfter(now));
-
-    final bool segmentHit =
-        S.contains('all') ||
-        (S.contains('students') && role == 'student') ||
-        (S.contains('instructors') && role == 'instructor') ||
-        (S.contains('active') && userStatus == 'active') ||
-        (S.contains('pending') && userStatus == 'pending');
-
-    return withinTime && (direct || segmentHit);
   }
 
   @override
   Widget build(BuildContext context) {
     final fs = FirebaseFirestore.instance;
 
+    // read receipts for current user
     final readsStream = fs
         .collection('users')
         .doc(uid)
         .collection('notif_reads')
         .snapshots();
 
+    // Global broadcast notifications
     final notifsQuery = fs
         .collection('notifications')
         .orderBy('created_at', descending: true)
         .limit(30)
         .snapshots();
 
+    // Per-user notifications (written by admin flows to user_notification)
+    // NOTE: Removed orderBy to avoid composite index requirement.
+    final userNotifsQuery = fs
+        .collection('user_notification')
+        .where('uid', isEqualTo: uid)
+        .limit(100) // increase if you expect more items
+        .snapshots();
+
+    // Always show the icon immediately so UI doesn't disappear while streams resolve.
     return StreamBuilder<QuerySnapshot>(
       stream: readsStream,
       builder: (context, readsSnap) {
-        final Map<String, DateTime?> readAtMap = {
-          if (readsSnap.hasData)
-            for (final d in readsSnap.data!.docs)
-              d.id: (() {
-                final m = (d.data() as Map).cast<String, dynamic>();
-                final v = m['readAt'];
-                if (v is Timestamp) return v.toDate();
-                if (v is DateTime) return v;
-                return null;
-              })(),
-        };
+        // build a safe readAtMap (never throws)
+        final Map<String, DateTime?> readAtMap = {};
+        if (readsSnap.hasError) {
+          debugPrint('NBELL: readsStream error: ${readsSnap.error}');
+        } else if (readsSnap.hasData) {
+          try {
+            for (final d in readsSnap.data!.docs) {
+              final map = (d.data() as Map<String, dynamic>?) ?? <String, dynamic>{};
+              final v = map['readAt'] ?? map['read_at'];
+              if (v is Timestamp) readAtMap[d.id] = v.toDate();
+              else if (v is DateTime) readAtMap[d.id] = v;
+              else readAtMap[d.id] = null;
+            }
+          } catch (e, st) {
+            debugPrint('NBELL: readsStream parsing error: $e\n$st');
+          }
+        }
 
         return StreamBuilder<QuerySnapshot>(
           stream: notifsQuery,
           builder: (context, notifSnap) {
-            final targeted = <QueryDocumentSnapshot>[];
-            if (notifSnap.hasData) {
-              for (final d in notifSnap.data!.docs) {
-                final m = (d.data() as Map).cast<String, dynamic>();
-                if (_isTargeted(m)) targeted.add(d);
-              }
+            if (notifSnap.hasError) {
+              debugPrint('NBELL: notifsQuery error: ${notifSnap.error}');
             }
 
-            final now = DateTime.now();
-            final sevenDays = const Duration(days: 7);
+            return StreamBuilder<QuerySnapshot>(
+              stream: userNotifsQuery,
+              builder: (context, userNotifSnap) {
+                if (userNotifSnap.hasError) {
+                  debugPrint('NBELL: userNotifsQuery error: ${userNotifSnap.error}');
+                }
 
-            final List<QueryDocumentSnapshot> visible = targeted.where((d) {
-              final readAt = readAtMap[d.id];
-              if (readAt == null) return true;
-              return now.difference(readAt) <= sevenDays;
-            }).toList();
+                // Merge documents safely
+                final List<QueryDocumentSnapshot> combined = [];
+                try {
+                  if (notifSnap.hasData) combined.addAll(notifSnap.data!.docs);
+                  if (userNotifSnap.hasData) combined.addAll(userNotifSnap.data!.docs);
+                } catch (e, st) {
+                  debugPrint('NBELL: merging snapshots error: $e\n$st');
+                }
 
-            final int unreadCount =
-                visible.where((d) => !readAtMap.containsKey(d.id)).length;
+                // dedupe by id
+                final Map<String, QueryDocumentSnapshot> byId = {};
+                for (final d in combined) {
+                  byId[d.id] ??= d;
+                }
+                final merged = byId.values.toList();
 
-            return Stack(
-              clipBehavior: Clip.none,
-              children: [
-                IconButton(
-                  icon: const Icon(Icons.notifications_none_rounded),
-                  onPressed: () => _openMenu(
-                    context,
-                    anchorKey,
-                    visible,
-                    readAtMap.keys.toSet(),
-                  ),
-                ),
-                if (unreadCount > 0)
-                  Positioned(
-                    right: 6,
-                    top: 6,
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: AppColors.danger,
-                        borderRadius: BorderRadius.circular(999),
-                      ),
-                      child: Text(
-                        unreadCount > 99 ? '99+' : '$unreadCount',
-                        style: const TextStyle(color: AppColors.onSurfaceInverse, fontSize: 10),
+                // sort client-side by created_at (newest first)
+                merged.sort((a, b) {
+                  DateTime ta = DateTime.fromMillisecondsSinceEpoch(0);
+                  DateTime tb = DateTime.fromMillisecondsSinceEpoch(0);
+                  try {
+                    final ma = (a.data() as Map<String, dynamic>?) ?? {};
+                    final mb = (b.data() as Map<String, dynamic>?) ?? {};
+                    final ca = ma['created_at'];
+                    final cb = mb['created_at'];
+                    if (ca is Timestamp) ta = ca.toDate();
+                    if (ca is DateTime) ta = ca;
+                    if (cb is Timestamp) tb = cb.toDate();
+                    if (cb is DateTime) tb = cb;
+                  } catch (_) {}
+                  return tb.compareTo(ta);
+                });
+
+                // pick targeted
+                final targeted = <QueryDocumentSnapshot>[];
+                for (final d in merged) {
+                  final path = d.reference.path;
+                  final m = (d.data() as Map<String, dynamic>?) ?? <String, dynamic>{};
+                  final fromUserNotification = path.contains('user_notification/');
+                  if (fromUserNotification) {
+                    targeted.add(d);
+                  } else {
+                    if (_isTargeted(m)) targeted.add(d);
+                  }
+                }
+
+                final now = DateTime.now();
+                final sevenDays = const Duration(days: 7);
+
+                final visible = targeted.where((d) {
+                  final readAt = readAtMap[d.id];
+                  if (readAt == null) return true;
+                  return now.difference(readAt) <= sevenDays;
+                }).toList();
+
+                final unreadCount = visible.where((d) => !readAtMap.containsKey(d.id)).length;
+
+                // debug output to help troubleshooting
+                debugPrint('NBELL: uid=$uid merged=${merged.length} targeted=${targeted.length} visible=${visible.length} unread=$unreadCount');
+
+                return Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    IconButton(
+                      icon: const Icon(Icons.notifications_none_rounded),
+                      onPressed: () => _openMenu(
+                        context,
+                        anchorKey,
+                        visible,
+                        readAtMap.keys.toSet(),
                       ),
                     ),
-                  ),
-              ],
+                    if (unreadCount > 0)
+                      Positioned(
+                        right: 6,
+                        top: 6,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.danger,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            unreadCount > 99 ? '99+' : '$unreadCount',
+                            style: const TextStyle(color: AppColors.onSurfaceInverse, fontSize: 10),
+                          ),
+                        ),
+                      ),
+                  ],
+                );
+              },
             );
           },
         );
@@ -948,10 +1081,10 @@ class _NotificationsList extends StatelessWidget {
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (ctx, i) {
         final d = targeted[i];
-        final m = (d.data() as Map).cast<String, dynamic>();
+        final m = d.data() as Map<String, dynamic>? ?? <String, dynamic>{};
         final title = (m['title'] ?? '-') as String;
         final msg = (m['message'] ?? '') as String;
-        final url = (m['action_url'] ?? '').toString();
+        final url = (m['action_url'] ?? m['actionUrl'] ?? '').toString();
         final ts = (m['scheduled_at'] ?? m['created_at']) as dynamic;
         final whenTxt = _formatWhen(ts);
         final isRead = readIds.contains(d.id);

@@ -2,17 +2,17 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
-import 'package:smart_drive/splash_router.dart';//session check + routing
+import 'package:firebase_auth/firebase_auth.dart';
 
 import 'firebase_options.dart';
 import 'messaging_setup.dart';
 import 'services/session_service.dart';
-// your real entry screen
+import 'splash_router.dart'; // your real entry screen / session check + routing
 
 @pragma('vm:entry-point')
 Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  // handle message.data['action_url'] if needed
+  // handle message.data['action_url'] if needed in background
 }
 
 class AppBootstrap extends StatefulWidget {
@@ -33,17 +33,27 @@ class _AppBootstrapState extends State<AppBootstrap> {
   Future<void> _init() async {
     try {
       await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-      FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
+      //FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
 
-      await initPush(); // permissions, channels, foreground handler
+      // Initialize push (permissions, channels, foreground handler)
+      await initPush();
 
       // Restore session and topics
       final sess = await SessionService().read();
+
+      // Start per-user Firestore notification listener for the stored session UID
+      // fallback to FirebaseAuth.instance.currentUser?.uid if session doesn't have userId
+      final restoredUid = sess.userId ?? FirebaseAuth.instance.currentUser?.uid;
+      if (restoredUid != null && restoredUid.isNotEmpty) {
+        await startUserNotificationListener(restoredUid);
+      }
+
+      // Reapply topic subscriptions from session if available
       if (sess.role != null && sess.status != null) {
         await subscribeUserSegments(role: sess.role!, status: sess.status!);
       }
 
-      // Reapply on token refresh
+      // Reapply on token refresh (reads session again)
       attachTokenRefreshHandler(() async {
         final s = await SessionService().read();
         if (s.role != null && s.status != null) {
@@ -54,7 +64,7 @@ class _AppBootstrapState extends State<AppBootstrap> {
       if (!mounted) return;
       // Navigate to your actual home
       Navigator.of(context).pushReplacement(
-        MaterialPageRoute(builder: (_) => SplashRouter()),
+        MaterialPageRoute(builder: (_) => const SplashRouter()),
       );
     } catch (e) {
       setState(() => _error = e.toString());

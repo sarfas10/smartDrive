@@ -55,6 +55,7 @@ dependencies:
   url_launcher: ^6.3.2
   firebase_messaging: ^16.0.0
   flutter_local_notifications: ^19.4.1
+  video_player: ^2.10.0
 
 dev_dependencies:
   flutter_test:

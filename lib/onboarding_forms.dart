@@ -42,6 +42,10 @@ class _OnboardingFormState extends State<OnboardingForm> {
   final _licenseNumberCtrl = TextEditingController();
   DateTime? _licenseExpiry;
 
+  // NEW: license issue date + issuing authority
+  DateTime? _licenseIssued; // date of issue
+  final _licenseAuthorityCtrl = TextEditingController();
+
   DateTime? _dob;
   XFile? _profilePhoto;
   String? _photoUrl;
@@ -67,6 +71,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
     _relationCtrl.dispose();
     _learnerNumberCtrl.dispose();
     _licenseNumberCtrl.dispose();
+    _licenseAuthorityCtrl.dispose();
     super.dispose();
   }
 
@@ -108,6 +113,17 @@ class _OnboardingFormState extends State<OnboardingForm> {
         _licenseNumberCtrl.text = (data?['license_number'] ?? '') as String;
         final licExp = data?['license_expiry'] as Timestamp?;
         _licenseExpiry = licExp?.toDate();
+        // If a license exists, clear learner fields and disable learner input
+        if (_isLicenseHolder) {
+          _isLearnerHolder = false;
+          _learnerNumberCtrl.clear();
+          _learnerExpiry = null;
+        }
+
+        // NEW: hydrate license issue date + authority
+        final licIssuedTs = data?['license_issue_date'] as Timestamp?;
+        _licenseIssued = licIssuedTs?.toDate();
+        _licenseAuthorityCtrl.text = (data?['license_authority'] ?? '') as String;
       }
     } catch (_) {
       // ignore and let user fill
@@ -203,6 +219,41 @@ class _OnboardingFormState extends State<OnboardingForm> {
       return;
     }
 
+    // Date validations: DOB and license issue date must be in the past; expiry dates must be in the future
+    final now = DateTime.now();
+    if (_dob == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick date of birth')));
+      return;
+    }
+    if (! _dob!.isBefore(now)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Date of birth must be in the past')));
+      return;
+    }
+    if (_isLearnerHolder && _learnerExpiry == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick learner expiry date')));
+      return;
+    }
+    if (_isLearnerHolder && _learnerExpiry != null && !_learnerExpiry!.isAfter(now)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Learner expiry must be a future date')));
+      return;
+    }
+    if (_isLicenseHolder && _licenseExpiry == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick license expiry date')));
+      return;
+    }
+    if (_isLicenseHolder && _licenseExpiry != null && !_licenseExpiry!.isAfter(now)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('License expiry must be a future date')));
+      return;
+    }
+    if (_isLicenseHolder && _licenseIssued == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick license date of issue')));
+      return;
+    }
+    if (_isLicenseHolder && _licenseIssued != null && !_licenseIssued!.isBefore(now)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('License date of issue must be in the past')));
+      return;
+    }
+
     // Additional validation: expiry dates when applicable
     if (_isLearnerHolder && _learnerExpiry == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick learner expiry date')));
@@ -210,6 +261,16 @@ class _OnboardingFormState extends State<OnboardingForm> {
     }
     if (_isLicenseHolder && _licenseExpiry == null) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick license expiry date')));
+      return;
+    }
+
+    // NEW: validate license issue date and authority when license holder
+    if (_isLicenseHolder && _licenseIssued == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick license date of issue')));
+      return;
+    }
+    if (_isLicenseHolder && (_licenseAuthorityCtrl.text.trim().isEmpty)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter licensing authority')));
       return;
     }
 
@@ -238,6 +299,9 @@ class _OnboardingFormState extends State<OnboardingForm> {
         'is_license_holder': _isLicenseHolder,
         'license_number': _isLicenseHolder ? _licenseNumberCtrl.text.trim() : null,
         'license_expiry': _isLicenseHolder && _licenseExpiry != null ? Timestamp.fromDate(_licenseExpiry!) : null,
+        // NEW: save issue date + authority
+        'license_issue_date': _isLicenseHolder && _licenseIssued != null ? Timestamp.fromDate(_licenseIssued!) : null,
+        'license_authority': _isLicenseHolder ? _licenseAuthorityCtrl.text.trim() : null,
         'onboarding_status': 'personal_saved',
         'updated_at': FieldValue.serverTimestamp(),
         'created_at': FieldValue.serverTimestamp(),
@@ -400,11 +464,16 @@ class _OnboardingFormState extends State<OnboardingForm> {
                 DropdownMenuItem(value: false, child: Text('No')),
                 DropdownMenuItem(value: true, child: Text('Yes')),
               ],
-              onChanged: (v) => setState(() => _isLearnerHolder = v ?? false),
+              onChanged: _isLicenseHolder ? null : (v) => setState(() => _isLearnerHolder = v ?? false),
             ),
           ),
           const SizedBox(height: 8),
-          if (_isLearnerHolder) ...[
+          if (_isLicenseHolder)
+            Padding(
+              padding: const EdgeInsets.only(top: 8, left: 4),
+              child: Text('Learner details are disabled when license details are provided.', style: TextStyle(color: AppColors.onSurfaceFaint, fontSize: 12)),
+            ),
+          if (_isLearnerHolder)  ...[
             _Labeled(
               'Learner Number*',
               child: TextFormField(
@@ -454,7 +523,15 @@ class _OnboardingFormState extends State<OnboardingForm> {
                 DropdownMenuItem(value: false, child: Text('No')),
                 DropdownMenuItem(value: true, child: Text('Yes')),
               ],
-              onChanged: (v) => setState(() => _isLicenseHolder = v ?? false),
+              onChanged: (v) => setState(() {
+                _isLicenseHolder = v ?? false;
+                // if user toggles license ON, clear learner details and disable them
+                if (_isLicenseHolder) {
+                  _isLearnerHolder = false;
+                  _learnerNumberCtrl.clear();
+                  _learnerExpiry = null;
+                }
+              }),
             ),
           ),
           const SizedBox(height: 8),
@@ -468,6 +545,47 @@ class _OnboardingFormState extends State<OnboardingForm> {
               ),
             ),
             const SizedBox(height: 12),
+
+            // NEW: Date of Issue
+            _Labeled(
+              'License Date of Issue*',
+              child: InkWell(
+                onTap: () async {
+                  final now = DateTime.now();
+                  final picked = await showDatePicker(
+                    context: context,
+                    firstDate: DateTime(now.year - 50),
+                    lastDate: DateTime(now.year + 10),
+                    initialDate: _licenseIssued ?? now,
+                  );
+                  if (picked != null) setState(() => _licenseIssued = picked);
+                },
+                child: InputDecorator(
+                  decoration: _inputDecoration('Pick license date of issue'),
+                  child: Text(
+                    _licenseIssued == null
+                        ? 'Tap to select'
+                        : '${_licenseIssued!.day.toString().padLeft(2, '0')}-'
+                            '${_licenseIssued!.month.toString().padLeft(2, '0')}-'
+                            '${_licenseIssued!.year}',
+                    style: TextStyle(color: _licenseIssued == null ? AppColors.onSurfaceFaint : context.c.onSurface),
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            // NEW: Licensing Authority
+            _Labeled(
+              'Licensing Authority*',
+              child: TextFormField(
+                controller: _licenseAuthorityCtrl,
+                decoration: _inputDecoration('E.g. RTO Ernakulam / Regional Transport Office'),
+                validator: (v) => (_isLicenseHolder && (v == null || v.trim().isEmpty)) ? 'Required' : null,
+              ),
+            ),
+            const SizedBox(height: 12),
+
             _Labeled(
               'License Expiry*',
               child: InkWell(

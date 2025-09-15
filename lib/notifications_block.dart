@@ -18,11 +18,9 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
   final _msgCtrl = TextEditingController();
   final _urlCtrl = TextEditingController();
 
-  // segments & schedule
-  final Set<String> _segments = {}; // multi-select
+  // segments
+  final Set<String> _segments = {'all'}; // default to 'all'
   static const _segmentOptions = ['all', 'students', 'instructors', 'active', 'pending'];
-  String _schedule = 'Send Now'; // or 'Schedule for Later'
-  DateTime? _when;
   bool _busy = false;
 
   // ======= CONFIG: point to your Hostinger API and admin key =======
@@ -80,7 +78,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        if (_segments.isNotEmpty)
+                        if (_segments.isNotEmpty && !(_segments.length==1 && _segments.contains('all')))
                           TextButton.icon(
                             onPressed: () => setState(_segments.clear),
                             icon: const Icon(Icons.close_rounded, size: 18),
@@ -144,38 +142,6 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                         style: AppText.tileTitle.copyWith(color: context.c.onSurface),
                       ),
                     ),
-                    const SizedBox(height: 12),
-
-                    // Schedule row (adaptive)
-                    _twoUp(
-                      isWide: isWide,
-                      left: DropdownButtonFormField<String>(
-                        value: _schedule,
-                        items: const [
-                          DropdownMenuItem(value: 'Send Now', child: Text('Send Now')),
-                          DropdownMenuItem(value: 'Schedule for Later', child: Text('Schedule for Later')),
-                        ],
-                        onChanged: (v) => setState(() {
-                          _schedule = v ?? 'Send Now';
-                          if (_schedule == 'Send Now') _when = null;
-                        }),
-                        decoration: const InputDecoration(
-                          border: OutlineInputBorder(),
-                          labelText: 'Schedule',
-                        ),
-                      ),
-                      right: (_schedule == 'Schedule for Later')
-                          ? OutlinedButton.icon(
-                              icon: const Icon(Icons.calendar_today_outlined),
-                              label: Text(_when == null ? 'Pick Date & Time' : _format(_when!),
-                                  style: AppText.hintSmall.copyWith(color: context.c.onSurface)),
-                              onPressed: _pickDateTime,
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: context.c.primary,
-                              ),
-                            )
-                          : const SizedBox.shrink(),
-                    ),
                     const SizedBox(height: 16),
 
                     // Actions
@@ -190,7 +156,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                                     child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onSurfaceInverse),
                                   )
                                 : const Icon(Icons.send_outlined),
-                            label: const Text('Send / Schedule'),
+                            label: const Text('Send'),
                             onPressed: _busy ? null : _submit,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
@@ -271,8 +237,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                         final m = (docs[i].data() as Map).cast<String, dynamic>();
                         final title = (m['title'] ?? '-') as String;
                         final segs = (m['segments'] as List?)?.join(', ') ?? 'all';
-                        final when = _format((m['scheduled_at'] as Timestamp?)?.toDate() ??
-                            (m['created_at'] as Timestamp?)?.toDate());
+                        final when = _format((m['created_at'] as Timestamp?)?.toDate());
                         final status = (m['status']?.toString() ?? '-');
 
                         return Card(
@@ -321,8 +286,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                     rows.add([
                       Text(m['title'] ?? '-', overflow: TextOverflow.ellipsis, style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
                       Text((m['segments'] as List?)?.join(', ') ?? 'all', overflow: TextOverflow.ellipsis, style: AppText.tileSubtitle),
-                      Text(_format((m['scheduled_at'] as Timestamp?)?.toDate() ??
-                          (m['created_at'] as Timestamp?)?.toDate()), style: AppText.hintSmall),
+                      Text(_format((m['created_at'] as Timestamp?)?.toDate()), style: AppText.hintSmall),
                       _StatusPill(m['status']?.toString() ?? '-'),
                       TextButton(
                         onPressed: () => _preview(context, m),
@@ -412,7 +376,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
     }
 
     // Phone: bottom sheet with checkboxes (better for small screens)
-    final localSelections = Set<String>.from(_segments.isEmpty ? ['all'] : _segments);
+    final localSelections = Set<String>.from(_segments.isEmpty ? {'all'} : _segments);
     await showModalBottomSheet<void>(
       context: context,
       showDragHandle: true,
@@ -517,33 +481,12 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
   }
 
   // ---------------- Actions ----------------
-  Future<void> _pickDateTime() async {
-    final now = DateTime.now();
-    final date = await showDatePicker(
-      context: context,
-      firstDate: now,
-      lastDate: now.add(const Duration(days: 365)),
-      initialDate: now.add(const Duration(days: 1)),
-    );
-    if (date == null) return;
-    final time = await showTimePicker(context: context, initialTime: TimeOfDay.now());
-    if (time == null) return;
-    setState(() => _when = DateTime(date.year, date.month, date.day, time.hour, time.minute));
-  }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
+    // default to 'all' if user didn't pick any segment
     if (_segments.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: const Text('Pick at least one segment (or “all”)'), backgroundColor: AppColors.warning),
-      );
-      return;
-    }
-    if (_schedule == 'Schedule for Later' && _when == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: const Text('Pick a schedule date & time'), backgroundColor: AppColors.warning),
-      );
-      return;
+      setState(() => _segments.add('all'));
     }
 
     setState(() => _busy = true);
@@ -553,12 +496,9 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
         'message': _msgCtrl.text.trim(),
         'segments': _segments.toList(),
         'action_url': _urlCtrl.text.trim().isEmpty ? null : _urlCtrl.text.trim(),
-        if (_schedule == 'Schedule for Later') 'scheduled_at': _when!.toIso8601String(),
       };
 
-      final uri = Uri.parse(
-        '$_apiBase/${_schedule == "Send Now" ? "notify_send.php" : "notify_schedule.php"}',
-      );
+      final uri = Uri.parse('$_apiBase/notify_send.php');
 
       final res = await http.post(
         uri,
@@ -567,19 +507,19 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
       );
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        await _saveHistoryFirestore(status: _schedule == 'Send Now' ? 'queued' : 'scheduled');
+        await _saveHistoryFirestore(status: 'queued');
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(_schedule == 'Send Now' ? 'Queued to send now.' : 'Scheduled.'), backgroundColor: AppColors.success),
+            SnackBar(content: const Text('Queued to send.'), backgroundColor: AppColors.success),
           );
         }
         _titleCtrl.clear();
         _msgCtrl.clear();
         _urlCtrl.clear();
         setState(() {
-          _segments.clear();
-          _schedule = 'Send Now';
-          _when = null;
+          _segments
+            ..clear()
+            ..add('all');
         });
       } else {
         throw Exception('API error ${res.statusCode}: ${res.body}');
@@ -599,9 +539,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
       'message': _msgCtrl.text.trim(),
       'segments': _segments.toList().isEmpty ? ['all'] : _segments.toList(),
       'action_url': _urlCtrl.text.trim(),
-      'schedule': _schedule,
-      'scheduled_at': _when,
-      'status': status, // draft | queued | scheduled (UI mirror)
+      'status': status, // draft | queued
       'created_at': FieldValue.serverTimestamp(),
     });
   }

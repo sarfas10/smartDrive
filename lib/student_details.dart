@@ -1,4 +1,5 @@
 // lib/student_details.dart
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart'; // for view/download + opening links
@@ -127,21 +128,37 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
   }
 
   // ── Direct notification helper ─────────────────────────────────────────────
+  ///
+  /// Simplified: write a `user_notification` doc to Firestore only.
+  /// This will keep the in-app bell and notification list working, but will
+  /// not attempt to send FCM pushes from the mobile app.
   Future<void> _sendUserNotification({
     required String targetUid,
     required String title,
     required String message,
-    String segment = 'students', // keeps compatibility with segment filter
+    String segment = 'students', // kept for metadata but unused by client
     String? actionUrl,
   }) async {
-    await FirebaseFirestore.instance.collection('notifications').add({
-      'title': title,
-      'message': message,
-      'segments': [segment], // optional legacy segment
-      'target_uids': [targetUid], // direct target
-      'action_url': actionUrl,
-      'created_at': FieldValue.serverTimestamp(),
-    });
+    try {
+      final fs = FirebaseFirestore.instance;
+      await fs.collection('user_notification').add({
+        'uid': targetUid,
+        'title': title,
+        'message': message,
+        'action_url': actionUrl,
+        'segments': [segment],
+        'read': false,
+        'created_at': FieldValue.serverTimestamp(),
+        'status': 'created',
+      });
+    } catch (e) {
+      debugPrint('Failed to write user_notification: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Failed to create notification')),
+        );
+      }
+    }
   }
 
   // ── Actions ────────────────────────────────────────────────────────────────
@@ -163,7 +180,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     }
     await batch.commit();
 
-    // 🔔 notify the user
+    // 🔔 notify the user (Firestore only)
     await _sendUserNotification(
       targetUid: widget.uid,
       title: 'KYC Approved',
@@ -193,7 +210,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     }
     await batch.commit();
 
-    // 🔔 notify the user
+    // 🔔 notify the user (Firestore only)
     await _sendUserNotification(
       targetUid: widget.uid,
       title: 'KYC Rejected',
@@ -214,7 +231,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
           .doc(_userDocId)
           .update({'status': 'blocked'});
 
-      // Optional: notify the user about blocking
+      // Notify the user (Firestore only)
       await _sendUserNotification(
         targetUid: widget.uid,
         title: 'Account Blocked',
@@ -446,58 +463,8 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                           ),
                           const SizedBox(height: 16),
 
-                          // KYC Documents
-                          _card(
-                            context: context,
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    Expanded(
-                                      child: Text('KYC Documents',
-                                          style: Theme.of(context)
-                                              .textTheme
-                                              .titleSmall
-                                              ?.copyWith(
-                                                fontWeight: FontWeight.w600,
-                                                color: cs.onSurface,
-                                              )),
-                                    ),
-                                    _rightStatusBadge(context, _prettyKyc(kyc)),
-                                  ],
-                                ),
-                                const SizedBox(height: 12),
-                                if (docs.isEmpty)
-                                  _emptyRow(context, 'No documents uploaded')
-                                else
-                                  Column(
-                                    children: docs.map((d) {
-                                      final m = d.data();
-                                      final typeRaw =
-                                          (m['type'] ?? 'Document').toString();
-                                      final docName = _prettyDocType(typeRaw);
-                                      final uploadedAt = _fmtDate(m['created_at']);
-                                      final status = _prettyDocStatus(
-                                          (m['status'] ?? 'pending').toString());
-                                      final frontUrl = (m['front'] ?? '').toString();
-                                      final backUrl = (m['back'] ?? '').toString();
-                                      return _docImagesTile(
-                                        context: context,
-                                        title: docName,
-                                        meta: 'Status: $status • Uploaded $uploadedAt',
-                                        frontUrl: frontUrl,
-                                        backUrl: backUrl,
-                                      );
-                                    }).toList(),
-                                  ),
-                              ],
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-
                           // ──────────────────────────────────────────────
-                          // Other Documents (from user_uploads)
+                          // Documents (previously "Other Documents")
                           // ──────────────────────────────────────────────
                           _card(
                             context: context,
@@ -505,7 +472,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Other Documents',
+                                  'Documents',
                                   style: Theme.of(context)
                                       .textTheme
                                       .titleSmall
@@ -769,8 +736,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
         border: Border.all(color: cs.primary.withOpacity(0.25)),
       ),
       child: Text(text,
-          style: TextStyle(
-              fontSize: 12, fontWeight: FontWeight.w600, color: cs.primary)),
+          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: cs.primary)),
     );
   }
 
@@ -892,8 +858,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                 height: 76,
                 color: AppColors.neuBg,
                 alignment: Alignment.center,
-                child: Icon(Icons.broken_image_outlined,
-                    color: AppColors.onSurfaceMuted),
+                child: Icon(Icons.broken_image_outlined, color: AppColors.onSurfaceMuted),
               ),
             ),
           ),
@@ -921,29 +886,22 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                 if (front.isNotEmpty) ...[
                   const Text('Front', style: TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
-                  ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(front, fit: BoxFit.contain)),
+                  ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(front, fit: BoxFit.contain)),
                   const SizedBox(height: 12),
                 ],
                 if (back.isNotEmpty) ...[
                   const Text('Back', style: TextStyle(fontWeight: FontWeight.w600)),
                   const SizedBox(height: 6),
-                  ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(back, fit: BoxFit.contain)),
+                  ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(back, fit: BoxFit.contain)),
                 ],
                 if (front.isEmpty && back.isEmpty)
                   const Padding(
                     padding: EdgeInsets.symmetric(vertical: 24),
-                    child:
-                        Text('No preview available', textAlign: TextAlign.center),
+                    child: Text('No preview available', textAlign: TextAlign.center),
                   ),
                 Align(
                   alignment: Alignment.centerRight,
-                  child: TextButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      child: const Text('Close')),
+                  child: TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Close')),
                 ),
               ],
             ),
@@ -985,8 +943,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
   static const _warnAmber = AppColors.warnFg;
 
   String _prettyDocType(String raw) {
-    final parts =
-        raw.trim().split(RegExp(r'[_\-\s]+')).where((e) => e.isNotEmpty);
+    final parts = raw.trim().split(RegExp(r'[_\-\s]+')).where((e) => e.isNotEmpty);
     String cap(String s) => s[0].toUpperCase() + s.substring(1).toLowerCase();
     return parts.map(cap).join(' ');
   }
@@ -1003,8 +960,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     if (v is Map && v['seconds'] != null) {
       final s = int.tryParse(v['seconds'].toString());
       if (s != null) {
-        final d = DateTime.fromMillisecondsSinceEpoch(s * 1000, isUtc: true)
-            .toLocal();
+        final d = DateTime.fromMillisecondsSinceEpoch(s * 1000, isUtc: true).toLocal();
         return '${_dd(d.day)}/${_dd(d.month)}/${d.year}';
       }
     }
@@ -1015,17 +971,14 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
       final m = RegExp(r'seconds\s*[:=]\s*(\d+)').firstMatch(s);
       if (m != null) {
         final sec = int.parse(m.group(1)!);
-        final d =
-            DateTime.fromMillisecondsSinceEpoch(sec * 1000, isUtc: true)
-                .toLocal();
+        final d = DateTime.fromMillisecondsSinceEpoch(sec * 1000, isUtc: true).toLocal();
         return '${_dd(d.day)}/${_dd(d.month)}/${d.year}';
       }
       if (RegExp(r'^\d+$').hasMatch(s)) {
         final n = int.parse(s);
         final d = (n >= 1000000000000)
             ? DateTime.fromMillisecondsSinceEpoch(n, isUtc: true).toLocal()
-            : DateTime.fromMillisecondsSinceEpoch(n * 1000, isUtc: true)
-                .toLocal();
+            : DateTime.fromMillisecondsSinceEpoch(n * 1000, isUtc: true).toLocal();
         return '${_dd(d.day)}/${_dd(d.month)}/${d.year}';
       }
     }
@@ -1033,8 +986,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
       final n = v.toInt();
       final d = (n >= 1000000000000)
           ? DateTime.fromMillisecondsSinceEpoch(n, isUtc: true).toLocal()
-          : DateTime.fromMillisecondsSinceEpoch(n * 1000, isUtc: true)
-              .toLocal();
+          : DateTime.fromMillisecondsSinceEpoch(n * 1000, isUtc: true).toLocal();
       return '${_dd(d.day)}/${_dd(d.month)}/${d.year}';
     }
     return '-';
@@ -1082,8 +1034,7 @@ class _UploadsSearchField extends StatelessWidget {
         hintText: 'Search documents...',
         prefixIcon: const Icon(Icons.search),
         isDense: true,
-        contentPadding:
-            const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         filled: true,
         fillColor: Colors.white,
         border: OutlineInputBorder(
@@ -1128,8 +1079,7 @@ class _UploadItem extends StatelessWidget {
     return Card(
       elevation: 0,
       color: Colors.white,
-      shape:
-          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -1144,14 +1094,12 @@ class _UploadItem extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   padding: const EdgeInsets.all(8),
-                  child: Icon(icon,
-                      size: 20, color: const Color(0xFF3559FF)),
+                  child: Icon(icon, size: 20, color: const Color(0xFF3559FF)),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(name,
                           style: const TextStyle(
@@ -1166,13 +1114,9 @@ class _UploadItem extends StatelessWidget {
                           const Icon(Icons.calendar_today,
                               size: 14, color: Colors.black54),
                           const SizedBox(width: 6),
-                          Text(date,
-                              style: const TextStyle(
-                                  color: Colors.black54, fontSize: 12)),
+                          Text(date, style: const TextStyle(color: Colors.black54, fontSize: 12)),
                           const SizedBox(width: 14),
-                          Text(size,
-                              style: const TextStyle(
-                                  color: Colors.black54, fontSize: 12)),
+                          Text(size, style: const TextStyle(color: Colors.black54, fontSize: 12)),
                         ],
                       ),
                     ],
@@ -1188,19 +1132,14 @@ class _UploadItem extends StatelessWidget {
                   color: const Color(0xFFF6F8FE),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 10, vertical: 10),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     const Text('Remarks: ',
-                        style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: Colors.black87)),
-                    Expanded(
-                        child: Text(remarks,
-                            style: const TextStyle(
-                                color: Colors.black87, height: 1.2))),
+                        style:
+                            TextStyle(fontWeight: FontWeight.w600, color: Colors.black87)),
+                    Expanded(child: Text(remarks, style: const TextStyle(color: Colors.black87, height: 1.2))),
                   ],
                 ),
               ),

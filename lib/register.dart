@@ -145,56 +145,101 @@ class _RegisterScreenState extends State<RegisterScreen>
     }
   }
 
-  Future<void> _registerWithFirebase() async {
-  final email = _emailController.text.trim().toLowerCase();
-  final password = _passwordController.text.trim();
-  final displayName = _nameController.text.trim();
-  final phone = _phoneController.text.trim();
-  final role = isStudent ? 'student' : 'instructor';
+  /// Register user, create users doc and optionally user_plans.
+  ///
+  /// This version allocates a concurrency-safe enrolment number of the form
+  /// "<seq>/<year>" by using a Firestore transaction on `settings/app_settings`.
+    Future<void> _registerWithFirebase() async {
+    final email = _emailController.text.trim().toLowerCase();
+    final password = _passwordController.text.trim();
+    final displayName = _nameController.text.trim();
+    final phone = _phoneController.text.trim();
+    final role = isStudent ? 'student' : 'instructor';
 
-  // 1) Create auth user
-  final cred = await FirebaseAuth.instance
-      .createUserWithEmailAndPassword(email: email, password: password);
+    // 1) Create auth user
+    final cred = await FirebaseAuth.instance
+        .createUserWithEmailAndPassword(email: email, password: password);
 
-  await cred.user?.updateDisplayName(displayName);
+    await cred.user?.updateDisplayName(displayName);
 
-  final uid = cred.user!.uid;
+    final uid = cred.user!.uid;
 
-  // 2) Create/merge user profile document
-  final data = <String, dynamic>{
-    'uid': uid,
-    'email': email,
-    'name': displayName,
-    'phone': phone,
-    'role': role,
-    'status': 'pending',
-    'createdAt': FieldValue.serverTimestamp(),
-    if (!isStudent) 'licenseNo': _licenseController.text.trim(),
-    if (!isStudent)
-      'yearsExp': int.tryParse(_experienceController.text.trim()) ?? 0,
-  };
+    // 2) Allocate enrolment number in a transaction
+    // Document path: settings/app_settings
+    final settingsRef = FirebaseFirestore.instance.collection('settings').doc('app_settings');
 
-  await FirebaseFirestore.instance
-      .collection('users')
-      .doc(uid)
-      .set(data, SetOptions(merge: true));
+    final now = DateTime.now();
+    final currentYear = now.year;
 
-  // 3) If student, also create a user_plans record
-  //    Using doc(uid) prevents duplicates; includes createdAt for auditing.
-  if (isStudent) {
-    final planDoc = <String, dynamic>{
-      'userId': uid,
-      'planId': 'pay-per-use',
-      'active': true,
+    // We'll compute enrolmentSequence safely in a transaction.
+    final enrolmentResult = await FirebaseFirestore.instance.runTransaction<Map<String, dynamic>>((tx) async {
+      final snap = await tx.get(settingsRef);
+
+      int lastYear = 0;
+      int lastSeq = 0;
+
+      if (snap.exists) {
+        final data = snap.data()!;
+        lastYear = (data['last_enrolment_year'] is int) ? data['last_enrolment_year'] as int : (data['last_enrolment_year'] is String ? int.tryParse(data['last_enrolment_year']) ?? 0 : 0);
+        lastSeq = (data['last_enrolment_seq'] is int) ? data['last_enrolment_seq'] as int : (data['last_enrolment_seq'] is String ? int.tryParse(data['last_enrolment_seq']) ?? 0 : 0);
+      }
+
+      // NEW: Do NOT reset sequence at new year. Always increment the global sequence.
+      int nextSeq = lastSeq + 1;
+      if (nextSeq <= 0) nextSeq = 1; // safety
+
+      // Write back the updated counters (we still keep the last_enrolment_year for reference)
+      tx.set(settingsRef, {
+        'last_enrolment_year': currentYear,
+        'last_enrolment_seq': nextSeq,
+        'last_enrolment_updated_at': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
+
+      return {
+        'year': currentYear,
+        'seq': nextSeq,
+      };
+    });
+
+    final seq = enrolmentResult['seq'] as int;
+    final year = enrolmentResult['year'] as int;
+    final enrolmentNumber = '$seq/$year';
+
+    // 3) Create/merge user profile document with enrolment_number
+    final data = <String, dynamic>{
+      'uid': uid,
+      'email': email,
+      'name': displayName,
+      'phone': phone,
+      'role': role,
+      'status': 'pending',
       'createdAt': FieldValue.serverTimestamp(),
+      'enrolment_number': enrolmentNumber,
+      if (!isStudent) 'licenseNo': _licenseController.text.trim(),
+      if (!isStudent)
+        'yearsExp': int.tryParse(_experienceController.text.trim()) ?? 0,
     };
 
     await FirebaseFirestore.instance
-        .collection('user_plans')
+        .collection('users')
         .doc(uid)
-        .set(planDoc, SetOptions(merge: true));
+        .set(data, SetOptions(merge: true));
+
+    // 4) If student, also create a user_plans record
+    if (isStudent) {
+      final planDoc = <String, dynamic>{
+        'userId': uid,
+        'planId': 'pay-per-use',
+        'active': true,
+        'createdAt': FieldValue.serverTimestamp(),
+      };
+
+      await FirebaseFirestore.instance
+          .collection('user_plans')
+          .doc(uid)
+          .set(planDoc, SetOptions(merge: true));
+    }
   }
-}
 
 
   String _friendlyAuthError(FirebaseAuthException e) {

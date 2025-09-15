@@ -1,4 +1,11 @@
 // lib/settings_block.dart
+// SettingsBlock with Admin Popup (signed Cloudinary upload) integrated.
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -14,6 +21,12 @@ import 'messaging_setup.dart';
 import 'services/session_service.dart';
 import 'package:smart_drive/theme/app_theme.dart';
 
+// New dependencies for signed Cloudinary upload & file picking
+import 'package:file_picker/file_picker.dart';
+import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 class SettingsBlock extends StatefulWidget {
   const SettingsBlock({super.key});
 
@@ -22,11 +35,10 @@ class SettingsBlock extends StatefulWidget {
 }
 
 class _SettingsBlockState extends State<SettingsBlock> {
+  // ===== Settings controllers =====
   final TextEditingController _radiusCtrl = TextEditingController();
   final TextEditingController _perKmCtrl = TextEditingController();
   final TextEditingController _policyCtrl = TextEditingController();
-
-  // separate controllers for 8-type and H-type driving test charges
   final TextEditingController _testCharge8Ctrl = TextEditingController();
   final TextEditingController _testChargeHCtrl = TextEditingController();
 
@@ -38,6 +50,16 @@ class _SettingsBlockState extends State<SettingsBlock> {
   // numeric values cached for quick access
   double _testCharge8 = 0.0;
   double _testChargeH = 0.0;
+
+  // ===== Admin Popup state =====
+  PlatformFile? _pickedPopupFile;
+  bool _popupUploading = false;
+  bool _showRecentPopups = true;
+
+  // Cloudinary signer endpoint (your signature.php)
+  static const String _signatureEndpoint = 'https://tajdrivingschool.in/smartDrive/cloudinary/signature.php';
+  static const String _cloudBaseFolder = 'smartDrive/admin_popups';
+  static const String _cloudName = 'dxeunc4vd'; // update if different
 
   @override
   void dispose() {
@@ -137,6 +159,8 @@ class _SettingsBlockState extends State<SettingsBlock> {
                   SizedBox(height: gap),
                   _buildPaymentSettingsCard(doc, pad, cardRadius),
                   SizedBox(height: gap),
+                  _buildAdminPopupCard(pad, gap, cardRadius),
+                  SizedBox(height: gap),
                   // 🔽 NEW: logout card
                   _buildLogoutCard(pad, cardRadius),
                 ],
@@ -150,7 +174,6 @@ class _SettingsBlockState extends State<SettingsBlock> {
 
   // ---------------- UI SECTIONS ----------------
 
-  /// Office Location card:
   Widget _buildOfficeLocationCard({
     required DocumentReference doc,
     required double pad,
@@ -490,71 +513,130 @@ class _SettingsBlockState extends State<SettingsBlock> {
     );
   }
 
-  // 🔽 NEW: Logout card
-  Widget _buildLogoutCard(double pad, double radius) {
+  // ---------------- Admin Popup upload card ----------------
+
+  Widget _buildAdminPopupCard(double pad, double gap, double radius) {
     return Container(
       padding: EdgeInsets.all(pad),
       decoration: BoxDecoration(
-        color: AppColors.neuBg,
+        color: AppColors.surface,
         border: Border.all(color: AppColors.divider),
         borderRadius: BorderRadius.circular(radius),
+        boxShadow: AppShadows.card,
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          _title('Logout'),
-          SizedBox(height: pad * 0.75),
-          Text(
-            'Sign out from this device.',
-            style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
-          ),
-          SizedBox(height: pad * 0.75),
-          SizedBox(
-            width: double.infinity,
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _title('Admin Popup (Image / Video / PDF)'),
+        SizedBox(height: gap * 0.5),
+        Text(
+          'Upload a one-time popup that will be shown to users after booking/payment. Supported: JPG, PNG, MP4, WEBM, PDF.',
+          style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
+        ),
+        SizedBox(height: gap),
+        Row(children: [
+          Expanded(
             child: ElevatedButton.icon(
-              onPressed: () {
-                showDialog(
-                  context: context,
-                  builder: (_) => AlertDialog(
-                    title: Text('Logout', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
-                    content: Text('Are you sure you want to logout?', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
-                    actions: [
-                      TextButton(
-                        onPressed: () => Navigator.pop(context),
-                        child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary)),
-                      ),
-                      ElevatedButton(
-                        onPressed: () {
-                          Navigator.pop(context);
-                          _logout();
-                        },
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.danger,
-                          foregroundColor: AppColors.onSurfaceInverse,
-                        ),
-                        child: Text('Logout', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
-                      ),
-                    ],
-                  ),
-                );
-              },
-              icon: Icon(Icons.logout, color: AppColors.onSurfaceInverse),
-              label: Text('Logout', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppColors.danger,
-                foregroundColor: AppColors.onSurfaceInverse,
-              ),
+              onPressed: _popupUploading ? null : _pickPopupFile,
+              icon: Icon(Icons.attach_file, color: AppColors.onSurfaceInverse),
+              label: Text(_pickedPopupFile == null ? 'Choose File' : 'Change File', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+              style: ElevatedButton.styleFrom(backgroundColor: context.c.primary),
             ),
           ),
+          SizedBox(width: 12),
+          ElevatedButton.icon(
+            onPressed: (_pickedPopupFile == null || _popupUploading) ? null : _uploadPickedPopupSigned,
+            icon: Icon(Icons.cloud_upload, color: AppColors.onSurfaceInverse),
+            label: Text('Upload & Activate', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.brand),
+          ),
+        ]),
+        if (_pickedPopupFile != null) ...[
+          SizedBox(height: gap * 0.6),
+          Row(
+            children: [
+              Icon(Icons.insert_drive_file, color: AppColors.onSurfaceMuted),
+              SizedBox(width: 12),
+              Expanded(child: Text('${_pickedPopupFile!.name} • ${( _pickedPopupFile!.size / (1024 * 1024)).toStringAsFixed(2)} MB', style: AppText.tileSubtitle)),
+            ],
+          ),
         ],
-      ),
+        SizedBox(height: gap),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text('Recent popups', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700)),
+            TextButton.icon(
+              onPressed: () => setState(() => _showRecentPopups = !_showRecentPopups),
+              icon: Icon(_showRecentPopups ? Icons.expand_less : Icons.expand_more),
+              label: Text(_showRecentPopups ? 'Hide' : 'Show'),
+            ),
+          ],
+        ),
+        if (_showRecentPopups) SizedBox(height: 8),
+        if (_showRecentPopups)
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('admin_popups').orderBy('created_at', descending: true).limit(5).snapshots(),
+            builder: (context, snap) {
+              if (snap.connectionState == ConnectionState.waiting) {
+                return Padding(
+                  padding: EdgeInsets.all(pad),
+                  child: Center(child: CircularProgressIndicator(color: context.c.primary)),
+                );
+              }
+              final docs = snap.data?.docs ?? [];
+              if (docs.isEmpty) {
+                return Text('No popups yet', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted));
+              }
+              return Column(
+                children: docs.map((d) {
+                  final data = d.data() as Map<String, dynamic>;
+                  final active = (data['active'] ?? false) as bool;
+                  final title = (data['title'] ?? '').toString();
+                  final url = (data['url'] ?? '').toString();
+                  final type = (data['type'] ?? '').toString();
+                  final cloudId = (data['cloudinary_public_id'] ?? '').toString();
+                  return ListTile(
+                    dense: true,
+                    contentPadding: EdgeInsets.zero,
+                    leading: Icon(
+                      type == 'image' ? Icons.image : (type == 'video' ? Icons.videocam : Icons.picture_as_pdf),
+                      color: active ? AppColors.brand : AppColors.onSurfaceMuted,
+                    ),
+                    title: Text(title.isEmpty ? url.split('/').last : title, style: AppText.tileSubtitle.copyWith(fontWeight: FontWeight.w600)),
+                    subtitle: Text('${type.toUpperCase()} • ${active ? 'ACTIVE' : 'inactive'}', style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
+                    trailing: PopupMenuButton<String>(
+                      onSelected: (choice) async {
+  try {
+    if (choice == 'deactivate') {
+      await d.reference.set({'active': false}, SetOptions(merge: true));
+    } else if (choice == 'activate') {
+      await _deactivateOtherPopups();
+      await d.reference.set({'active': true}, SetOptions(merge: true));
+    } else if (choice == 'delete') {
+      await _confirmAndDeletePopup(d);
+    } else if (choice == 'open') {
+      final uri = Uri.tryParse(url);
+      if (uri != null && await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
+      else ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open URL')));
+    }
+  } catch (e) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Action failed: $e'), backgroundColor: AppColors.danger));
+  }
+},
+                      itemBuilder: (_) => <PopupMenuEntry<String>>[
+                        if (!active) PopupMenuItem(value: 'activate', child: Text('Activate')),
+                        if (active) PopupMenuItem(value: 'deactivate', child: Text('Deactivate')),
+                        PopupMenuItem(value: 'open', child: Text('Open')),
+                        PopupMenuItem(value: 'delete', child: Text('Delete'), textStyle: TextStyle(color: AppColors.danger)),
+                      ],
+                    ),
+                  );
+                }).toList(),
+              );
+            },
+          ),
+      ]),
     );
   }
-
-  Text _title(String s) => Text(
-        s,
-        style: AppText.sectionTitle.copyWith(color: context.c.onSurface, fontWeight: FontWeight.bold),
-      );
 
   // ---------------- Vehicles: Add dialogs ----------------
 
@@ -735,7 +817,503 @@ class _SettingsBlockState extends State<SettingsBlock> {
     );
   }
 
+  // ---------------- Popup helpers: pick, signed upload, destroy ----------------
+
+  Future<void> _pickPopupFile() async {
+    try {
+      final res = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['jpg','jpeg','png','mp4','webm','pdf'],
+        withData: true,
+      );
+      if (res == null || res.files.isEmpty) return;
+      final f = res.files.first;
+      setState(() => _pickedPopupFile = f);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('File pick error: $e'), backgroundColor: AppColors.danger));
+    }
+  }
+
+  // NOTE: keep this helper for internal cleaning when you want to store safe identifiers.
+  // We will NOT use it for signing because signature must be calculated on exactly the string
+  // the signer expects (no client-side transformation before sending to signer).
+  String _clean(String s) => s.replaceAll(RegExp(r'\s+'), '_').replaceAll('/', '_');
+
+  /// Request a signature from your PHP signer.
+  /// Simple contract: send public_id, folder, overwrite and get { api_key, timestamp, signature, cloud_name }.
+  Future<Map<String, dynamic>> _getSignature({
+    required String publicId,
+    required String folder,
+    String overwrite = 'false',
+  }) async {
+    final uri = Uri.parse(_signatureEndpoint);
+    final body = {
+      'op': 'upload',
+      'public_id': publicId,
+      'folder': folder,
+      'overwrite': overwrite,
+    };
+
+    final res = await http.post(uri, body: body);
+    if (res.statusCode != 200) {
+      throw Exception('Signature server error: ${res.statusCode} ${res.body}');
+    }
+    final json = jsonDecode(res.body) as Map<String, dynamic>;
+    debugPrint('Signer response: $json'); // remove in prod
+    if (json['signature'] == null || json['api_key'] == null || json['timestamp'] == null) {
+      throw Exception('Invalid signature response: $json');
+    }
+    return json;
+  }
+
+
+  /// Upload bytes to Cloudinary, using the exact params returned by the signer.
+  /// This avoids mismatches between what was signed and what is uploaded.
+  /// Upload bytes to Cloudinary using the 'auto' endpoint and the exact params returned by the signer.
+  /// Keeps the contract simple: signer provides api_key, timestamp, signature (which were calculated for the
+  /// public_id and folder you pass here).
+  Future<String> _uploadToCloudinarySigned({
+    required Uint8List bytes,
+    required String filename,
+    required String publicId,
+    required String folder,
+    String overwrite = 'false',
+  }) async {
+    final signed = await _getSignature(publicId: publicId, folder: folder, overwrite: overwrite);
+
+    final cloudName = (signed['cloud_name'] ?? '').toString();
+    final apiKey = signed['api_key'].toString();
+    final timestamp = signed['timestamp'].toString();
+    final signature = signed['signature'].toString();
+
+    final endpoint = 'https://api.cloudinary.com/v1_1/$cloudName/auto/upload';
+    final req = http.MultipartRequest('POST', Uri.parse(endpoint))
+      ..fields['api_key'] = apiKey
+      ..fields['timestamp'] = timestamp
+      ..fields['signature'] = signature
+      ..fields['public_id'] = publicId
+      ..fields['folder'] = folder
+      ..fields['overwrite'] = overwrite;
+
+    final ext = filename.contains('.') ? filename.split('.').last.toLowerCase() : '';
+    final contentType = _inferMediaType(ext);
+    req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename, contentType: contentType));
+
+    debugPrint('Uploading to Cloudinary (auto): $endpoint');
+    debugPrint('Upload fields: ${req.fields}');
+    debugPrint('Upload filename: $filename, bytes: ${bytes.lengthInBytes}');
+
+    final streamed = await req.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 200) {
+      throw Exception('Cloudinary upload failed: ${streamed.statusCode} $body');
+    }
+    final json = jsonDecode(body) as Map<String, dynamic>;
+    return (json['secure_url'] as String?) ?? (json['url'] as String);
+  }
+
+  MediaType _inferMediaType(String ext) {
+    switch (ext) {
+      case 'jpg':
+      case 'jpeg':
+        return MediaType('image', 'jpeg');
+      case 'png':
+        return MediaType('image', 'png');
+      case 'webm':
+        return MediaType('video', 'webm');
+      case 'mp4':
+        return MediaType('video', 'mp4');
+      case 'pdf':
+        return MediaType('application', 'pdf');
+      default:
+        return MediaType('application', 'octet-stream');
+    }
+  }
+
+  Future<void> _uploadPickedPopupSigned() async {
+    if (_pickedPopupFile == null) return;
+    setState(() => _popupUploading = true);
+
+    try {
+      final picked = _pickedPopupFile!;
+      final filename = picked.name;
+      final ext = (picked.extension ?? '').toLowerCase();
+
+      // folder per-day
+      final now = DateTime.now();
+      final datePart = '${now.year}${now.month.toString().padLeft(2,'0')}${now.day.toString().padLeft(2,'0')}';
+      final folder = '$_cloudBaseFolder/$datePart';
+
+      // generate safer publicId: base + ts
+      final baseName = filename.contains('.') ? filename.split('.').first : filename;
+      final publicId = '${_clean(baseName)}_${DateTime.now().millisecondsSinceEpoch}';
+
+      // obtain bytes (web or native)
+      late Uint8List bytes;
+      if (picked.bytes != null) {
+        bytes = picked.bytes!;
+      } else if (picked.path != null) {
+        bytes = await File(picked.path!).readAsBytes();
+      } else {
+        throw Exception('No file bytes available');
+      }
+
+      // upload signed — always use auto endpoint (no 'raw' special-case)
+      final secureUrl = await _uploadToCloudinarySigned(
+        bytes: bytes,
+        filename: filename,
+        publicId: publicId,
+        folder: folder,
+        overwrite: 'false', // safer default
+      );
+
+      final popupType = _mapCloudinaryTypeFromExt(ext);
+
+      // deactivate others and create doc
+      await _deactivateOtherPopups();
+
+      await FirebaseFirestore.instance.collection('admin_popups').add({
+        'active': true,
+        'url': secureUrl,
+        'type': popupType,
+        'title': filename,
+        'description': '',
+        'created_at': FieldValue.serverTimestamp(),
+        // store the cloudinary id as folder/publicId (matching what we requested)
+        'cloudinary_public_id': '$folder/$publicId',
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Popup uploaded & activated'), backgroundColor: AppColors.success));
+      setState(() {
+        _pickedPopupFile = null;
+      });
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: $e'), backgroundColor: AppColors.danger));
+    } finally {
+      setState(() => _popupUploading = false);
+    }
+  }
+
+
+  String _mapCloudinaryTypeFromExt(String ext) {
+    final e = ext.toLowerCase();
+    if (['jpg','jpeg','png','gif','webp'].contains(e)) return 'image';
+    if (['mp4','webm','mov','mkv'].contains(e)) return 'video';
+    if (['pdf'].contains(e)) return 'pdf';
+    return 'image';
+  }
+
+  Future<void> _deactivateOtherPopups() async {
+    final fs = FirebaseFirestore.instance;
+    final q = await fs.collection('admin_popups').where('active', isEqualTo: true).get();
+    final batch = fs.batch();
+    for (final d in q.docs) {
+      batch.update(d.reference, {'active': false});
+    }
+    await batch.commit();
+  }
+
+  // ---------------- Cloudinary destroy (signed) ----------------
+  // Uses signature.php with op=destroy, then calls Cloudinary /destroy endpoint.
+  String? _resourceTypeFromUrl(String url) {
+    final u = url.toLowerCase();
+    if (u.contains('/image/upload/')) return 'image';
+    if (u.contains('/video/upload/')) return 'video';
+    if (u.contains('/raw/upload/')) return 'raw';
+    return null;
+  }
+
+  String _resourceTypeFromExt(String ext) {
+    final e = ext.toLowerCase();
+    if (['jpg','jpeg','png','gif','webp','bmp','tiff','svg'].contains(e)) return 'image';
+    if (['mp4','mov','avi','mkv','webm'].contains(e)) return 'video';
+    return 'raw';
+  }
+
+  Future<Map<String, dynamic>> _getSignatureForDestroy({
+    required String fullPublicId,
+  }) async {
+    final uri = Uri.parse(_signatureEndpoint);
+    final body = {
+      'op': 'destroy',
+      'public_id': fullPublicId,
+      'invalidate': 'true',
+    };
+    final res = await http.post(uri, body: body);
+    if (res.statusCode != 200) {
+      throw Exception('Signature server error: ${res.statusCode} ${res.body}');
+    }
+    final json = jsonDecode(res.body) as Map<String, dynamic>;
+    if (json['signature'] == null || json['api_key'] == null || json['timestamp'] == null) {
+      throw Exception('Invalid signature response: $json');
+    }
+    return json;
+  }
+
+  Future<String> _cloudinaryDestroyOnce({
+    required String fullPublicId,
+    required String resourceType, // image|raw|video
+    required Map<String, dynamic> signed,
+  }) async {
+    final uri = Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/destroy');
+
+    final req = http.MultipartRequest('POST', uri)
+      ..fields['api_key']    = signed['api_key'].toString()
+      ..fields['timestamp']  = signed['timestamp'].toString()
+      ..fields['signature']  = signed['signature'].toString()
+      ..fields['public_id']  = fullPublicId
+      ..fields['invalidate'] = 'true';
+
+    final streamed = await req.send();
+    final body = await streamed.stream.bytesToString();
+
+    if (streamed.statusCode != 200) {
+      throw Exception('Cloudinary destroy failed: ${streamed.statusCode} $body');
+    }
+
+    final json = jsonDecode(body) as Map<String, dynamic>;
+    final result = (json['result'] ?? '').toString();
+    return result.isEmpty ? 'error' : result; // 'ok', 'not found', etc.
+  }
+
+  // Try primary resource type, then fall back through others if {result: "not found"}
+  Future<void> _cloudinaryDestroyWithFallback({
+    required String fullPublicId,
+    required String primaryType,
+  }) async {
+    final signed = await _getSignatureForDestroy(fullPublicId: fullPublicId);
+
+    final candidates = <String>[
+      primaryType,
+      if (primaryType != 'image') 'image',
+      if (primaryType != 'raw') 'raw',
+      if (primaryType != 'video') 'video',
+    ];
+
+    for (final t in candidates) {
+      final result = await _cloudinaryDestroyOnce(
+        fullPublicId: fullPublicId,
+        resourceType: t,
+        signed: signed,
+      );
+      if (result == 'ok') return; // success
+      if (result != 'not found') {
+        // Any other result -> stop and throw
+        throw Exception('Cloudinary destroy unexpected result: $result');
+      }
+      // else continue to next candidate
+    }
+    throw Exception('Cloudinary destroy did not find the asset under any resource_type.');
+  }
+
+  /// Delete an admin_popup document and its Cloudinary asset (if present).
+  /// Shows confirmation dialog and a modal progress indicator while deleting (no persistent snackbar).
+  /// Tries stored cloudinary_public_id, then fallbacks (last segment, folder/publicId, cleaned).
+  Future<void> _confirmAndDeletePopup(DocumentSnapshot docSnap) async {
+    final docRef = docSnap.reference;
+    final data = docSnap.data() as Map<String, dynamic>? ?? {};
+    final storedCloudId = (data['cloudinary_public_id'] ?? '').toString().trim();
+    final storedFolder = (data['cloudinary_folder'] ?? '').toString().trim();
+    final title = (data['title'] ?? docSnap.id).toString();
+    final fileUrl = (data['url'] ?? '').toString();
+
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Delete popup', style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
+        content: Text('Delete \"$title\"? This will remove the Firestore record and the Cloudinary asset.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary))),
+          ElevatedButton(onPressed: () => Navigator.pop(context, true), style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger), child: Text('Delete', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse))),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    // ── DELETION UI FIX ──
+    // Use a modal progress dialog instead of an indefinite SnackBar.
+    void _showProgressDialog() {
+      showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => Dialog(
+          backgroundColor: Colors.transparent,
+          elevation: 0,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.all(18),
+                decoration: BoxDecoration(
+                  color: context.c.surface,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(context.c.primary))),
+                    const SizedBox(width: 12),
+                    Text('Deleting...', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    Future<void> _deleteDocOnly() async {
+      await docRef.delete();
+      // ensure any progress dialog is closed
+      if (Navigator.canPop(context)) Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Popup deleted', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)), backgroundColor: AppColors.success));
+    }
+
+    try {
+      // show modal progress
+      _showProgressDialog();
+
+      if (storedCloudId.isEmpty) {
+        await _deleteDocOnly();
+        return;
+      }
+
+      // Build candidate list (try stored first, then fallbacks)
+      final candidates = <String>[];
+      candidates.add(storedCloudId);
+
+      // If storedCloudId has slashes, try last segment
+      if (storedCloudId.contains('/')) {
+        final parts = storedCloudId.split('/');
+        final last = parts.isNotEmpty ? parts.last : storedCloudId;
+        if (last.isNotEmpty && last != storedCloudId) candidates.add(last);
+      } else {
+        // storedCloudId is just a name — if folder exists, try folder/publicId
+        if (storedFolder.isNotEmpty) candidates.add('${storedFolder.replaceAll(RegExp(r'\/$'), '')}/$storedCloudId');
+      }
+
+      // cleaned variant (spaces -> underscores)
+      final cleaned = storedCloudId.replaceAll(' ', '_');
+      if (cleaned != storedCloudId) candidates.add(cleaned);
+
+      // Map popup type -> resource_type for initial detection (image, video => video, else raw)
+      final popupType = (data['type'] ?? '').toString().toLowerCase();
+      String primaryFromType = (popupType == 'image') ? 'image' : (popupType == 'video') ? 'video' : 'raw';
+
+      // But prefer detection from stored URL if available
+      final detectedFromUrl = _resourceTypeFromUrl(fileUrl);
+      final primaryType = detectedFromUrl ?? primaryFromType;
+
+      Exception? lastError;
+      for (final cand in candidates) {
+        try {
+          await _cloudinaryDestroyWithFallback(fullPublicId: cand, primaryType: primaryType);
+          // success — remove doc
+          await _deleteDocOnly();
+          return;
+        } catch (e) {
+          debugPrint('Delete attempt failed for "$cand": $e');
+          lastError = e is Exception ? e : Exception(e.toString());
+        }
+      }
+
+      // If we reach here none of the attempts worked
+      throw lastError ?? Exception('All delete attempts failed for stored id: $storedCloudId');
+    } catch (e) {
+      // ensure progress dialog is closed
+      if (Navigator.canPop(context)) Navigator.pop(context);
+
+      // Offer to delete Firestore doc anyway (if Cloudinary deletion failed)
+      final proceed = await showDialog<bool>(
+        context: context,
+        builder: (_) => AlertDialog(
+          title: Text('Delete failed', style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
+          content: Text('Could not delete Cloudinary asset: $e\n\nDelete Firestore record only?'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary)),
+            ),
+            ElevatedButton(
+              onPressed: () => Navigator.pop(context, true),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+              child: Text('Delete doc only', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
+            ),
+          ],
+        ),
+      );
+
+      if (proceed == true) {
+        await docRef.delete();
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Popup record deleted (Cloud asset may still exist)', style: AppText.tileSubtitle), backgroundColor: AppColors.warning));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e', style: AppText.tileSubtitle.copyWith(color: AppColors.danger))));
+      }
+    }
+  }
+
   // ---------------- Logout logic ----------------
+
+  Widget _buildLogoutCard(double pad, double radius) {
+    return Container(
+      padding: EdgeInsets.all(pad),
+      decoration: BoxDecoration(
+        color: AppColors.neuBg,
+        border: Border.all(color: AppColors.divider),
+        borderRadius: BorderRadius.circular(radius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _title('Logout'),
+          SizedBox(height: pad * 0.75),
+          Text(
+            'Sign out from this device.',
+            style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
+          ),
+          SizedBox(height: pad * 0.75),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton.icon(
+              onPressed: () {
+                showDialog(
+                  context: context,
+                  builder: (_) => AlertDialog(
+                    title: Text('Logout', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
+                    content: Text('Are you sure you want to logout?', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary)),
+                      ),
+                      ElevatedButton(
+                        onPressed: () {
+                          Navigator.pop(context);
+                          _logout();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.danger,
+                          foregroundColor: AppColors.onSurfaceInverse,
+                        ),
+                        child: Text('Logout', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              icon: Icon(Icons.logout, color: AppColors.onSurfaceInverse),
+              label: Text('Logout', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.danger,
+                foregroundColor: AppColors.onSurfaceInverse,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 
   Future<void> _logout({bool wipeAllPrefs = false}) async {
     try {
@@ -773,6 +1351,11 @@ class _SettingsBlockState extends State<SettingsBlock> {
   }
 
   // ---------------- Utils ----------------
+
+  Text _title(String s) => Text(
+        s,
+        style: AppText.sectionTitle.copyWith(color: context.c.onSurface, fontWeight: FontWeight.bold),
+      );
 
   bool _deepEquals(Map a, Map b) {
     if (a.length != b.length) return false;

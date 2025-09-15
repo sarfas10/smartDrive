@@ -2,7 +2,9 @@
 // Booking page with Google Maps boarding point selector, distance-based surcharge,
 // Razorpay checkout (order+verify via Hostinger PHP), and Firestore transaction
 // that marks slots/{slotId}.status = "booked" only after successful booking.
-// EMI, Wallet, and Paylater are disabled in Razorpay (mobile + web fallback).
+// Admin can publish a one-time popup (image / video / pdf) via admin_popups collection.
+// The popup is shown once per user (users/{userId}.pop_up_shown = true).
+// Booking documents are NOT modified to store popup_shown (per request).
 
 import 'dart:async';
 import 'dart:convert';
@@ -16,6 +18,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'theme/app_theme.dart';
+
+// New imports for admin media popup
+import 'package:video_player/video_player.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 const Color _kAccent = AppColors.brand;
 
@@ -87,11 +93,32 @@ class _BookingPageState extends State<BookingPage> {
     zoom: 12,
   );
 
+  // Admin popup metadata fetched from Firestore
+  Map<String, dynamic>? _adminPopup;
+
+  // Video player controller (only used if popup type == 'video')
+  VideoPlayerController? _popupVideoController;
+  Future<void>? _initializePopupVideoFuture;
+
+  // Track whether this user has already seen ANY admin popup (persisted at users/{userId}.pop_up_shown)
+  bool _userPopupShown = false;
+
+  // Whether the Acknowledge button in the popup is enabled (becomes true only after user opens/interacts with file)
+  bool _acknowledgeEnabled = true;
+
+  // Video listener to detect playback position / start
+  VoidCallback? _popupVideoListener;
+
   @override
   void initState() {
     super.initState();
     _initRazorpay();
-    _loadInitialData();
+    // load initial data and then admin popup + check pending popups
+    _loadInitialData().whenComplete(() async {
+      // fetch admin popup once initially (but we'll re-fetch right before showing)
+      await _fetchActiveAdminPopup();
+      await _checkPendingSuccessPopups();
+    });
   }
 
   void _initRazorpay() {
@@ -106,6 +133,8 @@ class _BookingPageState extends State<BookingPage> {
     _mapController?.dispose();
     _hintTimer?.cancel();
     _razorpay?.clear();
+    _removePopupVideoListener();
+    _popupVideoController?.dispose();
     super.dispose();
   }
 
@@ -133,10 +162,7 @@ class _BookingPageState extends State<BookingPage> {
 
   Future<void> _loadUserBoardingPoint() async {
     try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(widget.userId)
-          .get();
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(widget.userId).get();
 
       final data = userDoc.data();
       if (data == null) return;
@@ -164,14 +190,12 @@ class _BookingPageState extends State<BookingPage> {
     }
   }
 
+  /// Load initial data including settings, slot, plan, boarding and user pop_up_shown flag
   Future<void> _loadInitialData() async {
     setState(() => _isDataLoading = true);
     try {
       // Settings
-      final settingsDoc = await FirebaseFirestore.instance
-          .collection('settings')
-          .doc('app_settings')
-          .get();
+      final settingsDoc = await FirebaseFirestore.instance.collection('settings').doc('app_settings').get();
 
       if (settingsDoc.exists) {
         final s = settingsDoc.data()!;
@@ -185,32 +209,21 @@ class _BookingPageState extends State<BookingPage> {
       }
 
       // Slot
-      final slotDoc = await FirebaseFirestore.instance
-          .collection('slots')
-          .doc(widget.slotId)
-          .get();
+      final slotDoc = await FirebaseFirestore.instance.collection('slots').doc(widget.slotId).get();
       if (slotDoc.exists) _slotData = slotDoc.data()!;
 
       // Plan
-      final userPlanDoc = await FirebaseFirestore.instance
-          .collection('user_plans')
-          .doc(widget.userId)
-          .get();
+      final userPlanDoc = await FirebaseFirestore.instance.collection('user_plans').doc(widget.userId).get();
 
       if (userPlanDoc.exists) {
         final up = userPlanDoc.data()!;
-        _activePlanId = (up['planId'] ?? '').toString().trim().isEmpty
-            ? null
-            : (up['planId'] as String);
+        _activePlanId = (up['planId'] ?? '').toString().trim().isEmpty ? null : (up['planId'] as String);
 
         final used = (up['slots_used'] ?? 0);
         _slotsUsed = used is num ? used.toInt() : 0;
 
         if (_activePlanId != null) {
-          final planDoc = await FirebaseFirestore.instance
-              .collection('plans')
-              .doc(_activePlanId)
-              .get();
+          final planDoc = await FirebaseFirestore.instance.collection('plans').doc(_activePlanId).get();
           if (planDoc.exists) {
             final pd = planDoc.data()!;
             final slots = (pd['slots'] ?? 0);
@@ -227,6 +240,17 @@ class _BookingPageState extends State<BookingPage> {
 
       // Load saved boarding marker (if any)
       await _loadUserBoardingPoint();
+
+      // ── NEW: load whether user has already seen an admin popup
+      try {
+        final userDoc = await FirebaseFirestore.instance.collection('users').doc(widget.userId).get();
+        final ud = userDoc.data();
+        _userPopupShown = (ud != null && (ud['pop_up_shown'] == true));
+        debugPrint('User pop_up_shown initial value: $_userPopupShown');
+      } catch (e, st) {
+        debugPrint('Error reading user pop_up_shown: $e\n$st');
+        _userPopupShown = false;
+      }
 
       setState(() => _isDataLoading = false);
     } catch (e) {
@@ -251,7 +275,6 @@ class _BookingPageState extends State<BookingPage> {
             strokeColor: AppColors.brand.withOpacity(0.4),
             strokeWidth: 2,
             consumeTapEvents: true,
-            // NOTE: google_maps_flutter Circle has no onTap; handled via map tap.
           ),
         );
       }
@@ -354,8 +377,7 @@ class _BookingPageState extends State<BookingPage> {
           icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueBlue),
           infoWindow: InfoWindow(
             title: 'Boarding Point',
-            snippet:
-                '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}',
+            snippet: '${position.latitude.toStringAsFixed(6)}, ${position.longitude.toStringAsFixed(6)}',
           ),
           consumeTapEvents: false,
         ),
@@ -444,8 +466,7 @@ class _BookingPageState extends State<BookingPage> {
 
   double get _vehicleCost => _numToDouble(_slotData?['vehicle_cost']);
   double get _additionalCost => _numToDouble(_slotData?['additional_cost']);
-  double get _baseTotalCost =>
-      double.parse((_vehicleCost + _additionalCost + _surcharge).toStringAsFixed(2));
+  double get _baseTotalCost => double.parse((_vehicleCost + _additionalCost + _surcharge).toStringAsFixed(2));
   double get _finalPayable => _isFreeByPlan ? 0.0 : _baseTotalCost;
 
   // -------------------- SERVER HELPERS --------------------
@@ -514,11 +535,31 @@ class _BookingPageState extends State<BookingPage> {
 
     // Free under plan → create booking immediately and increment slots_used
     if (_finalPayable <= 0.0) {
-      await _createBookingAndMaybeIncrement(
+      final bookingRef = await _createBookingAndMaybeIncrement(
         status: 'confirmed',
         paidAmount: 0,
         paymentInfo: null,
       );
+
+      // After successful write, show popup (if any) and mark user-level flag
+      if (bookingRef != null) {
+        try {
+          final found = await _fetchActiveAdminPopup();
+          if (!_userPopupShown && found && _adminPopup != null) {
+            final bookingData = {
+              'booking_id': bookingRef.id,
+              'status': 'confirmed',
+              'paid_amount': 0,
+            };
+            await _showSuccessPopupAndMark(bookingRef, bookingData);
+          } else {
+            debugPrint('Skipping popup after free booking (userSeen=$_userPopupShown, found=$found).');
+          }
+        } catch (e, st) {
+          debugPrint('Popup after free booking failed: $e\n$st');
+        }
+        if (mounted) Navigator.of(context).pop();
+      }
       return;
     }
 
@@ -561,8 +602,8 @@ class _BookingPageState extends State<BookingPage> {
         'card': true,
         'upi': true,
         'netbanking': true,
-        'wallet': false,   // hide
-        'emi': false,      // hide
+        'wallet': false, // hide
+        'emi': false, // hide
         'paylater': false, // hide
       },
 
@@ -596,6 +637,9 @@ class _BookingPageState extends State<BookingPage> {
 
     final amountPaise = (_finalPayable * 100).round();
 
+    // Show an immediate snackbar so user sees payment returned from Razorpay
+    _snack('Payment completed — verifying…', color: AppColors.info);
+
     // Verify with server before writing booking
     bool valid = false;
     try {
@@ -616,7 +660,7 @@ class _BookingPageState extends State<BookingPage> {
     }
 
     // Verified → write booking as paid
-    await _createBookingAndMaybeIncrement(
+    final bookingRef = await _createBookingAndMaybeIncrement(
       status: 'paid',
       paidAmount: _finalPayable,
       paymentInfo: {
@@ -625,22 +669,34 @@ class _BookingPageState extends State<BookingPage> {
         'razorpay_signature': r.signature,
       },
     );
+
+    // After the booking is successfully written, show popup and mark user flag
+    if (bookingRef != null) {
+      try {
+        final found = await _fetchActiveAdminPopup();
+        if (!_userPopupShown && found && _adminPopup != null) {
+          final bookingData = {
+            'booking_id': bookingRef.id,
+            'status': 'paid',
+            'paid_amount': _finalPayable,
+            'payment': {'razorpay_payment_id': r.paymentId},
+            if (_lastOrderId != null) 'razorpay_order_id': _lastOrderId,
+          };
+          await _showSuccessPopupAndMark(bookingRef, bookingData);
+        } else {
+          debugPrint('Skipping popup after paid booking (userSeen=$_userPopupShown, found=$found).');
+        }
+      } catch (e, st) {
+        debugPrint('Popup show failed after payment: $e\n$st');
+      }
+
+      if (mounted) Navigator.of(context).pop();
+    }
   }
 
   void _onPaymentError(PaymentFailureResponse r) {
     final msg = r.message?.toString().trim();
     _snack('Payment failed${msg != null && msg.isNotEmpty ? ': $msg' : ''}', color: AppColors.danger);
-
-    // Optional: log failed attempt
-    // FirebaseFirestore.instance.collection('payment_attempts').add({
-    //   'user_id': widget.userId,
-    //   'slot_id': widget.slotId,
-    //   'status': 'failed',
-    //   'code': r.code,
-    //   'message': r.message,
-    //   'order_id': _lastOrderId,
-    //   'created_at': FieldValue.serverTimestamp(),
-    // });
   }
 
   void _onExternalWallet(ExternalWalletResponse r) {
@@ -649,7 +705,9 @@ class _BookingPageState extends State<BookingPage> {
 
   // -------------------- FIRESTORE WRITE (Transaction) --------------------
 
-  Future<void> _createBookingAndMaybeIncrement({
+  /// Creates the booking inside a transaction and returns the booking DocumentReference on success.
+  /// Returns null on failure. (This function no longer shows the admin popup; caller will.)
+  Future<DocumentReference?> _createBookingAndMaybeIncrement({
     required String status,
     required num paidAmount,
     Map<String, dynamic>? paymentInfo,
@@ -685,6 +743,8 @@ class _BookingPageState extends State<BookingPage> {
         if (paymentInfo != null) 'payment': paymentInfo,
         if (_lastOrderId != null) 'razorpay_order_id': _lastOrderId,
         'paid_amount': paidAmount,
+
+        // NOTE: booking-level popup_shown intentionally omitted (we only write user-level flag)
       };
 
       // Transaction to prevent double-booking
@@ -718,12 +778,12 @@ class _BookingPageState extends State<BookingPage> {
       });
 
       _snack(
-        status == 'paid'
-            ? 'Payment successful. Booking created.'
-            : 'Booking created successfully (FREE under your plan)!',
+        status == 'paid' ? 'Payment successful. Booking created.' : 'Booking created successfully (FREE under your plan)!',
         color: AppColors.success,
       );
-      if (mounted) Navigator.of(context).pop();
+
+      // Return booking reference to caller (so popup can be shown/marked by caller)
+      return bookingRef;
     } catch (e) {
       // If anything fails inside the transaction, no writes were committed.
       final msg = e.toString();
@@ -732,8 +792,579 @@ class _BookingPageState extends State<BookingPage> {
       } else {
         _snack('Error creating booking: $e', color: AppColors.danger);
       }
+      return null;
     } finally {
       if (mounted) setState(() => _isBooking = false);
+    }
+  }
+
+  // -------------------- ONE-TIME SUCCESS POPUP & ADMIN MEDIA --------------------
+
+  /// Fetch the active admin popup (one document where active == true).
+  /// Returns true if an active popup was found and loaded.
+  /// Tries the efficient indexed query first; on index error falls back to
+  /// a client-side sort (safer while you create the index).
+  Future<bool> _fetchActiveAdminPopup() async {
+    final fs = FirebaseFirestore.instance;
+
+    try {
+      // Preferred, efficient query (requires composite index for active + created_at)
+      final q = await fs.collection('admin_popups').where('active', isEqualTo: true).orderBy('created_at', descending: true).limit(1).get();
+
+      if (q.docs.isNotEmpty) {
+        _adminPopup = q.docs.first.data();
+        _adminPopup!['id'] = q.docs.first.id;
+        debugPrint('Admin popup loaded (indexed): ${_adminPopup!['id']}');
+        return true;
+      } else {
+        _adminPopup = null;
+        debugPrint('No active admin popup found (indexed query returned empty)');
+        return false;
+      }
+    } on FirebaseException catch (e) {
+      // If the error indicates a missing index, fallback
+      debugPrint('Indexed admin_popups query failed: ${e.code} ${e.message}');
+      if (e.code == 'failed-precondition' || (e.message?.toLowerCase().contains('index') ?? false)) {
+        try {
+          debugPrint('Falling back to non-indexed fetch for admin_popups (client-side sort)');
+          final q2 = await fs.collection('admin_popups').where('active', isEqualTo: true).get();
+          if (q2.docs.isEmpty) {
+            _adminPopup = null;
+            return false;
+          }
+
+          // Find the doc with max created_at on client-side
+          QueryDocumentSnapshot? best;
+          for (final d in q2.docs) {
+            if (best == null) {
+              best = d;
+              continue;
+            }
+            final a = d.data() as Map<String, dynamic>;
+            final b = best.data() as Map<String, dynamic>;
+            final ta = a['created_at'];
+            final tb = b['created_at'];
+
+            // Timestamps may be Timestamp or milliseconds, handle safely
+            int _tsToMillis(dynamic t) {
+              if (t == null) return 0;
+              try {
+                if (t is Timestamp) return t.millisecondsSinceEpoch;
+                if (t is int) return t;
+                if (t is double) return t.toInt();
+                final s = t.toString();
+                return int.tryParse(s) ?? 0;
+              } catch (_) {
+                return 0;
+              }
+            }
+
+            if (_tsToMillis(ta) > _tsToMillis(tb)) best = d;
+          }
+
+          if (best != null) {
+            _adminPopup = best.data() as Map<String, dynamic>;
+            _adminPopup!['id'] = best.id;
+            debugPrint('Admin popup loaded (fallback): ${_adminPopup!['id']}');
+            return true;
+          } else {
+            _adminPopup = null;
+            return false;
+          }
+        } catch (e2, st2) {
+          debugPrint('Fallback fetch also failed: $e2\n$st2');
+          _adminPopup = null;
+          return false;
+        }
+      } else {
+        // Other firestore exception — don't swallow it silently
+        debugPrint('Firestore error fetching admin popup: ${e.code} ${e.message}');
+        _adminPopup = null;
+        return false;
+      }
+    } catch (e, st) {
+      debugPrint('Unexpected error fetching admin popup: $e\n$st');
+      _adminPopup = null;
+      return false;
+    }
+  }
+
+  Future<void> _preparePopupVideo(String url) async {
+    try {
+      await _popupVideoController?.dispose();
+    } catch (_) {}
+    _popupVideoController = VideoPlayerController.network(url);
+    _initializePopupVideoFuture = _popupVideoController!.initialize();
+    await _initializePopupVideoFuture;
+    _popupVideoController!.setLooping(false);
+
+    // Add a listener to update progress and detect playback start
+    _removePopupVideoListener();
+    _popupVideoListener = () {
+      try {
+        if (_popupVideoController != null) {
+          final pos = _popupVideoController!.value.position;
+          // Enable acknowledge after any playback > 0
+          if (!_acknowledgeEnabled && pos.inMilliseconds > 0) {
+            setState(() {
+              _acknowledgeEnabled = true;
+            });
+          }
+          // Update UI for progress (rebuild)
+          if (mounted) setState(() {});
+        }
+      } catch (_) {}
+    };
+    _popupVideoController!.addListener(_popupVideoListener!);
+  }
+
+  void _removePopupVideoListener() {
+    try {
+      if (_popupVideoController != null && _popupVideoListener != null) {
+        _popupVideoController!.removeListener(_popupVideoListener!);
+      }
+    } catch (_) {}
+    _popupVideoListener = null;
+  }
+
+  // Helper to format Duration as mm:ss
+  String _formatDuration(Duration d) {
+    final mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
+    final ss = d.inSeconds.remainder(60).toString().padLeft(2, '0');
+    return '$mm:$ss';
+  }
+
+  /// Show the popup (await) and then mark the user (users/{userId}.pop_up_shown = true).
+  /// IMPORTANT: we DO NOT write booking.popup_shown here (per request).
+  Future<void> _showSuccessPopupAndMark(DocumentReference bookingRef, Map<String, dynamic> bookingData) async {
+    try {
+      // Show popup (await so we know when user dismissed it)
+      await _showSuccessPopup(bookingData);
+
+      // Mark user-level flag so they never see admin popups again.
+      final fs = FirebaseFirestore.instance;
+      final userRef = fs.collection('users').doc(widget.userId);
+
+      if (!_userPopupShown) {
+        await userRef.set({'pop_up_shown': true}, SetOptions(merge: true));
+        _userPopupShown = true;
+        debugPrint('Marked users.pop_up_shown = true (no booking modification).');
+      } else {
+        debugPrint('User already marked pop_up_shown locally; skipping user write.');
+      }
+    } catch (e, st) {
+      // If marking fails, you could retry or log.
+      debugPrint('Popup show/mark failed: $e\n$st');
+      try {
+        _snack('Popup error: $e', color: AppColors.warning);
+      } catch (_) {}
+    } finally {
+      // Clean up listener if any
+      _removePopupVideoListener();
+    }
+  }
+
+  /// ROAD SAFETY — Non-skippable popup UI
+  /// Shows only road-safety information + optional admin media. No booking/txn details, no "View Bookings".
+  /// Acknowledge is disabled until user opens/interacts with the media file (pdf/image/video).
+  Future<void> _showSuccessPopup(Map<String, dynamic> bookingData) async {
+    if (!mounted) return Future.value();
+
+    // If adminPopup has media (pdf/image/video), require interaction to enable acknowledge
+    final mediaType = (_adminPopup != null) ? (_adminPopup!['type'] ?? '').toString().toLowerCase() : '';
+    final hasMedia = mediaType == 'pdf' || mediaType == 'image' || mediaType == 'video';
+
+    // Default: enabled unless there's a media file requiring open/play/tap
+    setState(() {
+      _acknowledgeEnabled = !hasMedia;
+    });
+
+    // If video, prepare controller (prepares listener to enable ack once playback starts)
+    if (mediaType == 'video' && (_adminPopup!['url'] ?? '').toString().isNotEmpty) {
+      try {
+        await _preparePopupVideo(_adminPopup!['url']);
+      } catch (e, st) {
+        debugPrint('Video prepare failed: $e\n$st');
+        // If video init fails, allow acknowledge to avoid blocking user forever
+        setState(() => _acknowledgeEnabled = true);
+      }
+    }
+
+    // Informational text: prefer admin description, fallback to a default road-safety message
+    final infoText = (_adminPopup != null && (_adminPopup!['description'] ?? '').toString().isNotEmpty)
+        ? (_adminPopup!['description'] ?? '').toString()
+        : 'Important Road Safety Guidelines:\n\n• Please be on time at your boarding point.\n• Wear a seatbelt at all times while in the vehicle.\n• Follow instructor directions and local traffic rules.\n• Report any safety concerns to us immediately.';
+
+    debugPrint('Preparing to show Road Safety popup (userSeen=$_userPopupShown, mediaType=$mediaType)');
+
+    return showDialog<void>(
+      context: context,
+      barrierDismissible: false, // require acknowledgement
+      builder: (c) {
+        return WillPopScope(
+          onWillPop: () async => false,
+          child: AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+            backgroundColor: AppColors.surface,
+            titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+            contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+            title: Row(
+              children: [
+                Icon(Icons.traffic, color: AppColors.brand, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    'Road Safety',
+                    style: AppText.sectionTitle.copyWith(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.onSurface),
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Admin media (image/video/pdf) — if present show it above info text
+                  if (_adminPopup != null) ...[
+                    if (mediaType == 'image' && (_adminPopup!['url'] ?? '').toString().isNotEmpty) ...[
+                      GestureDetector(
+                        onTap: () async {
+                          final url = _adminPopup!['url'].toString();
+                          final uri = Uri.parse(url);
+                          if (await canLaunchUrl(uri)) {
+                            await launchUrl(uri, mode: LaunchMode.externalApplication);
+                            // mark acknowledge enabled after user opened image externally
+                            setState(() => _acknowledgeEnabled = true);
+                          } else {
+                            _snack('Could not open image', color: AppColors.danger);
+                          }
+                        },
+                        child: SizedBox(
+                          height: 200,
+                          width: double.infinity,
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(AppRadii.s),
+                            child: Image.network(
+                              _adminPopup!['url'],
+                              fit: BoxFit.cover,
+                              loadingBuilder: (context, child, progress) {
+                                if (progress == null) return child;
+                                return SizedBox(
+                                  height: 200,
+                                  child: Center(
+                                    child: CircularProgressIndicator(
+                                      value: progress.expectedTotalBytes != null ? progress.cumulativeBytesLoaded / (progress.expectedTotalBytes ?? 1) : null,
+                                    ),
+                                  ),
+                                );
+                              },
+                              errorBuilder: (c, e, st) => Container(
+                                height: 200,
+                                color: AppColors.neuBg,
+                                child: Center(child: Text('Could not load image', style: AppText.tileSubtitle)),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ] else if (mediaType == 'video' && (_adminPopup!['url'] ?? '').toString().isNotEmpty) ...[
+                      SizedBox(
+                        height: 260,
+                        width: double.infinity,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(AppRadii.s),
+                          child: Container(
+                            color: AppColors.neuBg,
+                            child: Column(
+                              children: [
+                                // Video display area
+                                Expanded(
+                                  child: Center(
+                                    child: _popupVideoController != null
+                                        ? FutureBuilder(
+                                            future: _initializePopupVideoFuture,
+                                            builder: (context, snap) {
+                                              if (snap.connectionState == ConnectionState.done) {
+                                                return GestureDetector(
+                                                  onTap: () {
+                                                    // toggle play/pause on tap
+                                                    if (_popupVideoController!.value.isPlaying) {
+                                                      _popupVideoController!.pause();
+                                                    } else {
+                                                      _popupVideoController!.play();
+                                                      // ensure acknowledge becomes enabled
+                                                      setState(() => _acknowledgeEnabled = true);
+                                                    }
+                                                    setState(() {});
+                                                  },
+                                                  child: AspectRatio(
+                                                    aspectRatio: _popupVideoController!.value.aspectRatio,
+                                                    child: VideoPlayer(_popupVideoController!),
+                                                  ),
+                                                );
+                                              } else {
+                                                return const Center(child: CircularProgressIndicator());
+                                              }
+                                            },
+                                          )
+                                        : Center(child: Text('Video not available', style: AppText.tileSubtitle)),
+                                  ),
+                                ),
+
+                                // Playback controls: play/pause + progress + time
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
+                                  child: Column(
+                                    children: [
+                                      // Slider progress (seekable)
+                                      Row(
+                                        children: [
+                                          Expanded(
+                                            child: _popupVideoController != null && _popupVideoController!.value.isInitialized
+                                                ? Slider(
+                                                    min: 0,
+                                                    max: _popupVideoController!.value.duration.inMilliseconds.toDouble().clamp(0, double.infinity),
+                                                    value: _popupVideoController!.value.position.inMilliseconds.toDouble().clamp(0, _popupVideoController!.value.duration.inMilliseconds.toDouble().clamp(0, double.infinity)),
+                                                    onChanged: (v) {
+                                                      if (_popupVideoController == null) return;
+                                                      final pos = Duration(milliseconds: v.round());
+                                                      _popupVideoController!.seekTo(pos);
+                                                    },
+                                                  )
+                                                : LinearProgressIndicator(),
+                                          ),
+                                        ],
+                                      ),
+                                      // time labels + play/pause button
+                                      Row(
+                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                        children: [
+                                          // play/pause small button
+                                          Row(
+                                            children: [
+                                              Material(
+                                                color: AppColors.brand.withOpacity(0.95),
+                                                borderRadius: BorderRadius.circular(20),
+                                                child: InkWell(
+                                                  onTap: () {
+                                                    if (_popupVideoController == null || !_popupVideoController!.value.isInitialized) return;
+                                                    if (_popupVideoController!.value.isPlaying) {
+                                                      _popupVideoController!.pause();
+                                                    } else {
+                                                      _popupVideoController!.play();
+                                                      setState(() => _acknowledgeEnabled = true);
+                                                    }
+                                                    setState(() {});
+                                                  },
+                                                  borderRadius: BorderRadius.circular(20),
+                                                  child: Padding(
+                                                    padding: const EdgeInsets.all(8.0),
+                                                    child: Icon(
+                                                      _popupVideoController != null && _popupVideoController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
+                                                      color: AppColors.onSurfaceInverse,
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                _popupVideoController != null && _popupVideoController!.value.isInitialized
+                                                    ? _formatDuration(_popupVideoController!.value.position)
+                                                    : '00:00',
+                                                style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
+                                              ),
+                                            ],
+                                          ),
+
+                                          // total duration
+                                          Text(
+                                            _popupVideoController != null && _popupVideoController!.value.isInitialized
+                                                ? _formatDuration(_popupVideoController!.value.duration)
+                                                : '00:00',
+                                            style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ] else if (mediaType == 'pdf' && (_adminPopup!['url'] ?? '').toString().isNotEmpty) ...[
+                      Container(
+                        height: 120,
+                        decoration: BoxDecoration(
+                          color: AppColors.neuBg,
+                          borderRadius: BorderRadius.circular(AppRadii.s),
+                          border: Border.all(color: AppColors.divider),
+                        ),
+                        child: Row(
+                          children: [
+                            const SizedBox(width: 12),
+                            Icon(Icons.picture_as_pdf, size: 36, color: AppColors.danger),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                (_adminPopup!['description'] ?? 'Tap Open to view the PDF'),
+                                style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
+                              ),
+                            ),
+                            TextButton(
+                              onPressed: () async {
+                                final url = _adminPopup!['url'].toString();
+                                final uri = Uri.parse(url);
+                                if (await canLaunchUrl(uri)) {
+                                  await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                  // mark acknowledge enabled after user opened PDF externally
+                                  setState(() => _acknowledgeEnabled = true);
+                                } else {
+                                  _snack('Could not open PDF', color: AppColors.danger);
+                                }
+                              },
+                              child: Text('Open', style: AppText.tileTitle.copyWith(color: AppColors.brand)),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                  ],
+
+                  // Informational text only — concise, focused on road safety
+                  Text(
+                    infoText,
+                    style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted, fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+            ),
+            actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+            actions: [
+              // Single acknowledge button (non-skippable). Disabled until user opens/interacts with file when required.
+              SizedBox(
+                width: double.infinity,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.brand,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
+                  ),
+                  onPressed: _acknowledgeEnabled
+                      ? () async {
+                          // On acknowledge: stop video if playing and dispose controller
+                          try {
+                            await _popupVideoController?.pause();
+                            await _popupVideoController?.dispose();
+                            _popupVideoController = null;
+                            _removePopupVideoListener();
+                          } catch (_) {}
+                          Navigator.of(context).pop();
+                        }
+                      : null,
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    child: Text('Acknowledge', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// On app start, check for any bookings for this user that haven't shown popup.
+  /// But skip if user already saw any popup (users/{userId}.pop_up_shown == true).
+  /// This version does NOT rely on booking.popup_shown; it finds the earliest paid/confirmed booking.
+  Future<void> _checkPendingSuccessPopups() async {
+    try {
+      if (_userPopupShown) {
+        debugPrint('User already saw admin popup (users/${widget.userId}.pop_up_shown == true). Skipping pending booking popups.');
+        return; // user already saw a popup -> skip
+      }
+
+      final fs = FirebaseFirestore.instance;
+
+      // Try the indexed query first
+      try {
+        final q = await fs
+            .collection('bookings')
+            .where('user_id', isEqualTo: widget.userId)
+            .where('status', whereIn: ['paid', 'confirmed'])
+            .orderBy('created_at', descending: false)
+            .limit(1)
+            .get();
+
+        if (q.docs.isNotEmpty) {
+          final doc = q.docs.first;
+          final bookingRef = doc.reference;
+          final bookingDataRaw = doc.data();
+          final bookingData = bookingDataRaw is Map<String, dynamic> ? Map<String, dynamic>.from(bookingDataRaw) : <String, dynamic>{};
+
+          // Re-fetch admin popup right before showing
+          final found = await _fetchActiveAdminPopup();
+          if (!_userPopupShown && found && _adminPopup != null) {
+            await _showSuccessPopupAndMark(bookingRef, {...bookingData, 'booking_id': bookingRef.id});
+          } else {
+            debugPrint('Not showing pending popup (userSeen=$_userPopupShown, found=$found)');
+          }
+        }
+        return;
+      } on FirebaseException catch (e) {
+        if (!(e.code == 'failed-precondition' || (e.message?.toLowerCase().contains('index') ?? false))) {
+          rethrow; // unknown firestore error, rethrow
+        }
+        debugPrint('Indexed bookings query failed, falling back: ${e.message}');
+      }
+
+      // Fallback: fetch all bookings for this user (paid/confirmed) and pick the earliest one
+      final q2 = await fs.collection('bookings').where('user_id', isEqualTo: widget.userId).where('status', whereIn: ['paid', 'confirmed']).get();
+
+      if (q2.docs.isEmpty) {
+        debugPrint('No pending bookings found (fallback).');
+        return;
+      }
+
+      // find the doc with smallest created_at (earliest)
+      QueryDocumentSnapshot? best;
+      int _tsToMillis(dynamic t) {
+        if (t == null) return 0;
+        if (t is Timestamp) return t.millisecondsSinceEpoch;
+        if (t is int) return t;
+        if (t is double) return t.toInt();
+        return int.tryParse(t.toString()) ?? 0;
+      }
+
+      for (final d in q2.docs) {
+        if (best == null) {
+          best = d;
+          continue;
+        }
+        final a = d.data() as Map<String, dynamic>;
+        final b = best.data() as Map<String, dynamic>;
+        if (_tsToMillis(a['created_at']) < _tsToMillis(b['created_at'])) best = d;
+      }
+
+      if (best != null) {
+        final bookingRef = best.reference;
+        final bookingDataRaw = best.data();
+        final bookingData = bookingDataRaw is Map<String, dynamic> ? Map<String, dynamic>.from(bookingDataRaw) : <String, dynamic>{};
+
+        final found = await _fetchActiveAdminPopup();
+        if (!_userPopupShown && found && _adminPopup != null) {
+          await _showSuccessPopupAndMark(bookingRef, {...bookingData, 'booking_id': bookingRef.id});
+        } else {
+          debugPrint('Not showing pending popup after fallback (userSeen=$_userPopupShown, found=$found)');
+        }
+      }
+    } catch (e, st) {
+      debugPrint('checkPendingSuccessPopups error: $e\n$st');
     }
   }
 
@@ -752,9 +1383,7 @@ class _BookingPageState extends State<BookingPage> {
             child: Stack(
               children: [
                 GoogleMap(
-                  initialCameraPosition: _officeLocation != null
-                      ? CameraPosition(target: _officeLocation!, zoom: 12)
-                      : _initialCameraPosition,
+                  initialCameraPosition: _officeLocation != null ? CameraPosition(target: _officeLocation!, zoom: 12) : _initialCameraPosition,
                   mapType: MapType.normal,
                   myLocationEnabled: true,
                   myLocationButtonEnabled: false,
@@ -774,8 +1403,7 @@ class _BookingPageState extends State<BookingPage> {
                     Factory<OneSequenceGestureRecognizer>(() => EagerGestureRecognizer()),
                   },
                 ),
-                if (_isMapLoading || _isLocationLoading)
-                  const _LoadingOverlay(text: 'Initializing map & location...'),
+                if (_isMapLoading || _isLocationLoading) const _LoadingOverlay(text: 'Initializing map & location...'),
 
                 // Zoom controls
                 Positioned(
@@ -921,6 +1549,8 @@ class _LoadingOverlay extends StatelessWidget {
     );
   }
 }
+
+// ... (rest of small UI helpers unchanged: _RoundedButtonsColumn, _RadiusToggleButton, _SpeechBubble, _TrianglePointer, _SummarySheet, helpers)
 
 class _RoundedButtonsColumn extends StatelessWidget {
   const _RoundedButtonsColumn({super.key, required this.children});
@@ -1302,8 +1932,7 @@ class _SummarySheet extends StatelessWidget {
     );
   }
 
-  Widget _costRow(String label, double amount,
-      {bool isHighlight = false, bool strike = false}) {
+  Widget _costRow(String label, double amount, {bool isHighlight = false, bool strike = false}) {
     final valueText = '₹${amount.toStringAsFixed(2)}';
     final highlightColor = isHighlight ? AppColors.warning : AppColors.onSurfaceMuted;
     final valueColor = isHighlight ? AppColors.warning : AppColors.onSurface;
