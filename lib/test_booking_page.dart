@@ -16,6 +16,9 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:smart_drive/reusables/branding.dart' hide AppColors, AppText;
 
+import 'package:video_player/video_player.dart';
+import 'package:url_launcher/url_launcher.dart';
+
 import '../theme/app_theme.dart'; // adjust import path as needed
 
 enum TestType { classB, classH }
@@ -53,6 +56,14 @@ class _TestBookingPageState extends State<TestBookingPage> {
   String? _lastOrderId;
   bool _isProcessingPayment = false;
 
+  // ---------- Admin popup state ----------
+  Map<String, dynamic>? _adminPopup;
+  VideoPlayerController? _popupVideoController;
+  Future<void>? _initializePopupVideoFuture;
+  VoidCallback? _popupVideoListener;
+  bool _popupBusyOverlay = false;
+  Timer? _popupCountdownTimer;
+
   @override
   void initState() {
     super.initState();
@@ -64,6 +75,11 @@ class _TestBookingPageState extends State<TestBookingPage> {
   void dispose() {
     _settingsSub?.cancel();
     _razorpay?.clear();
+    _removePopupVideoListener();
+    try {
+      _popupVideoController?.dispose();
+    } catch (_) {}
+    _popupCountdownTimer?.cancel();
     super.dispose();
   }
 
@@ -75,7 +91,7 @@ class _TestBookingPageState extends State<TestBookingPage> {
       _razorpay!.on(Razorpay.EVENT_EXTERNAL_WALLET, _onExternalWallet);
     } catch (e) {
       // ignore init failures in dev
-      // print('Razorpay init error: $e');
+      debugPrint('Razorpay init error: $e');
     }
   }
 
@@ -179,74 +195,74 @@ class _TestBookingPageState extends State<TestBookingPage> {
   // ---------------- Payment flow ----------------
 
   Future<bool> _isBookingFreeForUser() async {
-  final user = FirebaseAuth.instance.currentUser;
-  if (user == null) return false;
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return false;
 
-  try {
-    // 1. Fetch planId from User_plan/{uid}
-    final planSnap = await _db.collection('user_plans').doc(user.uid).get();
-    final planId = planSnap.data()?['planId'];
-    if (planId == null || planId.toString().isEmpty) return false;
+    try {
+      // 1. Fetch planId from user_plans/{uid}
+      final planSnap = await _db.collection('user_plans').doc(user.uid).get();
+      final planId = planSnap.data()?['planId'];
+      if (planId == null || planId.toString().isEmpty) return false;
 
-    // 2. Fetch plan details from Plans/{planId}
-    final planSnap2 = await _db.collection('plans').doc(planId.toString()).get();
-    final planData = planSnap2.data() ?? {};
+      // 2. Fetch plan details from plans/{planId}
+      final planSnap2 = await _db.collection('plans').doc(planId.toString()).get();
+      final planData = planSnap2.data() ?? {};
 
-    bool allowB = planData['driving_test_8'] == true;
-    bool allowH = planData['driving_test_h'] == true;
+      bool allowB = planData['driving_test_8'] == true;
+      bool allowH = planData['driving_test_h'] == true;
 
-    // 3. Match with selected tests
-    if (_selectedTests.contains(TestType.classB) && !allowB) return false;
-    if (_selectedTests.contains(TestType.classH) && !allowH) return false;
+      // 3. Match with selected tests
+      if (_selectedTests.contains(TestType.classB) && !allowB) return false;
+      if (_selectedTests.contains(TestType.classH) && !allowH) return false;
 
-    // 4. Ensure test not attempted already
-    final userDoc = await _db.collection('users').doc(user.uid).get();
-    if (userDoc.data()?['test_attempted'] == true) return false;
+      // 4. Ensure test not attempted already
+      final userDoc = await _db.collection('users').doc(user.uid).get();
+      if (userDoc.data()?['test_attempted'] == true) return false;
 
-    // ✅ Eligible for free booking
-    return true;
-  } catch (e) {
-    debugPrint('Free plan check error: $e');
-    return false;
+      // ✅ Eligible for free booking
+      return true;
+    } catch (e) {
+      debugPrint('Free plan check error: $e');
+      return false;
+    }
   }
-}
-
 
   Future<void> _onConfirmPressed() async {
-  if (_selectedTests.isEmpty || _selectedDate == null) return;
+    if (_selectedTests.isEmpty || _selectedDate == null) return;
 
-  // 🔹 Check free plan eligibility
-  final isFree = await _isBookingFreeForUser();
-  if (isFree) {
-    await _saveBookingToFirestore(paymentInfo: null, paidAmount: 0, status: 'pending');
+    // 🔹 Check free plan eligibility
+    final isFree = await _isBookingFreeForUser();
+    if (isFree) {
+      await _saveBookingToFirestore(paymentInfo: null, paidAmount: 0, status: 'pending');
 
-    // also mark test_attempted = true
-    final user = FirebaseAuth.instance.currentUser;
-    if (user != null) {
-      await _db.collection('users').doc(user.uid).update({'test_attempted': true});
+      // also mark test_attempted = true
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        try {
+          await _db.collection('users').doc(user.uid).update({'test_attempted': true});
+        } catch (_) {}
+      }
+      return;
     }
-    return;
-  }
 
-  final total = _selectedTotalPrice;
-  if (total <= 0) {
-    await _saveBookingToFirestore(paymentInfo: null, paidAmount: 0, status: 'pending');
-    return;
-  }
+    final total = _selectedTotalPrice;
+    if (total <= 0) {
+      await _saveBookingToFirestore(paymentInfo: null, paidAmount: 0, status: 'pending');
+      return;
+    }
 
-  // Normal payment flow
-  final amountPaise = total * 100;
-  setState(() => _isProcessingPayment = true);
-  _snack('Preparing payment…');
-  try {
-    _lastOrderId = await _createOrderOnServer(amountPaise: amountPaise);
-    _openRazorpayCheckout(orderId: _lastOrderId!, amountPaise: amountPaise);
-  } catch (e) {
-    _snack('Could not start payment: $e', color: AppColors.danger);
-    setState(() => _isProcessingPayment = false);
+    // Normal payment flow
+    final amountPaise = total * 100;
+    setState(() => _isProcessingPayment = true);
+    _snack('Preparing payment…');
+    try {
+      _lastOrderId = await _createOrderOnServer(amountPaise: amountPaise);
+      _openRazorpayCheckout(orderId: _lastOrderId!, amountPaise: amountPaise);
+    } catch (e) {
+      _snack('Could not start payment: $e', color: AppColors.danger);
+      setState(() => _isProcessingPayment = false);
+    }
   }
-}
-
 
   void _openRazorpayCheckout({required String orderId, required int amountPaise}) {
     if (_razorpay == null) {
@@ -389,7 +405,7 @@ class _TestBookingPageState extends State<TestBookingPage> {
         if (userPhone != null) 'phone': userPhone,
       };
 
-      await _db.collection('test_bookings').add(doc);
+      final added = await _db.collection('test_bookings').add(doc);
 
       if (!mounted) return;
       _snack('Booking saved successfully', color: AppColors.success);
@@ -399,6 +415,23 @@ class _TestBookingPageState extends State<TestBookingPage> {
         _specialRequests = '';
         _lastOrderId = null;
       });
+
+      // Fetch & show admin popup (if any) after booking saved
+      try {
+        final found = await _fetchActiveAdminPopup();
+        if (found && _adminPopup != null) {
+          final bookingData = {
+            'booking_id': added.id,
+            'status': status,
+            'paid_amount': paidAmount,
+          };
+          await _showAdminPopup(bookingData);
+        } else {
+          debugPrint('No admin popup found after saving booking.');
+        }
+      } catch (e, st) {
+        debugPrint('Popup show error after booking: $e\n$st');
+      }
     } catch (e) {
       if (!mounted) return;
       _snack('Failed to save booking: $e', color: AppColors.danger);
@@ -410,8 +443,382 @@ class _TestBookingPageState extends State<TestBookingPage> {
     }
   }
 
-  // ---------------- UI ----------------
+  // ========== Admin popup helpers (copied/adapted from booking_page.dart) ==========
 
+  Future<bool> _fetchActiveAdminPopup() async {
+    final fs = FirebaseFirestore.instance;
+
+    try {
+      final q = await fs
+          .collection('admin_popups')
+          .where('active', isEqualTo: true)
+          .orderBy('created_at', descending: true)
+          .limit(1)
+          .get();
+
+      if (q.docs.isNotEmpty) {
+        _adminPopup = q.docs.first.data();
+        _adminPopup!['id'] = q.docs.first.id;
+        debugPrint('Admin popup loaded (indexed): ${_adminPopup!['id']}');
+        return true;
+      } else {
+        _adminPopup = null;
+        debugPrint('No active admin popup found (indexed query returned empty)');
+        return false;
+      }
+    } on FirebaseException catch (e) {
+      debugPrint('Indexed admin_popups query failed: ${e.code} ${e.message}');
+      if (e.code == 'failed-precondition' || (e.message?.toLowerCase().contains('index') ?? false)) {
+        try {
+          debugPrint('Falling back to non-indexed fetch for admin_popups (client-side sort)');
+          final q2 = await fs.collection('admin_popups').where('active', isEqualTo: true).get();
+          if (q2.docs.isEmpty) {
+            _adminPopup = null;
+            return false;
+          }
+
+          QueryDocumentSnapshot? best;
+          for (final d in q2.docs) {
+            if (best == null) {
+              best = d;
+              continue;
+            }
+            final a = d.data() as Map<String, dynamic>;
+            final b = best.data() as Map<String, dynamic>;
+            final ta = a['created_at'];
+            final tb = b['created_at'];
+
+            int _tsToMillis(dynamic t) {
+              if (t == null) return 0;
+              try {
+                if (t is Timestamp) return t.millisecondsSinceEpoch;
+                if (t is int) return t;
+                if (t is double) return t.toInt();
+                final s = t.toString();
+                return int.tryParse(s) ?? 0;
+              } catch (_) {
+                return 0;
+              }
+            }
+
+            if (_tsToMillis(ta) > _tsToMillis(tb)) best = d;
+          }
+
+          if (best != null) {
+            _adminPopup = best.data() as Map<String, dynamic>;
+            _adminPopup!['id'] = best.id;
+            debugPrint('Admin popup loaded (fallback): ${_adminPopup!['id']}');
+            return true;
+          } else {
+            _adminPopup = null;
+            return false;
+          }
+        } catch (e2, st2) {
+          debugPrint('Fallback fetch also failed: $e2\n$st2');
+          _adminPopup = null;
+          return false;
+        }
+      } else {
+        debugPrint('Firestore error fetching admin popup: ${e.code} ${e.message}');
+        _adminPopup = null;
+        return false;
+      }
+    } catch (e, st) {
+      debugPrint('Unexpected error fetching admin popup: $e\n$st');
+      _adminPopup = null;
+      return false;
+    }
+  }
+
+  Future<void> _preparePopupVideo(String url) async {
+    // Dispose previous controller if any
+    try {
+      await _popupVideoController?.dispose();
+    } catch (_) {}
+    _popupVideoController = VideoPlayerController.network(url);
+    _initializePopupVideoFuture = _popupVideoController!.initialize();
+
+    // initialize then auto-play
+    await _initializePopupVideoFuture;
+    _popupVideoController!.setLooping(false);
+
+    // auto play immediately
+    try {
+      await _popupVideoController!.play();
+    } catch (_) {}
+
+    // we don't use play/pause UI, but we keep a listener to update UI if needed
+    _removePopupVideoListener();
+    _popupVideoListener = () {
+      // nothing heavy here — used only to refresh state
+      if (mounted) setState(() {});
+    };
+    _popupVideoController!.addListener(_popupVideoListener!);
+  }
+
+  void _removePopupVideoListener() {
+    try {
+      if (_popupVideoController != null && _popupVideoListener != null) {
+        _popupVideoController!.removeListener(_popupVideoListener!);
+      }
+    } catch (_) {}
+    _popupVideoListener = null;
+  }
+
+  /// Shows the same non-dismissible admin popup with loader + 10s countdown.
+  /// bookingData is optional metadata shown/sent to server in future if needed.
+  Future<void> _showAdminPopup(Map<String, dynamic> bookingData) async {
+    if (!mounted) return Future.value();
+
+    // Show busy overlay while we prepare the popup
+    setState(() {
+      _popupBusyOverlay = true;
+    });
+
+    // Reset outer helpers
+    _popupCountdownTimer?.cancel();
+    _popupCountdownTimer = null;
+    bool _dialogMediaLoaded = false;
+    int dialogCountdown = 10;
+
+    final mediaType = (_adminPopup != null) ? (_adminPopup!['type'] ?? '').toString().toLowerCase() : '';
+    final url = (_adminPopup != null) ? (_adminPopup!['url'] ?? '').toString() : '';
+    final hasMedia = mediaType == 'image' || mediaType == 'video' || mediaType == 'pdf';
+
+    // If video, prepare controller ahead of showing the dialog (so we can show quickly)
+    if (mediaType == 'video' && url.isNotEmpty) {
+      try {
+        await _preparePopupVideo(url);
+      } catch (e, st) {
+        debugPrint('Video prepare/init error before dialog: $e\n$st');
+        // continue — dialog will handle fallback
+      }
+    }
+
+    // helper for dialog-local countdown start
+    void startDialogCountdown(StateSetter sb, {int seconds = 10}) {
+      dialogCountdown = seconds;
+      _dialogMediaLoaded = true;
+      sb(() {});
+      // notify outer that the dialog is ready to be shown (so the outer busy overlay can hide)
+      Future.microtask(() {
+        if (mounted) setState(() => _popupBusyOverlay = false);
+      });
+
+      _popupCountdownTimer?.cancel();
+      _popupCountdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+        if (!mounted) return;
+        dialogCountdown -= 1;
+        sb(() {});
+        if (dialogCountdown <= 0) {
+          _popupCountdownTimer?.cancel();
+        }
+      });
+    }
+
+    final infoText = (_adminPopup != null && (_adminPopup!['description'] ?? '').toString().isNotEmpty)
+        ? (_adminPopup!['description'] ?? '').toString()
+        : 'Important Road Safety Guidelines:\n\n• Please be on time at your booking point.\n• Wear a seatbelt at all times while in the vehicle.\n• Follow instructor directions and local traffic rules.\n• Report any safety concerns to us immediately.';
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (c) {
+        return StatefulBuilder(builder: (BuildContext dialogContext, StateSetter setDialogState) {
+          // auto-start countdown when media ready
+          if (!_dialogMediaLoaded && mediaType == 'video' && _popupVideoController != null && _popupVideoController!.value.isInitialized) {
+            startDialogCountdown(setDialogState, seconds: 10);
+          }
+          if (!_dialogMediaLoaded && mediaType == 'image' && url.isNotEmpty) {
+            // image will call loadingBuilder to start countdown once loaded.
+          }
+          if (!_dialogMediaLoaded && mediaType == 'pdf' && url.isNotEmpty) {
+            // pdf: mark loaded immediately
+            startDialogCountdown(setDialogState, seconds: 10);
+          }
+
+          return WillPopScope(
+            onWillPop: () async => false,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+              backgroundColor: AppColors.surface,
+              titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+              contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+              title: Row(
+                children: [
+                  Icon(Icons.traffic, color: AppColors.brand, size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Road Safety',
+                      style: AppText.sectionTitle.copyWith(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.onSurface),
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (hasMedia) ...[
+                      SizedBox(
+                        height: 220,
+                        width: double.infinity,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(AppRadii.s),
+                          child: Container(
+                            color: AppColors.neuBg,
+                            child: Stack(
+                              children: [
+                                // Image handling: use loadingBuilder to trigger startDialogCountdown when loaded
+                                if (mediaType == 'image' && url.isNotEmpty)
+                                  Image.network(
+                                    url,
+                                    fit: BoxFit.cover,
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                    loadingBuilder: (context, child, progress) {
+                                      if (progress == null) {
+                                        if (!_dialogMediaLoaded) {
+                                          startDialogCountdown(setDialogState, seconds: 10);
+                                        }
+                                        return child;
+                                      }
+                                      return const SizedBox.shrink();
+                                    },
+                                    errorBuilder: (c, e, st) {
+                                      if (!_dialogMediaLoaded) startDialogCountdown(setDialogState, seconds: 10);
+                                      return Center(child: Text('Could not load image', style: AppText.tileSubtitle));
+                                    },
+                                  )
+                                // Video handling: show VideoPlayer when controller is ready
+                                else if (mediaType == 'video' && _popupVideoController != null && _popupVideoController!.value.isInitialized)
+                                  Center(
+                                    child: AspectRatio(
+                                      aspectRatio: _popupVideoController!.value.aspectRatio,
+                                      child: VideoPlayer(_popupVideoController!),
+                                    ),
+                                  )
+                                // PDF placeholder
+                                else if (mediaType == 'pdf' && url.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.all(12.0),
+                                    child: Row(
+                                      children: [
+                                        const SizedBox(width: 8),
+                                        Icon(Icons.picture_as_pdf, size: 36, color: AppColors.danger),
+                                        const SizedBox(width: 12),
+                                        Expanded(child: Text((_adminPopup!['description'] ?? 'Tap Open to view the PDF'), style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted))),
+                                        TextButton(
+                                          onPressed: () async {
+                                            final uri = Uri.parse(url);
+                                            if (await canLaunchUrl(uri)) {
+                                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                            } else {
+                                              _snack('Could not open PDF', color: AppColors.danger);
+                                            }
+                                          },
+                                          child: Text('Open', style: AppText.tileTitle.copyWith(color: AppColors.brand)),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else
+                                  const SizedBox.shrink(),
+
+                                // Circular loader overlay until mediaLoaded == true
+                                if (!_dialogMediaLoaded)
+                                  const Positioned.fill(
+                                    child: Center(child: CircularProgressIndicator()),
+                                  ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
+                    Text(
+                      infoText,
+                      style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted, fontWeight: FontWeight.w500),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    Row(
+                      children: [
+                        Icon(Icons.timer, size: 16, color: AppColors.onSurfaceMuted),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _dialogMediaLoaded
+                                ? ( (dialogCountdown <= 0) ? 'You may now acknowledge.' : 'Please wait ${dialogCountdown}s to acknowledge.')
+                                : 'Loading…',
+                            style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.brand,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
+                    ),
+                    onPressed: (_dialogMediaLoaded && dialogCountdown <= 0)
+                        ? () async {
+                            // cleanup local timer & dialog video listener
+                            _popupCountdownTimer?.cancel();
+                            try {
+                              await _popupVideoController?.pause();
+                              await _popupVideoController?.dispose();
+                            } catch (_) {}
+                            _popupVideoController = null;
+                            _removePopupVideoListener();
+
+                            Navigator.of(dialogContext).pop();
+                          }
+                        : null,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      child: Text('Acknowledge', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        });
+      },
+    );
+
+    // after dialog closes: ensure we stop & clean up timers/listeners
+    _popupCountdownTimer?.cancel();
+    _popupCountdownTimer = null;
+    try {
+      await _popupVideoController?.pause();
+      await _popupVideoController?.dispose();
+    } catch (_) {}
+    _popupVideoController = null;
+    _removePopupVideoListener();
+
+    // ensure overlay hidden
+    if (mounted) {
+      setState(() {
+        _popupBusyOverlay = false;
+      });
+    }
+  }
+
+  // ========== UI ==========
   @override
   Widget build(BuildContext context) {
     final mq = MediaQuery.of(context);
@@ -435,115 +842,141 @@ class _TestBookingPageState extends State<TestBookingPage> {
           ],
         ),
       ),
-      body: SafeArea(
-        child: LayoutBuilder(
-          builder: (context, constraints) {
-            final availWidth = constraints.maxWidth - horizontalPadding * 2;
-            return SingleChildScrollView(
-              padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: contentSpacing),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _buildImportantNotice(),
-                  SizedBox(height: contentSpacing),
-                  _buildCardSection(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Text('Select Test Type', style: AppText.sectionTitle),
-                        const SizedBox(height: 12),
-                        _buildTestTypeOption(
-                          testType: TestType.classB,
-                          title: 'Class B License',
-                          subtitle: 'Motorcycle Test',
-                          minutes: 45,
-                          price: _chargeB,
-                          icon: Icons.motorcycle,
-                          availWidth: availWidth,
-                        ),
-                        const SizedBox(height: 12),
-                        _buildTestTypeOption(
-                          testType: TestType.classH,
-                          title: 'Class H License',
-                          subtitle: 'Heavy Vehicle Test',
-                          minutes: 60,
-                          price: _chargeH,
-                          icon: Icons.local_shipping,
-                          availWidth: availWidth,
-                        ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(height: contentSpacing),
-                  _buildCardSection(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Choose Your Date', style: AppText.sectionTitle),
-                        const SizedBox(height: 12),
-                        _buildMonthHeader(),
-                        const SizedBox(height: 12),
-                        _buildCalendarGrid(availWidth),
-                      ],
-                    ),
-                  ),
-                  SizedBox(height: contentSpacing),
-                  _buildCardSection(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
+      body: Stack(
+        children: [
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final availWidth = constraints.maxWidth - horizontalPadding * 2;
+                return SingleChildScrollView(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding, vertical: contentSpacing),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _buildImportantNotice(),
+                      SizedBox(height: contentSpacing),
+                      _buildCardSection(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            Text('Special Requests', style: AppText.sectionTitle),
-                            const SizedBox(width: 6),
-                            Text('(Optional)', style: AppText.tileSubtitle),
+                            Text('Select Test Type', style: AppText.sectionTitle),
+                            const SizedBox(height: 12),
+                            _buildTestTypeOption(
+                              testType: TestType.classB,
+                              title: 'Class B License',
+                              subtitle: 'Motorcycle Test',
+                              minutes: 45,
+                              price: _chargeB,
+                              icon: Icons.motorcycle,
+                              availWidth: availWidth,
+                            ),
+                            const SizedBox(height: 12),
+                            _buildTestTypeOption(
+                              testType: TestType.classH,
+                              title: 'Class H License',
+                              subtitle: 'Heavy Vehicle Test',
+                              minutes: 60,
+                              price: _chargeH,
+                              icon: Icons.local_shipping,
+                              availWidth: availWidth,
+                            ),
                           ],
                         ),
-                        const SizedBox(height: 12),
-                        TextField(
-                          minLines: 3,
-                          maxLines: 5,
-                          onChanged: (v) => setState(() => _specialRequests = v),
-                          decoration: InputDecoration(
-                            hintText: 'Any specific time preferences, accessibility needs, or other requirements...',
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(AppRadii.s),
-                              borderSide: BorderSide(color: AppColors.divider),
+                      ),
+                      SizedBox(height: contentSpacing),
+                      _buildCardSection(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Choose Your Date', style: AppText.sectionTitle),
+                            const SizedBox(height: 12),
+                            _buildMonthHeader(),
+                            const SizedBox(height: 12),
+                            _buildCalendarGrid(availWidth),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: contentSpacing),
+                      _buildCardSection(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text('Special Requests', style: AppText.sectionTitle),
+                                const SizedBox(width: 6),
+                                Text('(Optional)', style: AppText.tileSubtitle),
+                              ],
                             ),
-                            filled: true,
-                            fillColor: AppColors.surface,
-                            contentPadding: const EdgeInsets.all(12),
+                            const SizedBox(height: 12),
+                            TextField(
+                              minLines: 3,
+                              maxLines: 5,
+                              onChanged: (v) => setState(() => _specialRequests = v),
+                              decoration: InputDecoration(
+                                hintText: 'Any specific time preferences, accessibility needs, or other requirements...',
+                                border: OutlineInputBorder(
+                                  borderRadius: BorderRadius.circular(AppRadii.s),
+                                  borderSide: BorderSide(color: AppColors.divider),
+                                ),
+                                filled: true,
+                                fillColor: AppColors.surface,
+                                contentPadding: const EdgeInsets.all(12),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      SizedBox(height: contentSpacing),
+                      if (_selectedTests.isNotEmpty) _buildSummaryRow(),
+                      SizedBox(height: contentSpacing / 2),
+                      ElevatedButton(
+                        onPressed: canConfirm ? _onConfirmPressed : null,
+                        style: ElevatedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 16.0),
+                          backgroundColor: AppColors.primary,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
                         ),
-                      ],
-                    ),
-                  ),
-                  SizedBox(height: contentSpacing),
-                  if (_selectedTests.isNotEmpty) _buildSummaryRow(),
-                  SizedBox(height: contentSpacing / 2),
-                  ElevatedButton(
-                    onPressed: canConfirm ? _onConfirmPressed : null,
-                    style: ElevatedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(vertical: 16.0),
-                      backgroundColor: AppColors.primary,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
+                        child: _saving || _isProcessingPayment
+                            ? SizedBox(
+                                width: 20,
+                                height: 20,
+                                child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onSurfaceInverse),
+                              )
+                            : Text(!_chargesLoaded ? 'Loading…' : 'Confirm Booking', style: const TextStyle(fontWeight: FontWeight.w700)),
                       ),
-                    ),
-                    child: _saving || _isProcessingPayment
-                        ? SizedBox(
-                            width: 20,
-                            height: 20,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onSurfaceInverse),
-                          )
-                        : Text(!_chargesLoaded ? 'Loading…' : 'Confirm Booking', style: const TextStyle(fontWeight: FontWeight.w700)),
+                      SizedBox(height: math.max(16.0, contentSpacing)),
+                    ],
                   ),
-                  SizedBox(height: math.max(16.0, contentSpacing)),
-                ],
+                );
+              },
+            ),
+          ),
+
+          // Optional busy overlay shown while preparing popup
+          if (_popupBusyOverlay)
+            Positioned.fill(
+              child: Material(
+                color: AppColors.onSurface.withOpacity(0.45),
+                child: Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox(
+                        width: 56,
+                        height: 56,
+                        child: CircularProgressIndicator(strokeWidth: 4, color: AppColors.brand),
+                      ),
+                      const SizedBox(height: 12),
+                      Text('Preparing message…', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+                    ],
+                  ),
+                ),
               ),
-            );
-          },
-        ),
+            ),
+        ],
       ),
     );
   }
@@ -676,8 +1109,7 @@ class _TestBookingPageState extends State<TestBookingPage> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                Text('$minutes min', style: AppText.tileSubtitle),
-                const SizedBox(height: 6),
+                
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                   decoration: BoxDecoration(
