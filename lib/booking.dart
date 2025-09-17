@@ -3,8 +3,9 @@
 // Razorpay checkout (order+verify via Hostinger PHP), and Firestore transaction
 // that marks slots/{slotId}.status = "booked" only after successful booking.
 // Admin can publish a one-time popup (image / video / pdf) via admin_popups collection.
-// The popup is shown once per user (users/{userId}.pop_up_shown = true).
-// Booking documents are NOT modified to store popup_shown (per request).
+// NOTE: This variant SHOWS the popup every time (no users/{userId}.pop_up_shown checks/writes).
+// Popup changes: show circular loader until media ready, video auto-plays,
+// removed video controls/progress, 10s countdown enabling Acknowledge.
 
 import 'dart:async';
 import 'dart:convert';
@@ -79,6 +80,10 @@ class _BookingPageState extends State<BookingPage> {
   int _slotsUsed = 0;
   bool _isFreeByPlan = false;
 
+
+  int _freeBenefitCount = 0;
+  bool _isFreeByBenefit = false;
+
   // UI helpers
   bool _isRadiusVisible = true;
   bool _showHintBubble = false;
@@ -100,24 +105,28 @@ class _BookingPageState extends State<BookingPage> {
   VideoPlayerController? _popupVideoController;
   Future<void>? _initializePopupVideoFuture;
 
-  // Track whether this user has already seen ANY admin popup (persisted at users/{userId}.pop_up_shown)
-  bool _userPopupShown = false;
+  // Countdown & media loaded state (outer, used for cleanup)
+  bool _acknowledgeEnabled = false; // will be enabled after countdown reaches zero
+  int _popupCountdownSeconds = 10;
+  Timer? _popupCountdownTimer;
+  bool _popupMediaLoaded = false; // show spinner until true
 
-  // Whether the Acknowledge button in the popup is enabled (becomes true only after user opens/interacts with file)
-  bool _acknowledgeEnabled = true;
-
-  // Video listener to detect playback position / start
+  // Video listener placeholder (not used for controls now)
   VoidCallback? _popupVideoListener;
+
+  // NEW: overlay shown while popup is being prepared / until popup dialog reports it's ready
+  bool _popupBusyOverlay = false;
 
   @override
   void initState() {
     super.initState();
     _initRazorpay();
-    // load initial data and then admin popup + check pending popups
+    // load initial data and then admin popup
     _loadInitialData().whenComplete(() async {
-      // fetch admin popup once initially (but we'll re-fetch right before showing)
+      // fetch admin popup once initially (we'll re-fetch right before showing)
       await _fetchActiveAdminPopup();
-      await _checkPendingSuccessPopups();
+      // NOTE: Do NOT call _checkPendingSuccessPopups() here.
+      // We only show admin popup after successful booking/payment (or on free booking).
     });
   }
 
@@ -135,6 +144,7 @@ class _BookingPageState extends State<BookingPage> {
     _razorpay?.clear();
     _removePopupVideoListener();
     _popupVideoController?.dispose();
+    _popupCountdownTimer?.cancel();
     super.dispose();
   }
 
@@ -190,7 +200,7 @@ class _BookingPageState extends State<BookingPage> {
     }
   }
 
-  /// Load initial data including settings, slot, plan, boarding and user pop_up_shown flag
+  /// Load initial data including settings, slot, plan, boarding
   Future<void> _loadInitialData() async {
     setState(() => _isDataLoading = true);
     try {
@@ -238,19 +248,15 @@ class _BookingPageState extends State<BookingPage> {
 
       _isFreeByPlan = (_planSlots != 0) && (_slotsUsed < _planSlots);
 
+      final userDoc = await FirebaseFirestore.instance.collection('users').doc(widget.userId).get();
+      if (userDoc.exists) {
+        final u = userDoc.data()!;
+        _freeBenefitCount = (u['free_benefit'] ?? 0) is num ? (u['free_benefit'] as num).toInt() : 0;
+        _isFreeByBenefit = _freeBenefitCount > 0;
+      }
+
       // Load saved boarding marker (if any)
       await _loadUserBoardingPoint();
-
-      // ── NEW: load whether user has already seen an admin popup
-      try {
-        final userDoc = await FirebaseFirestore.instance.collection('users').doc(widget.userId).get();
-        final ud = userDoc.data();
-        _userPopupShown = (ud != null && (ud['pop_up_shown'] == true));
-        debugPrint('User pop_up_shown initial value: $_userPopupShown');
-      } catch (e, st) {
-        debugPrint('Error reading user pop_up_shown: $e\n$st');
-        _userPopupShown = false;
-      }
 
       setState(() => _isDataLoading = false);
     } catch (e) {
@@ -467,7 +473,12 @@ class _BookingPageState extends State<BookingPage> {
   double get _vehicleCost => _numToDouble(_slotData?['vehicle_cost']);
   double get _additionalCost => _numToDouble(_slotData?['additional_cost']);
   double get _baseTotalCost => double.parse((_vehicleCost + _additionalCost + _surcharge).toStringAsFixed(2));
-  double get _finalPayable => _isFreeByPlan ? 0.0 : _baseTotalCost;
+  double get _finalPayable {
+  if (_isFreeByBenefit) return 0.0; // free benefit
+  if (_isFreeByPlan) return 0.0;    // plan-based free
+  return _baseTotalCost;
+}
+
 
   // -------------------- SERVER HELPERS --------------------
 
@@ -541,19 +552,19 @@ class _BookingPageState extends State<BookingPage> {
         paymentInfo: null,
       );
 
-      // After successful write, show popup (if any) and mark user-level flag
+      // After successful write, show popup (if any)
       if (bookingRef != null) {
         try {
           final found = await _fetchActiveAdminPopup();
-          if (!_userPopupShown && found && _adminPopup != null) {
+          if (found && _adminPopup != null) {
             final bookingData = {
               'booking_id': bookingRef.id,
               'status': 'confirmed',
               'paid_amount': 0,
             };
-            await _showSuccessPopupAndMark(bookingRef, bookingData);
+            await _showSuccessPopup(bookingData);
           } else {
-            debugPrint('Skipping popup after free booking (userSeen=$_userPopupShown, found=$found).');
+            debugPrint('No admin popup to show after free booking (found=$found).');
           }
         } catch (e, st) {
           debugPrint('Popup after free booking failed: $e\n$st');
@@ -670,11 +681,11 @@ class _BookingPageState extends State<BookingPage> {
       },
     );
 
-    // After the booking is successfully written, show popup and mark user flag
+    // After the booking is successfully written, show popup
     if (bookingRef != null) {
       try {
         final found = await _fetchActiveAdminPopup();
-        if (!_userPopupShown && found && _adminPopup != null) {
+        if (found && _adminPopup != null) {
           final bookingData = {
             'booking_id': bookingRef.id,
             'status': 'paid',
@@ -682,9 +693,10 @@ class _BookingPageState extends State<BookingPage> {
             'payment': {'razorpay_payment_id': r.paymentId},
             if (_lastOrderId != null) 'razorpay_order_id': _lastOrderId,
           };
-          await _showSuccessPopupAndMark(bookingRef, bookingData);
+          // Show popup only after payment verification + booking write succeeded
+          await _showSuccessPopup(bookingData);
         } else {
-          debugPrint('Skipping popup after paid booking (userSeen=$_userPopupShown, found=$found).');
+          debugPrint('No admin popup to show after paid booking (found=$found).');
         }
       } catch (e, st) {
         debugPrint('Popup show failed after payment: $e\n$st');
@@ -708,108 +720,133 @@ class _BookingPageState extends State<BookingPage> {
   /// Creates the booking inside a transaction and returns the booking DocumentReference on success.
   /// Returns null on failure. (This function no longer shows the admin popup; caller will.)
   Future<DocumentReference?> _createBookingAndMaybeIncrement({
-    required String status,
-    required num paidAmount,
-    Map<String, dynamic>? paymentInfo,
-  }) async {
-    setState(() => _isBooking = true);
-    try {
-      final fs = FirebaseFirestore.instance;
+  required String status,
+  required num paidAmount,
+  Map<String, dynamic>? paymentInfo,
+}) async {
+  setState(() => _isBooking = true);
+  try {
+    final fs = FirebaseFirestore.instance;
 
-      final bookingRef = fs.collection('bookings').doc();
-      final userPlanRef = fs.collection('user_plans').doc(widget.userId);
-      final slotRef = fs.collection('slots').doc(widget.slotId);
+    final bookingRef = fs.collection('bookings').doc();
+    final userPlanRef = fs.collection('user_plans').doc(widget.userId);
+    final slotRef = fs.collection('slots').doc(widget.slotId);
+    final userRef = fs.collection('users').doc(widget.userId);
 
-      final bookingData = {
-        'user_id': widget.userId,
-        'slot_id': widget.slotId,
-        'boarding_point_latitude': _selectedLocation!.latitude,
-        'boarding_point_longitude': _selectedLocation!.longitude,
-        'distance_km': _distanceKm,
-        'surcharge': _surcharge,
-        'vehicle_cost': _vehicleCost,
-        'additional_cost': _additionalCost,
-        'total_cost': _finalPayable,
-        'status': status, // 'paid' or 'confirmed'
-        'created_at': FieldValue.serverTimestamp(),
+    // Base booking payload; some fields are added inside the transaction after we decide free path
+    final baseBookingData = {
+      'user_id': widget.userId,
+      'slot_id': widget.slotId,
+      'boarding_point_latitude': _selectedLocation!.latitude,
+      'boarding_point_longitude': _selectedLocation!.longitude,
+      'distance_km': _distanceKm,
+      'surcharge': _surcharge,
+      'vehicle_cost': _vehicleCost,
+      'additional_cost': _additionalCost,
+      'total_cost': _finalPayable,
+      'status': status,
+      'created_at': FieldValue.serverTimestamp(),
+      if (_slotData != null && _slotData!['slot_day'] != null) 'slot_day': _slotData!['slot_day'],
+      if (_slotData != null && _slotData!['slot_time'] != null) 'slot_time': _slotData!['slot_time'],
+      if (_slotData != null && _slotData!['vehicle_type'] != null) 'vehicle_type': _slotData!['vehicle_type'],
+      if (_slotData != null && _slotData!['instructor_name'] != null) 'instructor_name': _slotData!['instructor_name'],
+      'plan_id': _activePlanId,
+      'plan_slots': _planSlots,
+      'plan_slots_used': _slotsUsed,
+      if (paymentInfo != null) 'payment': paymentInfo,
+      if (_lastOrderId != null) 'razorpay_order_id': _lastOrderId,
+      'paid_amount': paidAmount,
+    };
 
-        // plan info
-        'plan_id': _activePlanId,
-        'plan_slots': _planSlots,
-        'plan_slots_used': _slotsUsed,
-        'free_by_plan': _isFreeByPlan,
-
-        // payment info
-        if (paymentInfo != null) 'payment': paymentInfo,
-        if (_lastOrderId != null) 'razorpay_order_id': _lastOrderId,
-        'paid_amount': paidAmount,
-
-        // NOTE: booking-level popup_shown intentionally omitted (we only write user-level flag)
-      };
-
-      // Transaction to prevent double-booking
-      await fs.runTransaction((tx) async {
-        // 1) Check slot is not already booked
-        final slotSnap = await tx.get(slotRef);
-        final currentStatus = (slotSnap.data()?['status'] ?? '').toString();
-        if (currentStatus.toLowerCase() == 'booked') {
-          throw Exception('Slot already booked');
-        }
-
-        // 2) Create booking
-        tx.set(bookingRef, bookingData);
-
-        // 3) If free by plan, increment user's slots_used
-        if (_activePlanId != null && _isFreeByPlan) {
-          tx.set(userPlanRef, {'slots_used': _slotsUsed + 1}, SetOptions(merge: true));
-        }
-
-        // 4) Mark slot as booked
-        tx.set(
-          slotRef,
-          {
-            'status': 'booked',
-            'booked_by': widget.userId,
-            'booking_id': bookingRef.id,
-            'booked_at': FieldValue.serverTimestamp(),
-          },
-          SetOptions(merge: true),
-        );
-      });
-
-      _snack(
-        status == 'paid' ? 'Payment successful. Booking created.' : 'Booking created successfully (FREE under your plan)!',
-        color: AppColors.success,
-      );
-
-      // Return booking reference to caller (so popup can be shown/marked by caller)
-      return bookingRef;
-    } catch (e) {
-      // If anything fails inside the transaction, no writes were committed.
-      final msg = e.toString();
-      if (msg.contains('already booked')) {
-        _snack('Sorry, this slot was just booked by someone else.', color: AppColors.danger);
-      } else {
-        _snack('Error creating booking: $e', color: AppColors.danger);
+    await fs.runTransaction((tx) async {
+      // 1) Ensure slot is still free
+      final slotSnap = await tx.get(slotRef);
+      final currentStatus = (slotSnap.data()?['status'] ?? '').toString().toLowerCase();
+      if (currentStatus == 'booked') {
+        throw Exception('Slot already booked');
       }
-      return null;
-    } finally {
-      if (mounted) setState(() => _isBooking = false);
+
+      // 2) Read user's current benefit count INSIDE the txn to avoid races
+      final userSnap = await tx.get(userRef);
+      int freeBenefit = 0;
+      if (userSnap.exists) {
+        final raw = userSnap.data()?['free_benefit'];
+        freeBenefit = (raw is num) ? raw.toInt() : 0;
+      }
+
+      // Decide free path atomically (benefit has priority, then plan)
+      final bool useBenefit = freeBenefit > 0;
+      final bool usePlan = !useBenefit && _activePlanId != null && _planSlots != 0 && _slotsUsed < _planSlots;
+
+      final bookingPayload = Map<String, dynamic>.from(baseBookingData)
+        ..addAll({
+          'free_by_benefit': useBenefit,
+          'free_by_plan': usePlan,
+        });
+
+      // If it’s free by either route, make sure total_cost reflects FREE (= 0.0)
+      if (useBenefit || usePlan) {
+        bookingPayload['total_cost'] = 0.0;
+        bookingPayload['paid_amount'] = 0;
+      }
+
+      // 3) Write booking
+      tx.set(bookingRef, bookingPayload);
+
+      // 4) Update counters
+      if (useBenefit) {
+        tx.update(userRef, {'free_benefit': FieldValue.increment(-1)});
+      } else if (usePlan) {
+        tx.set(userPlanRef, {'slots_used': _slotsUsed + 1}, SetOptions(merge: true));
+      }
+
+      // 5) Mark slot as booked
+      tx.set(
+        slotRef,
+        {
+          'status': 'booked',
+          'booked_by': widget.userId,
+          'booking_id': bookingRef.id,
+          'booked_at': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    });
+
+    _snack(
+      status == 'paid'
+          ? 'Payment successful. Booking created.'
+          : 'Booking created successfully (FREE)!',
+      color: AppColors.success,
+    );
+
+    return bookingRef;
+  } catch (e) {
+    final msg = e.toString();
+    if (msg.contains('already booked')) {
+      _snack('Sorry, this slot was just booked by someone else.', color: AppColors.danger);
+    } else {
+      _snack('Error creating booking: $e', color: AppColors.danger);
     }
+    return null;
+  } finally {
+    if (mounted) setState(() => _isBooking = false);
   }
+}
 
-  // -------------------- ONE-TIME SUCCESS POPUP & ADMIN MEDIA --------------------
 
-  /// Fetch the active admin popup (one document where active == true).
-  /// Returns true if an active popup was found and loaded.
-  /// Tries the efficient indexed query first; on index error falls back to
-  /// a client-side sort (safer while you create the index).
+  // -------------------- POPUP MEDIA HELPERS --------------------
+
   Future<bool> _fetchActiveAdminPopup() async {
     final fs = FirebaseFirestore.instance;
 
     try {
-      // Preferred, efficient query (requires composite index for active + created_at)
-      final q = await fs.collection('admin_popups').where('active', isEqualTo: true).orderBy('created_at', descending: true).limit(1).get();
+      final q = await fs
+          .collection('admin_popups')
+          .where('active', isEqualTo: true)
+          .orderBy('created_at', descending: true)
+          .limit(1)
+          .get();
 
       if (q.docs.isNotEmpty) {
         _adminPopup = q.docs.first.data();
@@ -822,7 +859,6 @@ class _BookingPageState extends State<BookingPage> {
         return false;
       }
     } on FirebaseException catch (e) {
-      // If the error indicates a missing index, fallback
       debugPrint('Indexed admin_popups query failed: ${e.code} ${e.message}');
       if (e.code == 'failed-precondition' || (e.message?.toLowerCase().contains('index') ?? false)) {
         try {
@@ -833,7 +869,6 @@ class _BookingPageState extends State<BookingPage> {
             return false;
           }
 
-          // Find the doc with max created_at on client-side
           QueryDocumentSnapshot? best;
           for (final d in q2.docs) {
             if (best == null) {
@@ -845,7 +880,6 @@ class _BookingPageState extends State<BookingPage> {
             final ta = a['created_at'];
             final tb = b['created_at'];
 
-            // Timestamps may be Timestamp or milliseconds, handle safely
             int _tsToMillis(dynamic t) {
               if (t == null) return 0;
               try {
@@ -877,7 +911,6 @@ class _BookingPageState extends State<BookingPage> {
           return false;
         }
       } else {
-        // Other firestore exception — don't swallow it silently
         debugPrint('Firestore error fetching admin popup: ${e.code} ${e.message}');
         _adminPopup = null;
         return false;
@@ -890,30 +923,27 @@ class _BookingPageState extends State<BookingPage> {
   }
 
   Future<void> _preparePopupVideo(String url) async {
+    // Dispose previous controller if any
     try {
       await _popupVideoController?.dispose();
     } catch (_) {}
     _popupVideoController = VideoPlayerController.network(url);
     _initializePopupVideoFuture = _popupVideoController!.initialize();
+
+    // initialize then auto-play
     await _initializePopupVideoFuture;
     _popupVideoController!.setLooping(false);
 
-    // Add a listener to update progress and detect playback start
+    // auto play immediately
+    try {
+      await _popupVideoController!.play();
+    } catch (_) {}
+
+    // we don't use play/pause UI, but we keep a listener to update UI if needed
     _removePopupVideoListener();
     _popupVideoListener = () {
-      try {
-        if (_popupVideoController != null) {
-          final pos = _popupVideoController!.value.position;
-          // Enable acknowledge after any playback > 0
-          if (!_acknowledgeEnabled && pos.inMilliseconds > 0) {
-            setState(() {
-              _acknowledgeEnabled = true;
-            });
-          }
-          // Update UI for progress (rebuild)
-          if (mounted) setState(() {});
-        }
-      } catch (_) {}
+      // nothing heavy here — used only to refresh state
+      if (mounted) setState(() {});
     };
     _popupVideoController!.addListener(_popupVideoListener!);
   }
@@ -927,368 +957,324 @@ class _BookingPageState extends State<BookingPage> {
     _popupVideoListener = null;
   }
 
-  // Helper to format Duration as mm:ss
-  String _formatDuration(Duration d) {
-    final mm = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final ss = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$mm:$ss';
+  // -------------------- COUNTDOWN --------------------
+
+  void _startPopupCountdown({int seconds = 10}) {
+    _popupCountdownTimer?.cancel();
+    setState(() {
+      _popupCountdownSeconds = seconds;
+      _acknowledgeEnabled = false;
+    });
+
+    _popupCountdownTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+      if (!mounted) return;
+      setState(() {
+        if (_popupCountdownSeconds > 0) {
+          _popupCountdownSeconds -= 1;
+        }
+        if (_popupCountdownSeconds <= 0) {
+          _acknowledgeEnabled = true;
+          _popupCountdownTimer?.cancel();
+        }
+      });
+    });
   }
 
-  /// Show the popup (await) and then mark the user (users/{userId}.pop_up_shown = true).
-  /// IMPORTANT: we DO NOT write booking.popup_shown here (per request).
-  Future<void> _showSuccessPopupAndMark(DocumentReference bookingRef, Map<String, dynamic> bookingData) async {
-    try {
-      // Show popup (await so we know when user dismissed it)
-      await _showSuccessPopup(bookingData);
-
-      // Mark user-level flag so they never see admin popups again.
-      final fs = FirebaseFirestore.instance;
-      final userRef = fs.collection('users').doc(widget.userId);
-
-      if (!_userPopupShown) {
-        await userRef.set({'pop_up_shown': true}, SetOptions(merge: true));
-        _userPopupShown = true;
-        debugPrint('Marked users.pop_up_shown = true (no booking modification).');
-      } else {
-        debugPrint('User already marked pop_up_shown locally; skipping user write.');
-      }
-    } catch (e, st) {
-      // If marking fails, you could retry or log.
-      debugPrint('Popup show/mark failed: $e\n$st');
-      try {
-        _snack('Popup error: $e', color: AppColors.warning);
-      } catch (_) {}
-    } finally {
-      // Clean up listener if any
-      _removePopupVideoListener();
-    }
+  void _stopPopupCountdown() {
+    _popupCountdownTimer?.cancel();
+    _popupCountdownTimer = null;
   }
 
-  /// ROAD SAFETY — Non-skippable popup UI
-  /// Shows only road-safety information + optional admin media. No booking/txn details, no "View Bookings".
-  /// Acknowledge is disabled until user opens/interacts with the media file (pdf/image/video).
+  // -------------------- POPUP UI --------------------
+
   Future<void> _showSuccessPopup(Map<String, dynamic> bookingData) async {
     if (!mounted) return Future.value();
 
-    // If adminPopup has media (pdf/image/video), require interaction to enable acknowledge
-    final mediaType = (_adminPopup != null) ? (_adminPopup!['type'] ?? '').toString().toLowerCase() : '';
-    final hasMedia = mediaType == 'pdf' || mediaType == 'image' || mediaType == 'video';
-
-    // Default: enabled unless there's a media file requiring open/play/tap
+    // Show busy overlay while we prepare the popup
     setState(() {
-      _acknowledgeEnabled = !hasMedia;
+      _popupBusyOverlay = true;
     });
 
-    // If video, prepare controller (prepares listener to enable ack once playback starts)
-    if (mediaType == 'video' && (_adminPopup!['url'] ?? '').toString().isNotEmpty) {
+    // Reset outer helpers
+    _popupCountdownTimer?.cancel();
+    _popupMediaLoaded = false;
+    _acknowledgeEnabled = false;
+    _popupCountdownSeconds = 10;
+
+    final mediaType = (_adminPopup != null) ? (_adminPopup!['type'] ?? '').toString().toLowerCase() : '';
+    final url = (_adminPopup != null) ? (_adminPopup!['url'] ?? '').toString() : '';
+    final hasMedia = mediaType == 'image' || mediaType == 'video' || mediaType == 'pdf';
+
+    // If video, prepare controller ahead of showing the dialog (so we can show quickly)
+    if (mediaType == 'video' && url.isNotEmpty) {
       try {
-        await _preparePopupVideo(_adminPopup!['url']);
+        await _preparePopupVideo(url);
+        // Note: dialog manages its own mediaLoaded local state
       } catch (e, st) {
-        debugPrint('Video prepare failed: $e\n$st');
-        // If video init fails, allow acknowledge to avoid blocking user forever
-        setState(() => _acknowledgeEnabled = true);
+        debugPrint('Video prepare/init error before dialog: $e\n$st');
+        // continue — dialog will handle fallback
       }
     }
 
-    // Informational text: prefer admin description, fallback to a default road-safety message
+    // Callback that inner dialog can call when it's ready to be visible (media loaded/countdown started).
+    void Function()? onMediaReady;
+
     final infoText = (_adminPopup != null && (_adminPopup!['description'] ?? '').toString().isNotEmpty)
         ? (_adminPopup!['description'] ?? '').toString()
         : 'Important Road Safety Guidelines:\n\n• Please be on time at your boarding point.\n• Wear a seatbelt at all times while in the vehicle.\n• Follow instructor directions and local traffic rules.\n• Report any safety concerns to us immediately.';
 
-    debugPrint('Preparing to show Road Safety popup (userSeen=$_userPopupShown, mediaType=$mediaType)');
+    // when dialog reports media ready, hide the outer blocking overlay
+    onMediaReady = () {
+      if (!mounted) return;
+      setState(() {
+        _popupBusyOverlay = false;
+      });
+    };
 
-    return showDialog<void>(
+    // Show dialog and manage countdown / media-loaded inside it
+    await showDialog<void>(
       context: context,
-      barrierDismissible: false, // require acknowledgement
+      barrierDismissible: false,
       builder: (c) {
-        return WillPopScope(
-          onWillPop: () async => false,
-          child: AlertDialog(
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
-            backgroundColor: AppColors.surface,
-            titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
-            contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
-            title: Row(
-              children: [
-                Icon(Icons.traffic, color: AppColors.brand, size: 28),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    'Road Safety',
-                    style: AppText.sectionTitle.copyWith(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.onSurface),
-                  ),
-                ),
-              ],
-            ),
-            content: SingleChildScrollView(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
+        // dialog-local state
+        bool mediaLoaded = false;
+        int countdown = 10;
+        Timer? localTimer;
+
+        // helper to start the countdown inside the dialog
+        void startLocalCountdown([int seconds = 10, StateSetter? sb]) {
+          localTimer?.cancel();
+          countdown = seconds;
+          // mark loaded
+          final wasNotLoaded = !mediaLoaded;
+          mediaLoaded = true;
+          sb?.call(() {}); // refresh immediately so spinner hides and text updates
+
+          // notify outer that the dialog is ready to be shown (so the outer busy overlay can hide)
+          if (wasNotLoaded) {
+            // small microtask to ensure setState ordering doesn't conflict
+            Future.microtask(() {
+              onMediaReady?.call();
+            });
+          }
+
+          localTimer = Timer.periodic(const Duration(seconds: 1), (t) {
+            if (!mounted) return;
+            if (countdown <= 0) {
+              localTimer?.cancel();
+              sb?.call(() {});
+              return;
+            }
+            countdown -= 1;
+            sb?.call(() {});
+          });
+        }
+
+        return StatefulBuilder(builder: (BuildContext dialogContext, StateSetter setDialogState) {
+          // If media is video and controller is initialized and we haven't marked mediaLoaded yet,
+          // mark loaded and start countdown.
+          if (!mediaLoaded && mediaType == 'video' && _popupVideoController != null && _popupVideoController!.value.isInitialized) {
+            // Start countdown immediately when video is ready (and playing)
+            startLocalCountdown(10, setDialogState);
+          }
+
+          // For PDF, mark loaded immediately (we don't block)
+          if (!mediaLoaded && mediaType == 'pdf' && url.isNotEmpty) {
+            startLocalCountdown(10, setDialogState);
+          }
+
+          // Dialog widget
+          return WillPopScope(
+            onWillPop: () async => false,
+            child: AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+              backgroundColor: AppColors.surface,
+              titlePadding: const EdgeInsets.fromLTRB(20, 18, 20, 0),
+              contentPadding: const EdgeInsets.fromLTRB(20, 12, 20, 20),
+              title: Row(
                 children: [
-                  // Admin media (image/video/pdf) — if present show it above info text
-                  if (_adminPopup != null) ...[
-                    if (mediaType == 'image' && (_adminPopup!['url'] ?? '').toString().isNotEmpty) ...[
-                      GestureDetector(
-                        onTap: () async {
-                          final url = _adminPopup!['url'].toString();
-                          final uri = Uri.parse(url);
-                          if (await canLaunchUrl(uri)) {
-                            await launchUrl(uri, mode: LaunchMode.externalApplication);
-                            // mark acknowledge enabled after user opened image externally
-                            setState(() => _acknowledgeEnabled = true);
-                          } else {
-                            _snack('Could not open image', color: AppColors.danger);
-                          }
-                        },
-                        child: SizedBox(
-                          height: 200,
-                          width: double.infinity,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(AppRadii.s),
-                            child: Image.network(
-                              _adminPopup!['url'],
-                              fit: BoxFit.cover,
-                              loadingBuilder: (context, child, progress) {
-                                if (progress == null) return child;
-                                return SizedBox(
-                                  height: 200,
-                                  child: Center(
-                                    child: CircularProgressIndicator(
-                                      value: progress.expectedTotalBytes != null ? progress.cumulativeBytesLoaded / (progress.expectedTotalBytes ?? 1) : null,
-                                    ),
-                                  ),
-                                );
-                              },
-                              errorBuilder: (c, e, st) => Container(
-                                height: 200,
-                                color: AppColors.neuBg,
-                                child: Center(child: Text('Could not load image', style: AppText.tileSubtitle)),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                    ] else if (mediaType == 'video' && (_adminPopup!['url'] ?? '').toString().isNotEmpty) ...[
+                  Icon(Icons.traffic, color: AppColors.brand, size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      'Road Safety',
+                      style: AppText.sectionTitle.copyWith(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.onSurface),
+                    ),
+                  ),
+                ],
+              ),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (hasMedia) ...[
                       SizedBox(
-                        height: 260,
+                        height: 220,
                         width: double.infinity,
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(AppRadii.s),
                           child: Container(
                             color: AppColors.neuBg,
-                            child: Column(
+                            child: Stack(
                               children: [
-                                // Video display area
-                                Expanded(
-                                  child: Center(
-                                    child: _popupVideoController != null
-                                        ? FutureBuilder(
-                                            future: _initializePopupVideoFuture,
-                                            builder: (context, snap) {
-                                              if (snap.connectionState == ConnectionState.done) {
-                                                return GestureDetector(
-                                                  onTap: () {
-                                                    // toggle play/pause on tap
-                                                    if (_popupVideoController!.value.isPlaying) {
-                                                      _popupVideoController!.pause();
-                                                    } else {
-                                                      _popupVideoController!.play();
-                                                      // ensure acknowledge becomes enabled
-                                                      setState(() => _acknowledgeEnabled = true);
-                                                    }
-                                                    setState(() {});
-                                                  },
-                                                  child: AspectRatio(
-                                                    aspectRatio: _popupVideoController!.value.aspectRatio,
-                                                    child: VideoPlayer(_popupVideoController!),
-                                                  ),
-                                                );
-                                              } else {
-                                                return const Center(child: CircularProgressIndicator());
-                                              }
-                                            },
-                                          )
-                                        : Center(child: Text('Video not available', style: AppText.tileSubtitle)),
-                                  ),
-                                ),
+                                // Image handling: use loadingBuilder to trigger startLocalCountdown when loaded
+                                if (mediaType == 'image' && url.isNotEmpty)
+                                  Image.network(
+                                    url,
+                                    fit: BoxFit.cover,
+                                    width: double.infinity,
+                                    height: double.infinity,
+                                    loadingBuilder: (context, child, progress) {
+                                      if (progress == null) {
+                                        // image loaded -> start countdown if not started
+                                        if (!mediaLoaded) {
+                                          startLocalCountdown(10, setDialogState);
+                                        }
+                                        return child;
+                                      }
+                                      return const SizedBox.shrink();
+                                    },
+                                    errorBuilder: (c, e, st) {
+                                      // image failed -> allow countdown to start so user isn't blocked
+                                      if (!mediaLoaded) startLocalCountdown(10, setDialogState);
+                                      return Center(child: Text('Could not load image', style: AppText.tileSubtitle));
+                                    },
+                                  )
+                                // Video handling: show VideoPlayer when controller is ready
+                                else if (mediaType == 'video' && _popupVideoController != null && _popupVideoController!.value.isInitialized)
+                                  Center(
+                                    child: AspectRatio(
+                                      aspectRatio: _popupVideoController!.value.aspectRatio,
+                                      child: VideoPlayer(_popupVideoController!),
+                                    ),
+                                  )
+                                // PDF placeholder
+                                else if (mediaType == 'pdf' && url.isNotEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.all(12.0),
+                                    child: Row(
+                                      children: [
+                                        const SizedBox(width: 8),
+                                        Icon(Icons.picture_as_pdf, size: 36, color: AppColors.danger),
+                                        const SizedBox(width: 12),
+                                        Expanded(child: Text((_adminPopup!['description'] ?? 'Tap Open to view the PDF'), style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted))),
+                                        TextButton(
+                                          onPressed: () async {
+                                            final uri = Uri.parse(url);
+                                            if (await canLaunchUrl(uri)) {
+                                              await launchUrl(uri, mode: LaunchMode.externalApplication);
+                                            } else {
+                                              _snack('Could not open PDF', color: AppColors.danger);
+                                            }
+                                          },
+                                          child: Text('Open', style: AppText.tileTitle.copyWith(color: AppColors.brand)),
+                                        ),
+                                      ],
+                                    ),
+                                  )
+                                else
+                                  const SizedBox.shrink(),
 
-                                // Playback controls: play/pause + progress + time
-                                Padding(
-                                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 6.0),
-                                  child: Column(
-                                    children: [
-                                      // Slider progress (seekable)
-                                      Row(
-                                        children: [
-                                          Expanded(
-                                            child: _popupVideoController != null && _popupVideoController!.value.isInitialized
-                                                ? Slider(
-                                                    min: 0,
-                                                    max: _popupVideoController!.value.duration.inMilliseconds.toDouble().clamp(0, double.infinity),
-                                                    value: _popupVideoController!.value.position.inMilliseconds.toDouble().clamp(0, _popupVideoController!.value.duration.inMilliseconds.toDouble().clamp(0, double.infinity)),
-                                                    onChanged: (v) {
-                                                      if (_popupVideoController == null) return;
-                                                      final pos = Duration(milliseconds: v.round());
-                                                      _popupVideoController!.seekTo(pos);
-                                                    },
-                                                  )
-                                                : LinearProgressIndicator(),
-                                          ),
-                                        ],
-                                      ),
-                                      // time labels + play/pause button
-                                      Row(
-                                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                        children: [
-                                          // play/pause small button
-                                          Row(
-                                            children: [
-                                              Material(
-                                                color: AppColors.brand.withOpacity(0.95),
-                                                borderRadius: BorderRadius.circular(20),
-                                                child: InkWell(
-                                                  onTap: () {
-                                                    if (_popupVideoController == null || !_popupVideoController!.value.isInitialized) return;
-                                                    if (_popupVideoController!.value.isPlaying) {
-                                                      _popupVideoController!.pause();
-                                                    } else {
-                                                      _popupVideoController!.play();
-                                                      setState(() => _acknowledgeEnabled = true);
-                                                    }
-                                                    setState(() {});
-                                                  },
-                                                  borderRadius: BorderRadius.circular(20),
-                                                  child: Padding(
-                                                    padding: const EdgeInsets.all(8.0),
-                                                    child: Icon(
-                                                      _popupVideoController != null && _popupVideoController!.value.isPlaying ? Icons.pause : Icons.play_arrow,
-                                                      color: AppColors.onSurfaceInverse,
-                                                    ),
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Text(
-                                                _popupVideoController != null && _popupVideoController!.value.isInitialized
-                                                    ? _formatDuration(_popupVideoController!.value.position)
-                                                    : '00:00',
-                                                style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
-                                              ),
-                                            ],
-                                          ),
-
-                                          // total duration
-                                          Text(
-                                            _popupVideoController != null && _popupVideoController!.value.isInitialized
-                                                ? _formatDuration(_popupVideoController!.value.duration)
-                                                : '00:00',
-                                            style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
-                                          ),
-                                        ],
-                                      ),
-                                    ],
+                                // Circular loader overlay until mediaLoaded == true
+                                if (!mediaLoaded)
+                                  const Positioned.fill(
+                                    child: Center(child: CircularProgressIndicator()),
                                   ),
-                                ),
                               ],
                             ),
                           ),
                         ),
                       ),
                       const SizedBox(height: 12),
-                    ] else if (mediaType == 'pdf' && (_adminPopup!['url'] ?? '').toString().isNotEmpty) ...[
-                      Container(
-                        height: 120,
-                        decoration: BoxDecoration(
-                          color: AppColors.neuBg,
-                          borderRadius: BorderRadius.circular(AppRadii.s),
-                          border: Border.all(color: AppColors.divider),
-                        ),
-                        child: Row(
-                          children: [
-                            const SizedBox(width: 12),
-                            Icon(Icons.picture_as_pdf, size: 36, color: AppColors.danger),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Text(
-                                (_adminPopup!['description'] ?? 'Tap Open to view the PDF'),
-                                style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
-                              ),
-                            ),
-                            TextButton(
-                              onPressed: () async {
-                                final url = _adminPopup!['url'].toString();
-                                final uri = Uri.parse(url);
-                                if (await canLaunchUrl(uri)) {
-                                  await launchUrl(uri, mode: LaunchMode.externalApplication);
-                                  // mark acknowledge enabled after user opened PDF externally
-                                  setState(() => _acknowledgeEnabled = true);
-                                } else {
-                                  _snack('Could not open PDF', color: AppColors.danger);
-                                }
-                              },
-                              child: Text('Open', style: AppText.tileTitle.copyWith(color: AppColors.brand)),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
                     ],
-                  ],
 
-                  // Informational text only — concise, focused on road safety
-                  Text(
-                    infoText,
-                    style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted, fontWeight: FontWeight.w500),
-                  ),
-                ],
-              ),
-            ),
-            actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-            actions: [
-              // Single acknowledge button (non-skippable). Disabled until user opens/interacts with file when required.
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppColors.brand,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
-                  ),
-                  onPressed: _acknowledgeEnabled
-                      ? () async {
-                          // On acknowledge: stop video if playing and dispose controller
-                          try {
-                            await _popupVideoController?.pause();
-                            await _popupVideoController?.dispose();
-                            _popupVideoController = null;
-                            _removePopupVideoListener();
-                          } catch (_) {}
-                          Navigator.of(context).pop();
-                        }
-                      : null,
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                    child: Text('Acknowledge', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
-                  ),
+                    Text(
+                      infoText,
+                      style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted, fontWeight: FontWeight.w500),
+                    ),
+
+                    const SizedBox(height: 12),
+
+                    Row(
+                      children: [
+                        Icon(Icons.timer, size: 16, color: AppColors.onSurfaceMuted),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            mediaLoaded ? (countdown <= 0 ? 'You may now acknowledge.' : 'Please wait ${countdown}s to acknowledge.') : 'Loading…',
+                            style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted, fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
-        );
+              actionsPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              actions: [
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: AppColors.brand,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
+                    ),
+                    onPressed: (mediaLoaded && countdown <= 0)
+                        ? () async {
+                            // cleanup local timer & dialog video listener
+                            localTimer?.cancel();
+                            // stop & dispose outer video controller if present
+                            try {
+                              await _popupVideoController?.pause();
+                              await _popupVideoController?.dispose();
+                            } catch (_) {}
+                            _popupVideoController = null;
+                            _removePopupVideoListener();
+
+                            Navigator.of(dialogContext).pop();
+                          }
+                        : null,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      child: Text('Acknowledge', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          );
+        });
       },
     );
+
+    // after dialog closes: ensure we stop & clean up timers/listeners
+    _popupCountdownTimer?.cancel();
+    _popupCountdownTimer = null;
+    try {
+      await _popupVideoController?.pause();
+      await _popupVideoController?.dispose();
+    } catch (_) {}
+    _popupVideoController = null;
+    _removePopupVideoListener();
+
+    // ensure overlay hidden
+    if (mounted) {
+      setState(() {
+        _popupBusyOverlay = false;
+        _popupMediaLoaded = false;
+        _acknowledgeEnabled = false;
+        _popupCountdownSeconds = 10;
+      });
+    }
   }
 
   /// On app start, check for any bookings for this user that haven't shown popup.
-  /// But skip if user already saw any popup (users/{userId}.pop_up_shown == true).
-  /// This version does NOT rely on booking.popup_shown; it finds the earliest paid/confirmed booking.
+  /// This version does NOT rely on any users/{userId}.pop_up_shown flag and will
+  /// show the popup for the earliest paid/confirmed booking if an admin popup exists.
+  /// NOTE: This function is intentionally NOT called in initState() in the current variant.
   Future<void> _checkPendingSuccessPopups() async {
     try {
-      if (_userPopupShown) {
-        debugPrint('User already saw admin popup (users/${widget.userId}.pop_up_shown == true). Skipping pending booking popups.');
-        return; // user already saw a popup -> skip
-      }
-
       final fs = FirebaseFirestore.instance;
 
       // Try the indexed query first
@@ -1309,10 +1295,10 @@ class _BookingPageState extends State<BookingPage> {
 
           // Re-fetch admin popup right before showing
           final found = await _fetchActiveAdminPopup();
-          if (!_userPopupShown && found && _adminPopup != null) {
-            await _showSuccessPopupAndMark(bookingRef, {...bookingData, 'booking_id': bookingRef.id});
+          if (found && _adminPopup != null) {
+            await _showSuccessPopup({...bookingData, 'booking_id': bookingRef.id});
           } else {
-            debugPrint('Not showing pending popup (userSeen=$_userPopupShown, found=$found)');
+            debugPrint('Not showing pending popup (found=$found)');
           }
         }
         return;
@@ -1331,7 +1317,6 @@ class _BookingPageState extends State<BookingPage> {
         return;
       }
 
-      // find the doc with smallest created_at (earliest)
       QueryDocumentSnapshot? best;
       int _tsToMillis(dynamic t) {
         if (t == null) return 0;
@@ -1357,10 +1342,10 @@ class _BookingPageState extends State<BookingPage> {
         final bookingData = bookingDataRaw is Map<String, dynamic> ? Map<String, dynamic>.from(bookingDataRaw) : <String, dynamic>{};
 
         final found = await _fetchActiveAdminPopup();
-        if (!_userPopupShown && found && _adminPopup != null) {
-          await _showSuccessPopupAndMark(bookingRef, {...bookingData, 'booking_id': bookingRef.id});
+        if (found && _adminPopup != null) {
+          await _showSuccessPopup({...bookingData, 'booking_id': bookingRef.id});
         } else {
-          debugPrint('Not showing pending popup after fallback (userSeen=$_userPopupShown, found=$found)');
+          debugPrint('Not showing pending popup after fallback (found=$found)');
         }
       }
     } catch (e, st) {
@@ -1404,6 +1389,28 @@ class _BookingPageState extends State<BookingPage> {
                   },
                 ),
                 if (_isMapLoading || _isLocationLoading) const _LoadingOverlay(text: 'Initializing map & location...'),
+
+                // FULLSCREEN overlay shown while popup is being prepared/loaded
+                if (_popupBusyOverlay)
+                  Positioned.fill(
+                    child: Material(
+                      color: AppColors.onSurface.withOpacity(0.45),
+                      child: Center(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            SizedBox(
+                              width: 56,
+                              height: 56,
+                              child: CircularProgressIndicator(strokeWidth: 4, color: AppColors.brand),
+                            ),
+                            const SizedBox(height: 12),
+                            Text('Preparing message…', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
 
                 // Zoom controls
                 Positioned(
@@ -1487,24 +1494,27 @@ class _BookingPageState extends State<BookingPage> {
             ),
           ),
 
-          _SummarySheet(
-            slotData: _slotData,
-            vehicleCost: _vehicleCost,
-            additionalCost: _additionalCost,
-            surcharge: _surcharge,
-            distanceKm: _distanceKm,
-            totalCost: _finalPayable,
-            freeRadiusKm: _freeRadiusKm,
-            isBooking: _isBooking,
-            onProceed: _proceedToPay,
-            hintVisible: _selectedLocation == null,
-            isRadiusVisible: _isRadiusVisible,
-            onToggleRadius: _toggleRadiusVisibility,
-            showHintBubble: _showHintBubble,
-            isFreeByPlan: _isFreeByPlan,
-            planSlots: _planSlots,
-            slotsUsed: _slotsUsed,
-          ),
+         _SummarySheet(
+  slotData: _slotData,
+  vehicleCost: _vehicleCost,
+  additionalCost: _additionalCost,
+  surcharge: _surcharge,
+  distanceKm: _distanceKm,
+  totalCost: _finalPayable,
+  freeRadiusKm: _freeRadiusKm,
+  isBooking: _isBooking,
+  onProceed: _proceedToPay,
+  hintVisible: _selectedLocation == null,
+  isRadiusVisible: _isRadiusVisible,
+  onToggleRadius: _toggleRadiusVisibility,
+  showHintBubble: _showHintBubble,
+  isFreeByPlan: _isFreeByPlan,
+  isFreeByBenefit: _isFreeByBenefit,       // NEW
+  planSlots: _planSlots,
+  slotsUsed: _slotsUsed,
+  freeBenefitCount: _freeBenefitCount,      // NEW
+),
+
         ],
       ),
     );
@@ -1711,8 +1721,10 @@ class _SummarySheet extends StatelessWidget {
     required this.onToggleRadius,
     required this.showHintBubble,
     required this.isFreeByPlan,
+    required this.isFreeByBenefit,   // NEW
     required this.planSlots,
     required this.slotsUsed,
+    required this.freeBenefitCount,  // NEW
   });
 
   final Map<String, dynamic>? slotData;
@@ -1730,11 +1742,15 @@ class _SummarySheet extends StatelessWidget {
   final bool showHintBubble;
 
   final bool isFreeByPlan;
+  final bool isFreeByBenefit;    // NEW
   final int planSlots;
   final int slotsUsed;
+  final int freeBenefitCount;    // NEW
 
   @override
   Widget build(BuildContext context) {
+    final bool isFree = isFreeByPlan || isFreeByBenefit;
+
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface,
@@ -1768,7 +1784,7 @@ class _SummarySheet extends StatelessWidget {
                   _RadiusToggleButton(
                     isVisible: isRadiusVisible,
                     onPressed: onToggleRadius,
-                    showBadge: hintVisible, // draws attention until user selects a point
+                    showBadge: hintVisible,
                   ),
                 ],
               ),
@@ -1778,16 +1794,37 @@ class _SummarySheet extends StatelessWidget {
                 Row(
                   children: [
                     const Spacer(),
-                    _SpeechBubble(
-                      text: 'Tip: Hide the radius to select points inside the free area.',
-                    ),
+                    _SpeechBubble(text: 'Tip: Hide the radius to select points inside the free area.'),
                   ],
                 ),
               ],
 
               const SizedBox(height: 16),
 
-              if (isFreeByPlan) ...[
+              // Free banners
+              if (isFreeByBenefit) ...[
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppColors.okBg,
+                    borderRadius: BorderRadius.circular(AppRadii.s),
+                    border: Border.all(color: AppColors.okBg),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.star, size: 16, color: AppColors.okFg),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          'This session will be FREE using your benefit. Remaining after this: ${freeBenefitCount - 1}',
+                          style: AppText.tileSubtitle.copyWith(color: AppColors.okFg, fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ] else if (isFreeByPlan) ...[
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
@@ -1811,6 +1848,7 @@ class _SummarySheet extends StatelessWidget {
                 const SizedBox(height: 12),
               ],
 
+              // Cost card
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
@@ -1821,33 +1859,25 @@ class _SummarySheet extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Cost Breakdown',
-                      style: AppText.tileTitle.copyWith(color: AppColors.onSurface),
-                    ),
+                    Text('Cost Breakdown', style: AppText.tileTitle.copyWith(color: AppColors.onSurface)),
                     const SizedBox(height: 12),
 
-                    _costRow('Vehicle Cost', vehicleCost, strike: isFreeByPlan),
+                    _costRow('Vehicle Cost', vehicleCost, strike: isFree),
                     const SizedBox(height: 8),
-                    _costRow('Additional Cost', additionalCost, strike: isFreeByPlan),
+                    _costRow('Additional Cost', additionalCost, strike: isFree),
 
-                    if (!isFreeByPlan) ...[
+                    if (!isFree) ...[
                       if (surcharge > 0) ...[
                         const SizedBox(height: 8),
-                        _costRow(
-                          'Distance Surcharge (${distanceKm.toStringAsFixed(2)} km)',
-                          surcharge,
-                          isHighlight: true,
-                        ),
+                        _costRow('Distance Surcharge (${distanceKm.toStringAsFixed(2)} km)', surcharge, isHighlight: true),
                       ] else ...[
                         const SizedBox(height: 8),
-                        _noteRow(
-                          'Within free radius (${distanceKm.toStringAsFixed(2)} km, free up to ${freeRadiusKm.toStringAsFixed(1)} km)',
-                        ),
+                        _noteRow('Within free radius (${distanceKm.toStringAsFixed(2)} km, free up to ${freeRadiusKm.toStringAsFixed(1)} km)'),
                       ],
                     ] else ...[
                       const SizedBox(height: 8),
-                      _noteRow('Covered under your plan — no charges'),
+                      _noteRow(isFreeByBenefit ? 'Covered by your free benefit — no charges'
+                                               : 'Covered under your plan — no charges'),
                     ],
 
                     const SizedBox(height: 12),
@@ -1857,12 +1887,11 @@ class _SummarySheet extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          'Total Amount',
+                        Text('Total Amount',
                           style: AppText.sectionTitle.copyWith(fontSize: 18, fontWeight: FontWeight.bold, color: AppColors.onSurface),
                         ),
                         Text(
-                          isFreeByPlan ? 'FREE' : '₹${totalCost.toStringAsFixed(2)}',
+                          isFree ? 'FREE' : '₹${totalCost.toStringAsFixed(2)}',
                           style: AppText.tileTitle.copyWith(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.success),
                         ),
                       ],
@@ -1881,22 +1910,16 @@ class _SummarySheet extends StatelessWidget {
                     backgroundColor: AppColors.brand,
                     foregroundColor: AppColors.onSurfaceInverse,
                     padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(AppRadii.l),
-                    ),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
                     elevation: 2,
                   ),
                   child: isBooking
                       ? SizedBox(
-                          width: 24,
-                          height: 24,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(AppColors.onSurfaceInverse),
-                          ),
+                          width: 24, height: 24,
+                          child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(AppColors.onSurfaceInverse)),
                         )
                       : Text(
-                          isFreeByPlan ? 'Confirm Booking' : 'Proceed to Pay',
+                          isFree ? 'Confirm Booking' : 'Proceed to Pay',
                           style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse, fontSize: 16),
                         ),
                 ),
@@ -1916,8 +1939,7 @@ class _SummarySheet extends StatelessWidget {
                       Icon(Icons.info_outline, size: 16, color: AppColors.warnFg),
                       const SizedBox(width: 8),
                       Expanded(
-                        child: Text(
-                          'Tap on the map to select your boarding point',
+                        child: Text('Tap on the map to select your boarding point',
                           style: AppText.tileSubtitle.copyWith(color: AppColors.warnFg, fontWeight: FontWeight.w500),
                         ),
                       ),
@@ -1940,14 +1962,7 @@ class _SummarySheet extends StatelessWidget {
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Flexible(
-          child: Text(
-            label,
-            style: AppText.tileSubtitle.copyWith(
-              color: highlightColor,
-              fontWeight: FontWeight.w500,
-              fontSize: 14,
-            ),
-          ),
+          child: Text(label, style: AppText.tileSubtitle.copyWith(color: highlightColor, fontWeight: FontWeight.w500, fontSize: 14)),
         ),
         Text(
           valueText,
@@ -1970,12 +1985,10 @@ class _SummarySheet extends StatelessWidget {
         Icon(Icons.check_circle, size: 16, color: AppColors.success),
         const SizedBox(width: 6),
         Expanded(
-          child: Text(
-            text,
-            style: AppText.tileSubtitle.copyWith(color: AppColors.success, fontWeight: FontWeight.w600),
-          ),
+          child: Text(text, style: AppText.tileSubtitle.copyWith(color: AppColors.success, fontWeight: FontWeight.w600)),
         ),
       ],
     );
   }
 }
+

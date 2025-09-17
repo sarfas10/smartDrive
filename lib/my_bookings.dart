@@ -16,9 +16,7 @@ class MyBookingsPage extends StatefulWidget {
 }
 
 class _MyBookingsPageState extends State<MyBookingsPage> {
-  // Caches the joined slot info for the current bookings page by booking ids.
-  final Map<String, Map<String, dynamic>> _slotCacheByBookingId = {};
-  bool _loadingJoin = false;
+  bool _cancelling = false;
 
   @override
   Widget build(BuildContext context) {
@@ -40,11 +38,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
       backgroundColor: context.c.background,
       appBar: _appBar(context, sw, ts),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance
-            .collection('bookings')
-            .where('user_id', isEqualTo: user.uid)
-            // NOTE: removed orderBy to avoid composite index requirement
-            .snapshots(),
+        stream: FirebaseFirestore.instance.collection('bookings').where('user_id', isEqualTo: user.uid).snapshots(),
         builder: (context, snap) {
           if (snap.hasError) {
             return Center(child: Text('Error: ${snap.error}', style: context.t.bodyMedium?.copyWith(color: AppColors.danger)));
@@ -53,91 +47,82 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
             return Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)));
           }
 
-          // Copy and locally sort by created_at (desc)
           final docs = List<QueryDocumentSnapshot>.from(snap.data?.docs ?? const []);
           docs.sort((a, b) {
             final ad = _toDate((a.data() as Map<String, dynamic>)['created_at']);
             final bd = _toDate((b.data() as Map<String, dynamic>)['created_at']);
             if (ad == null && bd == null) return 0;
-            if (ad == null) return 1; // nulls go last
+            if (ad == null) return 1;
             if (bd == null) return -1;
-            return bd.compareTo(ad); // newest first
+            return bd.compareTo(ad);
           });
 
-          if (docs.isEmpty) {
-            return _emptyState(sw);
+          if (docs.isEmpty) return _emptyState(sw);
+
+          final now = DateTime.now();
+          final List<_BookingView> upcoming = [];
+          final List<_BookingView> past = [];
+
+          for (final b in docs) {
+            final bData = Map<String, dynamic>.from(b.data() as Map<String, dynamic>);
+
+            // Use slot_time/slot_day/vehicle_type/instructor_name stored on the booking document itself
+            // Debug (helpful while testing)
+            debugPrint('[_buildBookingView] booking=${b.id} booking.slot_id="${bData['slot_id']}" booking.slot_time="${bData['slot_time'] ?? '(none)'}" slot_day="${bData['slot_day'] ?? '(none)'}" vehicle="${bData['vehicle_type'] ?? '(none)'}" instructor="${bData['instructor_name'] ?? '(none)'}"');
+
+            final when = _bookingDateTime(bData);
+            final status = (bData['status'] ?? '').toString().toLowerCase();
+
+            final isPast = when == null ? false : !when.isAfter(now);
+            final view = _BookingView(
+              bookingId: b.id,
+              bookingData: bData,
+              // We no longer keep a separate slotData; null indicates nothing extra beyond booking
+              slotData: null,
+              startEnd: _parseTimeRange(bData['slot_time'], day: _slotDayDate(bData['slot_day'])) ??
+                  _parseTimeRange(bData['slot_time'], day: _slotDayDate(bData['slot_day'])),
+              slotDay: _slotDayDate(bData['slot_day']),
+              status: status,
+            );
+
+            if (isPast || status == 'cancelled') {
+              past.add(view);
+            } else {
+              upcoming.add(view);
+            }
           }
 
-          // Perform a batched join to get slot details for these bookings
-          return FutureBuilder<Map<String, Map<String, dynamic>>>(
-            future: _fetchSlotsForBookings(docs),
-            builder: (context, joinSnap) {
-              final joined = joinSnap.data ?? _slotCacheByBookingId;
-
-              // Split into upcoming / past using slot end time if available; fallback to slot_day.
-              final now = DateTime.now();
-              final List<_BookingView> upcoming = [];
-              final List<_BookingView> past = [];
-
-              for (final b in docs) {
-                final bData = b.data() as Map<String, dynamic>;
-                final slot = joined[b.id];
-                final when = _bookingDateTime(slot);
-                final status = (bData['status'] ?? '').toString().toLowerCase();
-
-                final isPast = when == null ? false : !when.isAfter(now);
-                final view = _BookingView(
-                  bookingId: b.id,
-                  bookingData: bData,
-                  slotData: slot,
-                  startEnd: _parseTimeRange(slot?['slot_time'], day: _slotDayDate(slot?['slot_day'])),
-                  slotDay: _slotDayDate(slot?['slot_day']),
-                  status: status,
-                );
-
-                if (isPast || status == 'cancelled') {
-                  past.add(view);
-                } else {
-                  upcoming.add(view);
-                }
-              }
-
-              return Stack(
-                children: [
-                  ListView(
-                    padding: EdgeInsets.all(_scale(sw, 12, 20, 28)),
-                    children: [
-                      if (upcoming.isNotEmpty) _groupSection(context, sw, 'Upcoming', upcoming),
-                      if (past.isNotEmpty) _groupSection(context, sw, 'Past', past),
-                    ],
-                  ),
-
-                  if (_loadingJoin && joinSnap.connectionState == ConnectionState.waiting)
-                    Positioned(
-                      right: 16,
-                      top: 8,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(
-                          color: context.c.surface,
-                          borderRadius: BorderRadius.circular(AppRadii.l),
-                          boxShadow: AppShadows.card,
-                          border: Border.all(color: AppColors.divider),
-                        ),
-                        child: Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                          child: SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(context.c.primary)),
-                          ),
-                        ),
-                      ),
-                    ),
-                ],
-              );
-            },
+          return ListView(
+            padding: EdgeInsets.all(_scale(sw, 12, 20, 28)),
+            children: [
+              _infoBanner(sw),
+              const SizedBox(height: 12),
+              if (upcoming.isNotEmpty) _groupSection(context, sw, 'Upcoming', upcoming),
+              if (past.isNotEmpty) _groupSection(context, sw, 'Past', past),
+            ],
           );
         },
+      ),
+    );
+  }
+
+  Widget _infoBanner(double sw) {
+    return Container(
+      padding: EdgeInsets.all(_scale(sw, 12, 14, 16)),
+      decoration: BoxDecoration(
+        color: AppColors.warnBg,
+        borderRadius: BorderRadius.circular(AppRadii.s),
+        border: Border.all(color: AppColors.warnBg),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Refunds (if any) are collected in-hand at the office. Please inform the office about your cancellation after cancelling here.',
+              style: context.t.bodySmall?.copyWith(fontSize: _scale(sw, 12, 13, 14), color: AppColors.warnFg, fontWeight: FontWeight.w600),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -178,54 +163,6 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
       ),
     );
   }
-
-  // ------- Batched slot fetch for all bookings in view -------
-  Future<Map<String, Map<String, dynamic>>> _fetchSlotsForBookings(
-      List<QueryDocumentSnapshot> bookingDocs) async {
-    // Return cached if already have all.
-    final missing = <String, String>{}; // bookingId -> slotId
-    for (final b in bookingDocs) {
-      if (_slotCacheByBookingId.containsKey(b.id)) continue;
-      final bd = b.data() as Map<String, dynamic>;
-      final slotId = (bd['slot_id'] ?? '').toString();
-      if (slotId.isNotEmpty) {
-        missing[b.id] = slotId;
-      } else {
-        _slotCacheByBookingId[b.id] = {};
-      }
-    }
-    if (missing.isEmpty) return _slotCacheByBookingId;
-
-    if (mounted) setState(() => _loadingJoin = true);
-    try {
-      // Chunk slotIds (Firestore whereIn limit often 30).
-      const chunk = 30;
-      final slotIds = missing.values.toSet().toList();
-      final fetched = <String, Map<String, dynamic>>{};
-      for (var i = 0; i < slotIds.length; i += chunk) {
-        final sub = slotIds.sublist(i, (i + chunk > slotIds.length) ? slotIds.length : i + chunk);
-        final snap = await FirebaseFirestore.instance
-            .collection('slots')
-            .where(FieldPath.documentId, whereIn: sub)
-            .get();
-
-        for (final s in snap.docs) {
-          fetched[s.id] = s.data();
-        }
-      }
-
-      // Map back into bookingId => slotData
-      missing.forEach((bookingId, slotId) {
-        _slotCacheByBookingId[bookingId] = fetched[slotId] ?? {};
-      });
-
-      return _slotCacheByBookingId;
-    } finally {
-      if (mounted) setState(() => _loadingJoin = false);
-    }
-  }
-
-  // ------- UI Sections -------
 
   Widget _groupSection(BuildContext context, double sw, String title, List<_BookingView> items) {
     final headerPad = _scale(sw, 10, 12, 14);
@@ -271,28 +208,26 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
 
   Widget _bookingCard(BuildContext context, double sw, _BookingView v) {
     final data = v.bookingData;
-    final slot = v.slotData ?? {};
     final pad = _scale(sw, 12, 14, 16);
 
-    final slotTime = (slot['slot_time'] ?? '').toString();
-    final vehicleType = (slot['vehicle_type'] ?? data['vehicle_type'] ?? 'Unknown').toString();
-    final instructorName = (slot['instructor_name'] ?? data['instructor_name'] ?? 'Instructor').toString();
+    // Now always prefer booking's fields (slot_time/slot_day/vehicle_type/instructor_name)
+    final effectiveSlotDay = v.slotDay ?? _slotDayDate(data['slot_day']) ?? _toDate(data['created_at']);
+    final effectiveRange = v.startEnd ?? _parseTimeRange(data['slot_time'], day: _slotDayDate(data['slot_day']));
+
+    final vehicleType = (data['vehicle_type'] ?? 'Unknown').toString();
+    final instructorName = (data['instructor_name'] ?? 'Instructor').toString();
+    final slotTimeRaw = (data['slot_time'] ?? '').toString();
 
     final total = (data['total_cost'] is num) ? (data['total_cost'] as num).toDouble() : 0.0;
     final freeByPlan = data['free_by_plan'] == true;
     final status = (data['status'] ?? '').toString();
     final createdAt = _toDate(data['created_at']);
 
-    final slotDay = v.slotDay;
-    final start = v.startEnd?.$1;
-    final end = v.startEnd?.$2;
+    final start = effectiveRange?.$1;
+    final end = effectiveRange?.$2;
 
-    final dateLine = slotDay != null
-        ? DateFormat('EEE, d MMM yyyy').format(slotDay)
-        : (createdAt != null ? DateFormat('EEE, d MMM yyyy').format(createdAt) : '--');
-    final timeLine = (start != null && end != null)
-        ? '${DateFormat('h:mm a').format(start)}–${DateFormat('h:mm a').format(end)}'
-        : (slotTime.isNotEmpty ? slotTime : '');
+    final dateLine = effectiveSlotDay != null ? DateFormat('EEE, d MMM yyyy').format(effectiveSlotDay) : (createdAt != null ? DateFormat('EEE, d MMM yyyy').format(createdAt) : '--');
+    final timeLine = (start != null && end != null) ? '${DateFormat('h:mm a').format(start)}–${DateFormat('h:mm a').format(end)}' : (slotTimeRaw.isNotEmpty ? slotTimeRaw : '');
 
     final statusChip = _statusChip(status, freeByPlan);
 
@@ -306,7 +241,7 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _dateBadge(slotDay ?? createdAt, sw),
+            _dateBadge(effectiveSlotDay ?? createdAt, sw),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -425,11 +360,8 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
     );
   }
 
-  // ------- Bottom sheet with details -------
-
   void _showBookingSheet(BuildContext context, _BookingView v) {
     final data = v.bookingData;
-    final slot = v.slotData ?? {};
     final freeByPlan = data['free_by_plan'] == true;
     final total = (data['total_cost'] is num) ? (data['total_cost'] as num).toDouble() : 0.0;
 
@@ -442,12 +374,13 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
     final vehicleCost = _toDouble(data['vehicle_cost']);
     final additionalCost = _toDouble(data['additional_cost']);
 
-    final slotDay = v.slotDay;
-    final start = v.startEnd?.$1;
-    final end = v.startEnd?.$2;
+    // Use booking fields for display
+    final slotDay = v.slotDay ?? _slotDayDate(data['slot_day']) ?? _toDate(data['created_at']);
+    final start = v.startEnd?.$1 ?? _parseTimeRange(data['slot_time'], day: _slotDayDate(data['slot_day']))?.$1;
+    final end = v.startEnd?.$2 ?? _parseTimeRange(data['slot_time'], day: _slotDayDate(data['slot_day']))?.$2;
     final timeLine = (start != null && end != null)
         ? '${DateFormat('h:mm a').format(start)}–${DateFormat('h:mm a').format(end)}'
-        : (slot['slot_time'] ?? '').toString();
+        : (data['slot_time'] ?? '').toString();
     final dateLine = slotDay != null ? DateFormat('EEE, d MMM yyyy').format(slotDay) : '—';
 
     showModalBottomSheet(
@@ -472,8 +405,8 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
               const SizedBox(height: 10),
               _kv('Date', dateLine),
               _kv('Time', timeLine),
-              _kv('Vehicle', (slot['vehicle_type'] ?? data['vehicle_type'] ?? '—').toString()),
-              _kv('Instructor', (slot['instructor_name'] ?? data['instructor_name'] ?? '—').toString()),
+              _kv('Vehicle', (data['vehicle_type'] ?? '—').toString()),
+              _kv('Instructor', (data['instructor_name'] ?? '—').toString()),
               const SizedBox(height: 10),
               Divider(color: AppColors.divider),
               const SizedBox(height: 10),
@@ -496,10 +429,170 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
               if (!freeByPlan) _kv('Paid Amount', '₹${paidAmount.toStringAsFixed(2)}'),
               if (distanceKm > 0) _kv('Distance', '${distanceKm.toStringAsFixed(2)} km'),
               const SizedBox(height: 8),
+              if (status.toLowerCase() != 'cancelled') ...[
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: _cancelling
+                            ? null
+                            : () async {
+                                // 1) Ask for confirmation using a dialog
+                                final ok = await showDialog<bool>(
+                                  context: ctx, // use the bottom sheet context for dialog parent
+                                  builder: (dctx) => AlertDialog(
+                                    title: Text('Confirm cancellation', style: context.t.titleMedium),
+                                    content: Text('Are you sure you want to cancel this booking? Refunds (if any) are collected in-hand at the office. Please inform the office after cancelling.'),
+                                    actions: [
+                                      TextButton(onPressed: () => Navigator.of(dctx).pop(false), child: Text('No')),
+                                      TextButton(onPressed: () => Navigator.of(dctx).pop(true), child: Text('Yes, Cancel')),
+                                    ],
+                                  ),
+                                );
+
+                                if (ok != true) return;
+
+                                // 2) Close the bottom sheet immediately (same effect as tapping outside)
+                                try {
+                                  if (Navigator.of(ctx).canPop()) Navigator.of(ctx).pop();
+                                } catch (e) {
+                                  debugPrint('Failed to pop bottom sheet: $e');
+                                }
+
+                                // 3) Show a simple modal circular progress indicator (no container/text)
+                                showDialog<void>(
+                                  context: context,
+                                  barrierDismissible: false,
+                                  builder: (progressCtx) {
+                                    return const Center(
+                                      child: CircularProgressIndicator(),
+                                    );
+                                  },
+                                );
+
+                                // 4) Perform cancellation
+                                try {
+                                  setState(() => _cancelling = true);
+                                  await _cancelBookingAndDelete(v.bookingId, v.bookingData);
+
+                                  // Dismiss progress dialog
+                                  try {
+                                    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+                                  } catch (e) {
+                                    debugPrint('Failed to pop progress dialog: $e');
+                                  }
+
+                                  if (mounted) _snack('Booking cancelled. Please inform the office for refunds (if any).', color: AppColors.success);
+                                } on FirebaseException catch (fe) {
+                                  // Dismiss progress dialog
+                                  try {
+                                    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+                                  } catch (e) {
+                                    debugPrint('Failed to pop progress dialog on error: $e');
+                                  }
+                                  _snack('Cancellation failed: ${fe.message ?? fe.code}', color: AppColors.danger);
+                                } catch (e, st) {
+                                  // Dismiss progress dialog
+                                  try {
+                                    if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+                                  } catch (e2) {
+                                    debugPrint('Failed to pop progress dialog on error: $e2');
+                                  }
+                                  _snack('Cancellation failed: ${e.toString()}', color: AppColors.danger);
+                                  debugPrint('Cancellation error: $e\n$st');
+                                } finally {
+                                  if (mounted) setState(() => _cancelling = false);
+                                }
+                              },
+                        style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Text(_cancelling ? 'Cancelling…' : 'Cancel Booking', style: context.t.bodyMedium?.copyWith(color: AppColors.onSurfaceInverse)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+              const SizedBox(height: 8),
             ],
           ),
         );
       },
+    );
+  }
+
+  Future<void> _cancelBookingAndDelete(String bookingId, Map<String, dynamic> bookingData) async {
+    final fs = FirebaseFirestore.instance;
+    final bookingRef = fs.collection('bookings').doc(bookingId);
+    final slotId = (bookingData['slot_id'] ?? '').toString();
+    final slotRef = slotId.isNotEmpty ? fs.collection('slots').doc(slotId) : null;
+    final userId = (bookingData['user_id'] ?? '').toString();
+    final userPlanRef = userId.isNotEmpty ? fs.collection('user_plans').doc(userId) : null;
+
+    await fs.runTransaction((tx) async {
+      final bSnap = await tx.get(bookingRef);
+      if (!bSnap.exists) return;
+
+      final currentBooking = bSnap.data() as Map<String, dynamic>? ?? {};
+      final wasFreeByPlan = (currentBooking['free_by_plan'] == true);
+
+      Map<String, dynamic>? sData;
+      if (slotRef != null) {
+        final sSnap = await tx.get(slotRef);
+        if (sSnap.exists) sData = sSnap.data() as Map<String, dynamic>?;
+      }
+
+      Map<String, dynamic>? upData;
+      if (wasFreeByPlan && userPlanRef != null) {
+        final upSnap = await tx.get(userPlanRef);
+        if (upSnap.exists) upData = upSnap.data() as Map<String, dynamic>?;
+      }
+
+      // Delete booking doc
+      tx.delete(bookingRef);
+
+      // If slot doc references this booking, free it
+      if (slotRef != null && sData != null) {
+        final bookingIdInSlot = (sData['booking_id'] ?? '').toString();
+        if (bookingIdInSlot.isNotEmpty && bookingIdInSlot == bookingRef.id) {
+          tx.update(slotRef, {
+            'status': 'available',
+            'booked_by': FieldValue.delete(),
+            'booking_id': FieldValue.delete(),
+            'booked_at': FieldValue.delete(),
+          });
+        }
+      }
+
+      // If booking used a free plan slot, decrement user's slots_used
+      if (wasFreeByPlan && userPlanRef != null && upData != null) {
+        final used = (upData['slots_used'] ?? 0);
+        int usedInt = 0;
+        if (used is num) usedInt = used.toInt();
+        final next = (usedInt > 0) ? usedInt - 1 : 0;
+        tx.update(userPlanRef, {'slots_used': next});
+      }
+    });
+  }
+
+  void _snack(String message, {Color? color}) {
+    if (!mounted) return;
+
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          message,
+          style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse),
+        ),
+        backgroundColor: color ?? AppColors.onSurface,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+        margin: const EdgeInsets.all(12),
+      ),
     );
   }
 
@@ -529,8 +622,6 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
       ),
     );
   }
-
-  // ------- Small helpers -------
 
   static double _scale(double width, double small, double medium, double large) {
     if (width >= 1200) return large;
@@ -616,7 +707,6 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
     );
   }
 
-  // Convert Firestore Timestamp/DateTime to DateTime?
   DateTime? _toDate(dynamic v) {
     if (v == null) return null;
     if (v is Timestamp) return v.toDate();
@@ -633,46 +723,124 @@ class _MyBookingsPageState extends State<MyBookingsPage> {
     }
   }
 
-  // Slot helpers
+  // Improved slot day parser: accepts Timestamp, DateTime, numeric epoch, and several string formats
   DateTime? _slotDayDate(dynamic v) {
     if (v == null) return null;
+
+    // Firestore Timestamp -> DateTime
     if (v is Timestamp) return v.toDate();
+
+    // Already a DateTime
     if (v is DateTime) return v;
+
+    // If it's a numeric millisecondsSinceEpoch stored as num/string
+    if (v is num) {
+      try {
+        return DateTime.fromMillisecondsSinceEpoch(v.toInt());
+      } catch (_) {}
+    }
+    if (v is String) {
+      final s = v.trim();
+      // 1) Try ISO-like parse first (DateTime.parse accepts many formats)
+      try {
+        final dt = DateTime.parse(s);
+        return dt;
+      } catch (_) {}
+
+      // 2) Common Firestore toString() format: "September 17, 2025 at 12:00:00 AM UTC+5:30"
+      //    -> strip the " at ..." suffix and parse "September 17, 2025"
+      try {
+        // use case-insensitive split for " at "
+        final parts = s.split(RegExp(r'\s+at\s+', caseSensitive: false));
+        final dateOnly = parts.isNotEmpty ? parts[0].trim() : s;
+        final parsed = DateFormat('MMMM d, yyyy').parseStrict(dateOnly);
+        return parsed;
+      } catch (_) {}
+
+      // 3) Try a forgiving parse by removing timezone suffix after last space
+      try {
+        final withoutZone = s.replaceAll(RegExp(r'UTC[^\s]*'), '').trim();
+        final parts2 = withoutZone.split(RegExp(r'\s+at\s+', caseSensitive: false));
+        final dateOnly2 = parts2.isNotEmpty ? parts2[0].trim() : withoutZone;
+        final parsed2 = DateFormat('MMMM d, yyyy').parse(dateOnly2);
+        return parsed2;
+      } catch (_) {}
+    }
+
     return null;
   }
 
-  // Returns (start, end) DateTime on slotDay if possible
+  // Robust time-range parser that normalizes dashes and AM/PM spacing
   (DateTime, DateTime)? _parseTimeRange(dynamic slotTime, {DateTime? day}) {
     if (slotTime == null) return null;
-    final raw = slotTime.toString();
-    final parts = raw.split(' - ');
+
+    String raw = slotTime.toString().trim();
+
+    // Normalize different dash-like characters to a single hyphen
+    raw = raw.replaceAll(RegExp(r'[–—−]'), '-');
+
+    // Normalize various AM/PM spellings and ensure a space before AM/PM
+    // Handles "10:00am", "10am", "10 AM", etc.
+    raw = raw.replaceAllMapped(
+      RegExp(r'(\d{1,2}(?::\d{1,2})?)(\s?)(am|pm)\b', caseSensitive: false),
+      (m) {
+        final timePart = m[1]!.trim();
+        final ampm = (m[3] ?? '').toUpperCase();
+        if (!timePart.contains(':')) {
+          return '$timePart:00 $ampm';
+        }
+        return '$timePart $ampm';
+      },
+    );
+
+    // Split on the normalized hyphen, allowing spaces around it
+    final parts = raw.split(RegExp(r'\s*-\s*'));
     if (parts.length != 2) return null;
-    try {
-      final d = day;
-      final s = DateFormat('hh:mm a').parseStrict(parts[0].trim());
-      final e = DateFormat('hh:mm a').parseStrict(parts[1].trim());
-      if (d != null) {
-        final start = DateTime(d.year, d.month, d.day, s.hour, s.minute);
-        final end = DateTime(d.year, d.month, d.day, e.hour, e.minute);
-        return (start, end);
-      } else {
-        final now = DateTime.now();
-        final start = DateTime(now.year, now.month, now.day, s.hour, s.minute);
-        final end = DateTime(now.year, now.month, now.day, e.hour, e.minute);
-        return (start, end);
+
+    final formats = [
+      DateFormat('h:mm a'),
+      DateFormat('hh:mm a'),
+      // fallback formats
+      DateFormat('h:m a'),
+      DateFormat('h a'),
+    ];
+
+    DateTime? parseOne(String t) {
+      final s = t.trim();
+      for (final f in formats) {
+        try {
+          return f.parseStrict(s);
+        } catch (_) {}
       }
-    } catch (_) {
+      // last-resort try DateTime.parse (accepts ISO and some other formats)
+      try {
+        return DateTime.parse(s);
+      } catch (_) {}
       return null;
+    }
+
+    final sParsed = parseOne(parts[0]);
+    final eParsed = parseOne(parts[1]);
+    if (sParsed == null || eParsed == null) return null;
+
+    if (day != null) {
+      final start = DateTime(day.year, day.month, day.day, sParsed.hour, sParsed.minute);
+      final end = DateTime(day.year, day.month, day.day, eParsed.hour, eParsed.minute);
+      return (start, end);
+    } else {
+      final now = DateTime.now();
+      final start = DateTime(now.year, now.month, now.day, sParsed.hour, sParsed.minute);
+      final end = DateTime(now.year, now.month, now.day, eParsed.hour, eParsed.minute);
+      return (start, end);
     }
   }
 
-  // Build booking "moment" for grouping (prefer end time on slot_day)
-  DateTime? _bookingDateTime(Map<String, dynamic>? slot) {
-    if (slot == null) return null;
-    final day = _slotDayDate(slot['slot_day']);
-    final tr = _parseTimeRange(slot['slot_time'], day: day);
-    if (day != null && tr != null) return tr.$2; // end time
-    return day; // fallback
+  DateTime? _bookingDateTime(Map<String, dynamic>? bookingData) {
+    if (bookingData == null) return null;
+    final day = _slotDayDate(bookingData['slot_day']);
+    final tr = _parseTimeRange(bookingData['slot_time'], day: day);
+    if (day != null && tr != null) return tr.$2;
+    return day;
   }
 }
 

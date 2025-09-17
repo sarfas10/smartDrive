@@ -1,4 +1,6 @@
+// lib/user_slot_booking.dart
 // View available slots for a selected date and allow user to book a slot.
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -21,6 +23,9 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
   // Horizontal date scroller (infinite-forward feel)
   final ScrollController _dateScroll = ScrollController();
 
+  // Debounce timer for taps on date pills
+  Timer? _dateDebounce;
+
   // ── NEW: bookings batching + cache ─────────────────────────────────────────
   // Cache booked maps per selected date key (yyyy-mm-dd)
   final Map<String, Map<String, bool>> _bookedCacheByDay = {};
@@ -30,6 +35,7 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
   @override
   void dispose() {
     _dateScroll.dispose();
+    _dateDebounce?.cancel();
     super.dispose();
   }
 
@@ -162,12 +168,22 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
           width: cardWidth,
           child: GestureDetector(
             onTap: () {
-              setState(() {
-                selectedDate = date;
-                selectedSlotId = null;
-                // Optional: force refresh for a date instead of using cache
-                // _bookedCacheByDay.remove(_dayKey);
+              // Use a short debounce so quick taps don't thrash fetching,
+              // but keep it short for snappy UI.
+              _dateDebounce?.cancel();
+              _dateDebounce = Timer(const Duration(milliseconds: 80), () {
+                if (!mounted) return;
+
+                setState(() {
+                  selectedDate = date;
+                  selectedSlotId = null;
+                });
+
+                // Non-blocking prefetch for adjacent days to improve perceived responsiveness
+                _prefetchAdjacentDays(date);
               });
+
+              // Snap scroll to center the tapped pill
               scrollToIndex(index);
             },
             child: Container(
@@ -279,32 +295,74 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
         final docs =
             List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? const []);
 
-        return FutureBuilder<Map<String, bool>>(
-          future: _fetchBookedMapBatched(docs),
-          builder: (context, bookedSnap) {
-            final bookedMap =
-                bookedSnap.data ?? _bookedCacheByDay[_dayKey] ?? <String, bool>{};
+        if (docs.isEmpty) {
+          return _buildEmptyState(context);
+        }
 
-            if (docs.isEmpty) {
-              return _buildEmptyState(context);
+        // Sort by parsed start time
+        docs.sort((a, b) {
+          final sa = _parseStartTime(
+              (a.data() as Map)['slot_time']?.toString() ?? '');
+          final sb = _parseStartTime(
+              (b.data() as Map)['slot_time']?.toString() ?? '');
+          return sa.compareTo(sb);
+        });
+
+        // Group by period
+        final grouped = _groupSlotsByTimePeriod(docs);
+
+        final media = MediaQuery.of(context);
+        final sw = media.size.width;
+        final outerMargin = _scale(sw, 12, 20, 28);
+        final headerPad = _scale(sw, 10, 12, 14);
+
+        // ── NEW: stream bookings for selectedDate so UI updates live ─────────
+        final bookingsStream = FirebaseFirestore.instance
+            .collection('bookings')
+            .where('slot_day', isEqualTo: ts)
+            .where('status', whereIn: ['booked', 'confirmed'])
+            .snapshots();
+
+        return StreamBuilder<QuerySnapshot>(
+          stream: bookingsStream,
+          builder: (context, bSnap) {
+            // Build bookedMap from bookings snapshot; slot_id -> true
+            final Map<String, bool> bookedMap = {};
+
+            if (bSnap.hasData) {
+              for (final doc in bSnap.data!.docs) {
+                final bd = doc.data() as Map<String, dynamic>;
+                final sid = (bd['slot_id'] ?? '').toString();
+                if (sid.isNotEmpty) bookedMap[sid] = true;
+              }
             }
 
-            // Sort by parsed start time
-            docs.sort((a, b) {
-              final sa = _parseStartTime(
-                  (a.data() as Map)['slot_time']?.toString() ?? '');
-              final sb = _parseStartTime(
-                  (b.data() as Map)['slot_time']?.toString() ?? '');
-              return sa.compareTo(sb);
-            });
+            // If we didn't get data yet and have a cache, use cached map for snappy UI:
+            final cacheKey = DateFormat('yyyy-MM-dd').format(selectedDate);
+            if ((bSnap.connectionState == ConnectionState.waiting || !bSnap.hasData) &&
+                _bookedCacheByDay.containsKey(cacheKey)) {
+              final cached = _bookedCacheByDay[cacheKey]!;
+              // overlay cached known trues onto bookedMap (so later stream results can override)
+              for (final e in cached.entries) {
+                if (e.value) bookedMap[e.key] = true;
+              }
+            }
 
-            // Group by period
-            final grouped = _groupSlotsByTimePeriod(docs);
+            // Also mark any slot IDs present as false if absent (for deterministic lookups)
+            for (final sdoc in docs) {
+              final sdata = sdoc.data() as Map<String, dynamic>;
+              final sid = (sdata['slot_id'] ?? sdoc.id).toString();
+              bookedMap.putIfAbsent(sid, () => false);
+            }
 
-            final media = MediaQuery.of(context);
-            final sw = media.size.width;
-            final outerMargin = _scale(sw, 12, 20, 28);
-            final headerPad = _scale(sw, 10, 12, 14);
+            // Cache fresh result (optional)
+            if (bSnap.hasData) {
+              final Map<String, bool> fresh = {};
+              for (final e in bookedMap.entries) {
+                if (e.value) fresh[e.key] = true;
+              }
+              _bookedCacheByDay[cacheKey] = fresh;
+            }
 
             return Stack(
               children: [
@@ -373,9 +431,8 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
                 ),
 
                 // Subtle top-right progress while booked map resolves (first time)
-                if (_bookedLoading &&
-                    (bookedSnap.connectionState ==
-                        ConnectionState.waiting))
+                if ((bSnap.connectionState == ConnectionState.waiting) &&
+                    _bookedLoading)
                   Positioned(
                     right: 16,
                     top: 16,
@@ -405,6 +462,58 @@ class _UserSlotBookingState extends State<UserSlotBooking> {
         );
       },
     );
+  }
+
+  /// Prefetch bookings maps for adjacent dates to reduce perceived latency when user navigates.
+  /// This is non-blocking and will not override an existing cache for a day.
+  void _prefetchAdjacentDays(DateTime centerDay) {
+    final candidates = [
+      centerDay.add(const Duration(days: 1)),
+      centerDay.add(const Duration(days: 2)),
+      // If you want previous day too, include centerDay.subtract(const Duration(days: 1))
+    ];
+
+    for (final d in candidates) {
+      final key = DateFormat('yyyy-MM-dd').format(d);
+      if (_bookedCacheByDay.containsKey(key)) continue; // already cached
+      // fire and forget
+      _fetchBookingsForDay(d).catchError((e) {
+        debugPrint('prefetch bookings failed for $d: $e');
+      });
+    }
+  }
+
+  /// Query bookings for a specific slot_day (Firestore Timestamp) and store slot_id -> true
+  /// in the per-day cache. This doesn't require slot docs; the UI will fill absent keys to false.
+  Future<void> _fetchBookingsForDay(DateTime day) async {
+    final key = DateFormat('yyyy-MM-dd').format(day);
+    // If already cached by another inflight call, return early
+    if (_bookedCacheByDay.containsKey(key)) return;
+
+    final ts = Timestamp.fromDate(_atMidnight(day));
+    if (mounted) setState(() => _bookedLoading = true);
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('bookings')
+          .where('slot_day', isEqualTo: ts)
+          .where('status', whereIn: ['booked', 'confirmed'])
+          .get();
+
+      final Map<String, bool> map = {};
+      for (final doc in snap.docs) {
+        final bd = doc.data() as Map<String, dynamic>;
+        final sid = (bd['slot_id'] ?? '').toString();
+        if (sid.isNotEmpty) map[sid] = true;
+      }
+
+      // Store map (UI will put false defaults for missing slots)
+      _bookedCacheByDay[key] = map;
+    } catch (e) {
+      debugPrint('Error fetching bookings for $key: $e');
+      // don't set cache on error so we can retry later
+    } finally {
+      if (mounted) setState(() => _bookedLoading = false);
+    }
   }
 
   /// NEW: Batched fetch of bookings for the given slots using whereIn (<=30 per chunk).

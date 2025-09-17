@@ -16,10 +16,10 @@ class InstructorSlotsBlock extends StatefulWidget {
 
 class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
   DateTime selectedDate = _atMidnight(DateTime.now());
-  String? selectedSlotId;
-
   String? _uid;
   bool _identityLoaded = false;
+
+  static const int serverLimit = 500;
 
   @override
   void initState() {
@@ -34,11 +34,12 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
         _uid = user?.uid;
         _identityLoaded = true;
       });
-    } catch (_) {
+    } catch (e) {
       setState(() {
         _uid = null;
         _identityLoaded = true;
       });
+      debugPrint('Failed to load identity: $e');
     }
   }
 
@@ -76,7 +77,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
               },
             ),
             title: Text(
-              '👨‍🏫 My Scheduled Slots',
+              'My Booked Sessions',
               style: TextStyle(
                 color: AppColors.onSurfaceInverse,
                 fontWeight: FontWeight.w600,
@@ -88,10 +89,11 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
         body: Column(
           children: [
             _buildDateSelector(context),
+            _buildAdminNoticeBanner(context),
             Expanded(
               child: Container(
                 color: context.c.background,
-                child: _buildSlotsContent(context),
+                child: _buildBookingsContent(context),
               ),
             ),
           ],
@@ -100,7 +102,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
     );
   }
 
-  // ───────────────────────── Date selector (same look as SlotsBlock) ─────────────────────────
+  // ───────────────────────── Date selector ─────────────────────────
   Widget _buildDateSelector(BuildContext context) {
     final media = MediaQuery.of(context);
     final sw = media.size.width;
@@ -109,7 +111,6 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
     final barPaddingH = _scale(sw, 16, 20, 28);
     final barPaddingV = _scale(sw, 10, 12, 14);
     final barHeight = _scale(sw, 64, 70, 82);
-
     final pillPadH = _scale(sw, 8, 10, 12);
     final pillPadV = _scale(sw, 4, 6, 8);
     final pillGap = _scale(sw, 4, 6, 8);
@@ -137,7 +138,6 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
               onTap: () {
                 setState(() {
                   selectedDate = date;
-                  selectedSlotId = null;
                 });
               },
               child: Container(
@@ -156,7 +156,6 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
                 ),
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
-                  mainAxisSize: MainAxisSize.min,
                   children: [
                     Text(
                       DateFormat('EEE').format(date).toUpperCase(),
@@ -193,101 +192,428 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
     );
   }
 
-  // ───────────────────────── Stream + UI (ONLY current instructor’s slots) ─────────────────────────
-  Widget _buildSlotsContent(BuildContext context) {
+  // ───────────────────────── Admin notice banner ─────────────────────────
+  Widget _buildAdminNoticeBanner(BuildContext context) {
+    final sw = MediaQuery.of(context).size.width;
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(horizontal: _scale(sw, 14, 16, 20), vertical: _scale(sw, 10, 12, 14)),
+      decoration: BoxDecoration(
+        color: context.c.surfaceVariant ?? context.c.surface,
+        border: Border(bottom: BorderSide(color: AppColors.divider)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.info_outline, color: AppColors.onSurfaceMuted, size: _scale(sw, 18, 20, 22)),
+          SizedBox(width: _scale(sw, 10, 12, 14)),
+          Expanded(
+            child: Text(
+              'Important: When you cancel a booked slot, please inform the admin office.',
+              style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: _scale(sw, 13, 14, 15)),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ───────────────────────── Stream + UI ─────────────────────────
+  Widget _buildBookingsContent(BuildContext context) {
     if (!_identityLoaded) {
-      return Center(
-        child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)),
-      );
+      return Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)));
     }
     if (_uid == null) {
-      return _buildEmptyState(context, 'Please sign in to view your scheduled slots.');
+      return _buildEmptyState(context, 'Please sign in to view your booked sessions.');
     }
 
-    final ts = Timestamp.fromDate(selectedDate);
+    final bookingsQuery = FirebaseFirestore.instance.collection('bookings').limit(serverLimit).snapshots();
 
     return StreamBuilder<QuerySnapshot>(
-      stream: FirebaseFirestore.instance
-          .collection('slots')
-          .where('slot_day', isEqualTo: ts)
-          .where('instructor_user_id', isEqualTo: _uid) // ← key filter
-          .snapshots(),
+      stream: bookingsQuery,
       builder: (context, snapshot) {
         if (snapshot.hasError) {
           return _buildEmptyState(context, 'Error: ${snapshot.error}');
         }
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return Center(
-            child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)),
-          );
+          return Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)));
         }
 
         final docs = List<QueryDocumentSnapshot>.from(snapshot.data?.docs ?? const []);
-        if (docs.isEmpty) {
-          return _buildEmptyState(
-            context,
-            'No slots scheduled for you on ${DateFormat('EEEE, MMM d').format(selectedDate)}',
-          );
+
+        return FutureBuilder<List<_InstructorBookingDoc>>(
+          future: _enrichBookingDocs(docs),
+          builder: (context, enrichedSnap) {
+            if (enrichedSnap.connectionState == ConnectionState.waiting) {
+              return Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)));
+            }
+            if (enrichedSnap.hasError) {
+              return _buildEmptyState(context, 'Error preparing bookings: ${enrichedSnap.error}');
+            }
+
+            final enriched = enrichedSnap.data ?? [];
+
+            final sel = _atMidnight(selectedDate);
+            final filtered = <_InstructorBookingDoc>[];
+
+            for (final d in enriched) {
+              final m = d.data;
+              final status = (m['status'] ?? '').toString().toLowerCase();
+              if (!(status == 'booked' || status == 'confirmed')) continue;
+
+              final parsed = _toDate(m['slot_day']);
+              if (parsed != null && DateUtils.isSameDay(parsed, sel)) {
+                final bookingInstructor = (m['instructor_user_id'] ?? '').toString();
+                if (bookingInstructor.isNotEmpty && bookingInstructor == _uid) {
+                  filtered.add(d);
+                }
+              }
+            }
+
+            filtered.sort((a, b) {
+              final sa = _parseStartTime((a.data['slot_time'] ?? '').toString(), useDate: selectedDate);
+              final sb = _parseStartTime((b.data['slot_time'] ?? '').toString(), useDate: selectedDate);
+              return sa.compareTo(sb);
+            });
+
+            if (filtered.isEmpty) {
+              return _buildEmptyState(context, 'No bookings for ${DateFormat('EEEE, MMM d').format(selectedDate)}');
+            }
+
+            final grouped = <String, List<_InstructorBookingDoc>>{
+              'Morning': [],
+              'Afternoon': [],
+              'Evening': [],
+            };
+
+            for (final b in filtered) {
+              final start = _parseStartTime((b.data['slot_time'] ?? '').toString(), useDate: selectedDate);
+              final h = start.hour;
+              if (h >= 6 && h < 12) {
+                grouped['Morning']!.add(b);
+              } else if (h >= 12 && h < 17) {
+                grouped['Afternoon']!.add(b);
+              } else {
+                grouped['Evening']!.add(b);
+              }
+            }
+            grouped.removeWhere((k, v) => v.isEmpty);
+
+            final sw = MediaQuery.of(context).size.width;
+            final outerMargin = _scale(sw, 12, 20, 28);
+            final headerPad = _scale(sw, 10, 12, 14);
+
+            return Container(
+              margin: EdgeInsets.all(outerMargin),
+              decoration: BoxDecoration(
+                color: context.c.surface,
+                borderRadius: BorderRadius.circular(AppRadii.m),
+                boxShadow: AppShadows.card,
+              ),
+              child: Column(
+                children: [
+                  Container(
+                    padding: EdgeInsets.all(headerPad),
+                    decoration: BoxDecoration(
+                      color: context.c.background,
+                      border: Border(bottom: BorderSide(color: AppColors.divider)),
+                    ),
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Booked sessions for ${DateFormat('EEEE, d MMM').format(selectedDate)}',
+                            style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: _scale(sw, 12, 13, 14)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView(
+                      children: grouped.entries.map((e) => _buildBookingGroup(context, e.key, e.value)).toList(),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Future<List<_InstructorBookingDoc>> _enrichBookingDocs(List<QueryDocumentSnapshot> docs) async {
+    final fs = FirebaseFirestore.instance;
+    final futures = <Future<_InstructorBookingDoc>>[];
+
+    for (final d in docs) {
+      futures.add(Future(() async {
+        final m = Map<String, dynamic>.from(d.data() as Map<String, dynamic>);
+        final slotId = (m['slot_id'] ?? '').toString();
+        final studentId = (m['student_id'] ?? m['user_id'] ?? '').toString();
+
+        if (slotId.isNotEmpty) {
+          try {
+            final slotSnap = await fs.collection('slots').doc(slotId).get();
+            if (slotSnap.exists) {
+              final slotData = slotSnap.data() as Map<String, dynamic>? ?? {};
+              if ((slotData['instructor_user_id'] ?? '').toString().isNotEmpty) {
+                m['instructor_user_id'] = slotData['instructor_user_id'];
+              }
+              if ((slotData['slot_time'] ?? '').toString().isNotEmpty) {
+                m.putIfAbsent('slot_time', () => slotData['slot_time']);
+              }
+              if ((slotData['vehicle_type'] ?? '').toString().isNotEmpty) {
+                m.putIfAbsent('vehicle_type', () => slotData['vehicle_type']);
+              }
+              if (slotData['slot_cost'] != null) {
+                m.putIfAbsent('slot_cost', () => slotData['slot_cost']);
+              }
+            }
+          } catch (e) {
+            debugPrint('Slot fetch failed for $slotId: $e');
+          }
         }
 
-        // Sort by parsed start time
-        docs.sort((a, b) {
-          final sa = _parseStartTime((a.data() as Map<String, dynamic>)['slot_time']?.toString() ?? '');
-          final sb = _parseStartTime((b.data() as Map<String, dynamic>)['slot_time']?.toString() ?? '');
-          return sa.compareTo(sb);
-        });
+        if (studentId.isNotEmpty) {
+          try {
+            final userSnap = await fs.collection('users').doc(studentId).get();
+            if (userSnap.exists) {
+              final userData = userSnap.data() as Map<String, dynamic>? ?? {};
+              final displayName = (userData['name'] ??
+                      userData['full_name'] ??
+                      userData['display_name'] ??
+                      userData['username'] ??
+                      userData['user_name'] ??
+                      'Student')
+                  .toString();
+              m['user_name'] = displayName;
+            }
+          } catch (e) {
+            debugPrint('User fetch failed for $studentId: $e');
+          }
+        }
 
-        // Group by period
-        final grouped = _groupSlotsByTimePeriod(docs);
+        return _InstructorBookingDoc(id: d.id, data: m, ref: d.reference);
+      }));
+    }
 
-        final sw = MediaQuery.of(context).size.width;
-        final outerMargin = _scale(sw, 12, 20, 28);
-        final headerPad = _scale(sw, 10, 12, 14);
+    return Future.wait(futures);
+  }
 
-        return Container(
-          margin: EdgeInsets.all(outerMargin),
-          decoration: BoxDecoration(
-            color: context.c.surface,
-            borderRadius: BorderRadius.circular(AppRadii.m),
-            boxShadow: AppShadows.card,
+  Widget _buildBookingGroup(BuildContext context, String period, List<_InstructorBookingDoc> items) {
+    final sw = MediaQuery.of(context).size.width;
+    final titleSize = _scale(sw, 13, 14, 16);
+    final groupPad = _scale(sw, 12, 16, 20);
+
+    String timeRange = '';
+    switch (period) {
+      case 'Morning':
+        timeRange = '(6:00 AM - 12:00 PM)';
+        break;
+      case 'Afternoon':
+        timeRange = '(12:00 PM - 5:00 PM)';
+        break;
+      case 'Evening':
+        timeRange = '(5:00 PM - 10:00 PM)';
+        break;
+    }
+
+    return Container(
+      padding: EdgeInsets.all(groupPad),
+      decoration: BoxDecoration(border: Border(bottom: BorderSide(color: AppColors.neuBg))),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '$period $timeRange',
+            style: TextStyle(fontSize: titleSize, fontWeight: FontWeight.w600, color: context.c.onSurface),
           ),
-          child: Column(
+          const SizedBox(height: 12),
+          Column(
+            children: items.map((b) => _buildBookingCard(context, b)).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBookingCard(BuildContext context, _InstructorBookingDoc bdoc) {
+    // kept name _bookingCard originally; to avoid confusion rename internal call above
+    return _bookingCard(context, bdoc);
+  }
+
+  Widget _bookingCard(BuildContext context, _InstructorBookingDoc bdoc) {
+    final sw = MediaQuery.of(context).size.width;
+    final data = bdoc.data;
+
+    final slotTime = (data['slot_time'] ?? '').toString();
+    final slotDay = _toDate(data['slot_day']) ?? _atMidnight(DateTime.now());
+    final userName = (data['user_name'] ?? data['user_display_name'] ?? data['student_name'] ?? 'Student').toString();
+    final vehicle = (data['vehicle_type'] ?? 'Vehicle').toString();
+    final instructor = (data['instructor_name'] ?? 'Instructor').toString();
+    final total = (data['total_cost'] is num) ? (data['total_cost'] as num).toDouble() : 0.0;
+
+    final dateLine = DateFormat('EEE, d MMM yyyy').format(slotDay);
+    final timeLine = slotTime.isNotEmpty ? slotTime : '--';
+
+    return Container(
+      margin: EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.all(_scale(sw, 12, 14, 16)),
+      decoration: BoxDecoration(
+        color: context.c.surface,
+        borderRadius: BorderRadius.circular(AppRadii.s),
+        border: Border.all(color: AppColors.divider),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // top row: student + amount
+          Row(
             children: [
-              // Header
-              Container(
-                padding: EdgeInsets.all(headerPad),
-                decoration: BoxDecoration(
-                  color: context.c.background,
-                  borderRadius: const BorderRadius.only(topLeft: Radius.circular(8), topRight: Radius.circular(8)),
-                  border: Border(bottom: BorderSide(color: AppColors.divider)),
-                ),
-                child: Row(
-                  children: [
-                    Text('🎯', style: TextStyle(fontSize: _scale(sw, 14, 16, 18))),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: Text(
-                        'Your slots for ${DateFormat('EEEE, d MMM').format(selectedDate)}',
-                        style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: _scale(sw, 12, 13, 14)),
-                      ),
-                    ),
-                  ],
+              Expanded(
+                child: Text(
+                  userName,
+                  style: context.t.titleSmall?.copyWith(
+                    fontSize: _scale(sw, 14, 15, 16),
+                    fontWeight: FontWeight.w700,
+                    color: context.c.onSurface,
+                  ),
                 ),
               ),
-
-              // Slots
-              Expanded(
-                child: ListView(
-                  children: grouped.entries
-                      .map((e) => _buildTimeSlotGroup(context, e.key, e.value))
-                      .toList(),
+              Text(
+                freeOrAmount(data) ? 'FREE' : '₹${total.toStringAsFixed(2)}',
+                style: context.t.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: freeOrAmount(data) ? AppColors.success : context.c.onSurface,
                 ),
               ),
             ],
           ),
-        );
-      },
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(Icons.calendar_today, size: 14, color: AppColors.onSurfaceMuted),
+              const SizedBox(width: 8),
+              Text(dateLine, style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted)),
+              const SizedBox(width: 16),
+              Icon(Icons.schedule, size: 14, color: AppColors.onSurfaceMuted),
+              const SizedBox(width: 8),
+              Text(timeLine, style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              Icon(Icons.directions_car, size: 14, color: AppColors.onSurfaceMuted),
+              const SizedBox(width: 8),
+              Text(vehicle, style: context.t.bodySmall?.copyWith(color: context.c.onSurface)),
+              const SizedBox(width: 16),
+              Icon(Icons.person, size: 14, color: AppColors.onSurfaceMuted),
+              const SizedBox(width: 8),
+              Text(instructor, style: context.t.bodySmall?.copyWith(color: context.c.onSurface)),
+            ],
+          ),
+          const SizedBox(height: 8),
+          // cancel button bottom-right
+          Row(
+            children: [
+              Expanded(child: Container()),
+              ElevatedButton(
+                onPressed: () => _onCancelBookingPressed(context, bdoc),
+                style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  child: Text('Cancel', style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceInverse)),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
+  }
+
+  bool freeOrAmount(Map<String, dynamic> data) {
+    return (data['free_by_plan'] == true);
+  }
+
+  Future<void> _onCancelBookingPressed(BuildContext context, _InstructorBookingDoc bdoc) async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dctx) => AlertDialog(
+        title: Text('Confirm cancellation', style: context.t.titleMedium),
+        content: Text('Are you sure you want to cancel this booking?'),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(dctx).pop(false), child: const Text('No')),
+          TextButton(onPressed: () => Navigator.of(dctx).pop(true), child: const Text('Yes, Cancel')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+
+    // Show progress
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const Center(child: CircularProgressIndicator()),
+    );
+
+    try {
+      await _cancelBookingInstructorFlow(bdoc);
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop(); // remove progress
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Booking cancelled, slot deleted, student benefit granted'), backgroundColor: AppColors.success),
+        );
+      }
+    } catch (e) {
+      if (Navigator.of(context).canPop()) Navigator.of(context).pop();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Cancellation failed: $e'), backgroundColor: AppColors.danger),
+        );
+      }
+    }
+  }
+
+  // Fixed transaction: read all docs first, then perform writes (Firestore requires reads before writes)
+  Future<void> _cancelBookingInstructorFlow(_InstructorBookingDoc bdoc) async {
+    final fs = FirebaseFirestore.instance;
+    final bookingRef = bdoc.ref;
+    final bookingData = bdoc.data;
+    final slotId = (bookingData['slot_id'] ?? '').toString();
+    final slotRef = slotId.isNotEmpty ? fs.collection('slots').doc(slotId) : null;
+    final userId = (bookingData['student_id'] ?? bookingData['user_id'] ?? '').toString();
+    final userRef = userId.isNotEmpty ? fs.collection('users').doc(userId) : null;
+
+    await fs.runTransaction((tx) async {
+      // READS first
+      final bSnap = await tx.get(bookingRef);
+      DocumentSnapshot<Map<String, dynamic>>? sSnap;
+      DocumentSnapshot<Map<String, dynamic>>? uSnap;
+
+      if (slotRef != null) {
+        sSnap = await tx.get(slotRef);
+      }
+      if (userRef != null) {
+        uSnap = await tx.get(userRef);
+      }
+
+      if (!bSnap.exists) return;
+
+      // WRITES after all reads
+      tx.delete(bookingRef);
+
+      if (sSnap != null && sSnap.exists) {
+        tx.delete(slotRef!);
+      }
+
+      if (uSnap != null && uSnap.exists) {
+        tx.update(userRef!, {'free_benefit': FieldValue.increment(1)});
+      }
+    });
   }
 
   Widget _buildEmptyState(BuildContext context, String msg) {
@@ -307,419 +633,7 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
     );
   }
 
-  // ───────────────────────── Grouping ─────────────────────────
-  Map<String, List<QueryDocumentSnapshot>> _groupSlotsByTimePeriod(List<QueryDocumentSnapshot> slots) {
-    final Map<String, List<QueryDocumentSnapshot>> grouped = {
-      'Morning': [],
-      'Afternoon': [],
-      'Evening': [],
-    };
-
-    for (final slot in slots) {
-      final data = slot.data() as Map<String, dynamic>;
-      final start = _parseStartTime(data['slot_time']?.toString() ?? '');
-      final h = start.hour; // 0–23
-
-      if (h >= 6 && h < 12) {
-        grouped['Morning']!.add(slot);
-      } else if (h >= 12 && h < 17) {
-        grouped['Afternoon']!.add(slot);
-      } else {
-        grouped['Evening']!.add(slot);
-      }
-    }
-
-    grouped.removeWhere((_, v) => v.isEmpty);
-    return grouped;
-  }
-
-  // ───────────────────────── Period section ─────────────────────────
-  Widget _buildTimeSlotGroup(
-    BuildContext context,
-    String period,
-    List<QueryDocumentSnapshot> slots,
-  ) {
-    final sw = MediaQuery.of(context).size.width;
-    final titleSize = _scale(sw, 13, 14, 16);
-    final groupPad = _scale(sw, 12, 16, 20);
-    final chipGap = _scale(sw, 10, 12, 14);
-
-    String emoji = '🌅';
-    String timeRange = '';
-
-    switch (period) {
-      case 'Morning':
-        emoji = '🌅';
-        timeRange = '(6:00 AM - 12:00 PM)';
-        break;
-      case 'Afternoon':
-        emoji = '☀️';
-        timeRange = '(12:00 PM - 5:00 PM)';
-        break;
-      case 'Evening':
-        emoji = '🌇';
-        timeRange = '(5:00 PM - 10:00 PM)';
-        break;
-      default:
-        emoji = '🕒';
-        timeRange = '';
-    }
-
-    return Container(
-      padding: EdgeInsets.all(groupPad),
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: AppColors.neuBg)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '$emoji $period $timeRange',
-            style: TextStyle(
-              fontSize: titleSize,
-              fontWeight: FontWeight.w600,
-              color: context.c.onSurface,
-            ),
-          ),
-          const SizedBox(height: 12),
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final columns = _columnsForWidth(constraints.maxWidth);
-              final cardW = _cardWidth(constraints.maxWidth, columns, chipGap);
-
-              final slotCards = slots.map((s) => _buildSlotCard(context, s, cardW)).toList();
-
-              if (columns == 1) {
-                return Wrap(
-                  spacing: 0,
-                  runSpacing: chipGap,
-                  alignment: WrapAlignment.center,
-                  children: slotCards,
-                );
-              }
-
-              return Wrap(
-                spacing: chipGap,
-                runSpacing: chipGap,
-                alignment: WrapAlignment.start,
-                children: slotCards,
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
-
-  // ───────────────────────── Slot card (Edit + Delete like SlotsBlock) ─────────────────────────
-  Widget _buildSlotCard(BuildContext context, QueryDocumentSnapshot slot, double cardWidth) {
-    final sw = MediaQuery.of(context).size.width;
-    final ts = MediaQuery.of(context).textScaleFactor.clamp(0.9, 1.2);
-    final data = slot.data() as Map<String, dynamic>;
-
-    final slotId = data['slot_id']?.toString() ?? slot.id;
-    final vehicleType = data['vehicle_type']?.toString() ?? 'Unknown';
-    final instructorName = data['instructor_name']?.toString() ??
-        (data['instructor_user_id']?.toString() ?? 'Unknown');
-    final timeString = data['slot_time']?.toString() ?? '';
-
-    // Costs
-    final vehicleCost = _asNum(data['vehicle_cost']);
-    final additionalCost = _asNum(data['additional_cost']);
-
-    final isSelected = selectedSlotId == slotId;
-
-    final padAll = _scale(sw, 10, 12, 14);
-    final badgePadH = _scale(sw, 6, 8, 10);
-    final badgePadV = _scale(sw, 2, 3, 4);
-    final deleteBtn = _scale(sw, 18, 20, 22);
-    final deleteIcon = _scale(sw, 10, 12, 14);
-
-    final timeSize = _scale(sw, 12, 13, 14) * ts;
-    final vehSize = _scale(sw, 9, 10, 11) * ts;
-    final instSize = _scale(sw, 9, 10, 11) * ts;
-    final moneySize = _scale(sw, 11, 12, 13) * ts;
-
-    return GestureDetector(
-      onTap: () {
-        setState(() {
-          selectedSlotId = isSelected ? null : slotId;
-        });
-      },
-      child: Container(
-        width: cardWidth,
-        padding: EdgeInsets.all(padAll),
-        decoration: BoxDecoration(
-          color: isSelected ? AppColors.success : context.c.surface,
-          border: Border.all(
-            color: isSelected ? AppColors.success : AppColors.divider,
-            width: isSelected ? 2 : 1,
-          ),
-          borderRadius: BorderRadius.circular(AppRadii.m),
-        ),
-        child: Stack(
-          children: [
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  _formatTimeRange(timeString),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: timeSize,
-                    fontWeight: FontWeight.w600,
-                    color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface,
-                  ),
-                ),
-                SizedBox(height: _scale(sw, 4, 6, 8)),
-                Container(
-                  padding: EdgeInsets.symmetric(horizontal: badgePadH, vertical: badgePadV),
-                  decoration: BoxDecoration(
-                    color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.12) : AppColors.neuBg,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Text(
-                    vehicleType,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: vehSize,
-                      fontWeight: FontWeight.w500,
-                      color: isSelected ? AppColors.onSurfaceInverse : context.c.primary,
-                    ),
-                  ),
-                ),
-                SizedBox(height: _scale(sw, 4, 6, 8)),
-                Text(
-                  instructorName.length > 22 ? '${instructorName.substring(0, 22)}…' : instructorName,
-                  style: TextStyle(
-                    fontSize: instSize,
-                    color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.9) : AppColors.onSurfaceMuted,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-
-                // Costs display with EDIT like SlotsBlock
-                SizedBox(height: _scale(sw, 8, 10, 12)),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.12) : context.c.background,
-                    border: Border.all(
-                      color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.25) : AppColors.divider,
-                    ),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Vehicle Cost
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Vehicle Cost',
-                            style: TextStyle(
-                              fontSize: moneySize,
-                              fontWeight: FontWeight.w500,
-                              color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.95) : context.c.onSurface,
-                            ),
-                          ),
-                          Text(
-                            _formatCurrency(vehicleCost),
-                            style: TextStyle(
-                              fontSize: moneySize,
-                              fontWeight: FontWeight.w600,
-                              color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface,
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 6),
-                      // Additional Cost + EDIT
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            'Additional Cost',
-                            style: TextStyle(
-                              fontSize: moneySize,
-                              fontWeight: FontWeight.w500,
-                              color: isSelected ? AppColors.onSurfaceInverse.withOpacity(0.95) : context.c.onSurface,
-                            ),
-                          ),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                _formatCurrency(additionalCost),
-                                style: TextStyle(
-                                  fontSize: moneySize,
-                                  fontWeight: FontWeight.w600,
-                                  color: isSelected ? AppColors.onSurfaceInverse : context.c.onSurface,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              InkWell(
-                                onTap: () => _editAdditionalCost(slot.id, additionalCost),
-                                child: Icon(
-                                  Icons.edit,
-                                  size: 16,
-                                  color: isSelected ? AppColors.onSurfaceInverse : AppColors.slate,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-
-            // Delete button (same as SlotsBlock)
-            Positioned(
-              top: 0,
-              right: 0,
-              child: GestureDetector(
-                onTap: () => _deleteSlot(slot),
-                child: Container(
-                  width: deleteBtn,
-                  height: deleteBtn,
-                  decoration: BoxDecoration(
-                    color: AppColors.errBg,
-                    borderRadius: BorderRadius.circular(4),
-                  ),
-                  child: Icon(Icons.delete, size: deleteIcon, color: AppColors.danger),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ───────────────────────── Edit Additional Cost (same flow as SlotsBlock) ─────────────────────────
-  Future<void> _editAdditionalCost(String docId, num? current) async {
-    final ctrl = TextEditingController(text: current?.toString() ?? '');
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
-        title: Text('Edit Additional Cost', style: context.t.titleMedium?.copyWith(color: context.c.onSurface)),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Align(alignment: Alignment.centerLeft, child: Text('Enter amount (INR):', style: context.t.bodyMedium?.copyWith(color: context.c.onSurface))),
-            const SizedBox(height: 8),
-            TextField(
-              controller: ctrl,
-              keyboardType: const TextInputType.numberWithOptions(decimal: true),
-              decoration: InputDecoration(
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
-                hintText: 'e.g. 250',
-                filled: true,
-                fillColor: context.c.surface,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: TextStyle(color: context.c.primary))),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: context.c.primary, foregroundColor: context.c.onPrimary),
-            child: const Text('Save'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed != true) return;
-
-    final newVal = num.tryParse(ctrl.text.trim());
-    if (newVal == null) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Invalid amount', style: context.t.bodyMedium?.copyWith(color: AppColors.danger))));
-      }
-      return;
-    }
-
-    try {
-      await FirebaseFirestore.instance.collection('slots').doc(docId).update({
-        'additional_cost': newVal,
-        'updated_at': FieldValue.serverTimestamp(),
-      });
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Additional cost updated', style: context.t.bodyMedium?.copyWith(color: context.c.onSurface))));
-      }
-    } catch (e) {
-      if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e', style: context.t.bodyMedium?.copyWith(color: AppColors.danger))));
-      }
-    }
-  }
-
-  // ───────────────────────── Delete (same confirmation as SlotsBlock) ─────────────────────────
-  Future<void> _deleteSlot(QueryDocumentSnapshot slot) async {
-    final data = slot.data() as Map<String, dynamic>;
-    final slotId = data['slot_id']?.toString() ?? slot.id;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
-        title: Text('Delete Slot', style: context.t.titleMedium?.copyWith(color: context.c.onSurface)),
-        content: Text('Are you sure you want to delete slot $slotId?', style: context.t.bodyMedium?.copyWith(color: context.c.onSurface)),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: TextStyle(color: context.c.primary))),
-          ElevatedButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger, foregroundColor: context.c.onPrimary),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      try {
-        await slot.reference.delete();
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Slot $slotId deleted successfully', style: context.t.bodyMedium?.copyWith(color: context.c.onSurface))),
-          );
-        }
-      } catch (e) {
-        if (context.mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error deleting slot: $e', style: context.t.bodyMedium?.copyWith(color: AppColors.danger))),
-          );
-        }
-      }
-    }
-  }
-
-  // ───────────────────────── Helpers ─────────────────────────
   static DateTime _atMidnight(DateTime d) => DateTime(d.year, d.month, d.day);
-
-  int _columnsForWidth(double width) {
-    if (width < 360) return 1;
-    if (width >= 1200) return 5;
-    if (width >= 900) return 4;
-    if (width >= 600) return 3;
-    return 2;
-  }
-
-  double _cardWidth(double maxWidth, int columns, double gap) {
-    final totalGaps = gap * (columns - 1);
-    final usable = (maxWidth - totalGaps).clamp(200.0, maxWidth);
-    final base = usable / columns;
-    return base.clamp(160.0, 320.0);
-  }
 
   static double _scale(double width, double small, double medium, double large) {
     if (width >= 1200) return large;
@@ -727,39 +641,46 @@ class _InstructorSlotsBlockState extends State<InstructorSlotsBlock> {
     return small;
   }
 
-  /// Parse start time from "09:00 AM - 10:00 AM".
-  DateTime _parseStartTime(String slotTime) {
+  DateTime _parseStartTime(String slotTime, {DateTime? useDate}) {
     try {
       final start = slotTime.split(' - ').first.trim();
       final t = DateFormat('hh:mm a').parseStrict(start);
-      final d = selectedDate;
+      final d = useDate ?? selectedDate;
       return DateTime(d.year, d.month, d.day, t.hour, t.minute);
     } catch (_) {
       return DateTime(1970);
     }
   }
 
-  String _formatTimeRange(String slotTime) {
-    try {
-      final parts = slotTime.split(' - ');
-      if (parts.length != 2) return slotTime;
-      final s = DateFormat('hh:mm a').parseStrict(parts[0].trim());
-      final e = DateFormat('hh:mm a').parseStrict(parts[1].trim());
-      return '${DateFormat('h:mm a').format(s)} - ${DateFormat('h:mm a').format(e)}';
-    } catch (_) {
-      return slotTime;
-    }
-  }
-
-  num? _asNum(dynamic v) {
+  DateTime? _toDate(dynamic v) {
     if (v == null) return null;
-    if (v is num) return v;
-    return num.tryParse(v.toString());
+    if (v is Timestamp) return v.toDate();
+    if (v is DateTime) return v;
+    if (v is num) {
+      final n = v.toInt();
+      if (n <= 10000000000) {
+        return DateTime.fromMillisecondsSinceEpoch(n * 1000);
+      } else {
+        return DateTime.fromMillisecondsSinceEpoch(n);
+      }
+    }
+    if (v is String) {
+      try {
+        return DateTime.parse(v);
+      } catch (_) {
+        try {
+          return DateFormat('MMMM d, yyyy').parseLoose(v);
+        } catch (_) {}
+      }
+    }
+    return null;
   }
+}
 
-  String _formatCurrency(num? v) {
-    final f = NumberFormat.currency(locale: 'en_IN', symbol: '₹', decimalDigits: 0);
-    if (v == null) return '—';
-    return f.format(v);
-  }
+class _InstructorBookingDoc {
+  final String id;
+  final Map<String, dynamic> data;
+  final DocumentReference ref;
+
+  _InstructorBookingDoc({required this.id, required this.data, required this.ref});
 }
