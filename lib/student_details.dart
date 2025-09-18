@@ -7,6 +7,9 @@ import 'package:url_launcher/url_launcher.dart'; // for view/download + opening 
 // Use app theme tokens for consistent colors
 import 'theme/app_theme.dart';
 
+// New page import
+import 'student_documents_options.dart';
+
 class StudentDetailsPage extends StatelessWidget {
   const StudentDetailsPage({super.key});
 
@@ -128,10 +131,6 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
   }
 
   // ── Direct notification helper ─────────────────────────────────────────────
-  ///
-  /// Simplified: write a `user_notification` doc to Firestore only.
-  /// This will keep the in-app bell and notification list working, but will
-  /// not attempt to send FCM pushes from the mobile app.
   Future<void> _sendUserNotification({
     required String targetUid,
     required String title,
@@ -161,7 +160,7 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
     }
   }
 
-  // ── Actions ────────────────────────────────────────────────────────────────
+  // ── Actions ───────────────────────────────────────────────────────────────
   Future<void> _approveKyc() async {
     if (_userDocId == null) return;
     final fs = FirebaseFirestore.instance;
@@ -471,15 +470,37 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Text(
-                                  'Documents',
-                                  style: Theme.of(context)
-                                      .textTheme
-                                      .titleSmall
-                                      ?.copyWith(
-                                        fontWeight: FontWeight.w600,
-                                        color: cs.onSurface,
+                                // Row header — Title + "More options" button that navigates and passes uid
+                                Row(
+                                  children: [
+                                    Text(
+                                      'Documents',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleSmall
+                                          ?.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                            color: cs.onSurface,
+                                          ),
+                                    ),
+                                    const Spacer(),
+                                    TextButton.icon(
+                                      onPressed: () {
+                                        // Navigate to separate file / page for more document options
+                                        Navigator.of(context).push(
+                                          MaterialPageRoute(
+                                            builder: (_) => StudentDocumentsOptionsPage(uid: widget.uid),
+                                            settings: RouteSettings(arguments: {'uid': widget.uid}),
+                                          ),
+                                        );
+                                      },
+                                      icon: const Icon(Icons.more_horiz),
+                                      label: const Text('More options'),
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: cs.primary,
                                       ),
+                                    ),
+                                  ],
                                 ),
                                 const SizedBox(height: 12),
                                 _UploadsSearchField(
