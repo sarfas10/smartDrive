@@ -15,11 +15,11 @@ import 'package:intl/intl.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'package:smart_drive/reusables/branding.dart' hide AppColors, AppText;
-
 import 'package:video_player/video_player.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../theme/app_theme.dart'; // adjust import path as needed
+import 'view_bookings_page.dart'; // new page to view bookings
 
 enum TestType { classB, classH }
 
@@ -841,6 +841,25 @@ class _TestBookingPageState extends State<TestBookingPage> {
             Text(AppBrand.appName, style: const TextStyle(fontWeight: FontWeight.w700)),
           ],
         ),
+        actions: [
+          Padding(
+            padding: const EdgeInsets.only(right: 8.0),
+            child: TextButton.icon(
+              style: TextButton.styleFrom(
+                foregroundColor: AppColors.onSurfaceInverse,
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                backgroundColor: Colors.transparent,
+                textStyle: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              icon: const Icon(Icons.list_alt, size: 20),
+              label: const Text('My Bookings'),
+              onPressed: () {
+                Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ViewBookingsPage()));
+              },
+            ),
+          ),
+        ],
       ),
       body: Stack(
         children: [
@@ -1109,7 +1128,6 @@ class _TestBookingPageState extends State<TestBookingPage> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                
                 Container(
                   padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 8),
                   decoration: BoxDecoration(

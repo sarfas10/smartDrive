@@ -18,6 +18,9 @@ import 'package:smart_drive/user_slot_booking.dart';
 import 'package:smart_drive/onboarding_forms.dart';
 import 'package:smart_drive/test_booking_page.dart';
 
+// NEW: PlansView import so "Explore Plans" navigates to the plans screen
+import 'package:smart_drive/plans_view.dart';
+
 // THEME
 import 'package:smart_drive/theme/app_theme.dart';
 
@@ -306,14 +309,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
                       onTap: _navigateToDownloadables,
                     ),
                     const SizedBox(height: 12),
-                    _ActionTile(
-                      icon: Icons.receipt,
-                      iconColor: AppColors.brown,
-                      title: 'Invoice History',
-                      subtitle: 'See your payment receipts and invoices',
-                      onTap: _navigateToInvoices,
-                    ),
-                    const SizedBox(height: 12),
                     // Moved: Questionaries (was Mock Tests)
                     _ActionTile(
                       icon: Icons.quiz,
@@ -327,22 +322,22 @@ class _StudentDashboardState extends State<StudentDashboard> {
               ),
             ),
             // ── Contact Section
-SliverToBoxAdapter(
-  child: Padding(
-    padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: const [
-        _SectionTitle('Contact Us'),
-        SizedBox(height: 12),
-        _ContactTile(
-          phone: '+91 98765 43210',
-          email: 'support@smartdrive.com',
-        ),
-      ],
-    ),
-  ),
-),
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: const [
+                    _SectionTitle('Contact Us'),
+                    SizedBox(height: 12),
+                    _ContactTile(
+                      phone: '+91 98765 43210',
+                      email: 'support@smartdrive.com',
+                    ),
+                  ],
+                ),
+              ),
+            ),
 
             const SliverToBoxAdapter(child: SizedBox(height: 24)),
           ],
@@ -373,17 +368,12 @@ SliverToBoxAdapter(
     Navigator.push(context, MaterialPageRoute(builder: (_) => const TestBookingPage()));
   }
 
- 
   void _navigateToUploadDocuments() {
     Navigator.push(context, MaterialPageRoute(builder: (_) => const UploadDocumentPage()));
   }
 
   void _navigateToAttendance() {
     Navigator.push(context, MaterialPageRoute(builder: (_) => const UserAttendancePage()));
-  }
-
-  void _navigateToInvoices() {
-    debugPrint('Navigate to Invoices');
   }
 
   void _navigateToDownloadables() {
@@ -536,16 +526,52 @@ class _NameCard extends StatelessWidget {
                           style: const TextStyle(color: AppColors.onSurfaceInverseMuted, fontSize: 12, letterSpacing: 0.3),
                         ),
                         const SizedBox(height: 8),
-                        Row(
-                          children: [
-                            const Icon(Icons.workspace_premium, size: 16, color: AppColors.onSurfaceInverseMuted),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Plan: ${planIdString == null || planIdString!.isEmpty ? '—' : planIdString!}',
-                              style: const TextStyle(color: AppColors.onSurfaceInverse, fontSize: 12, fontWeight: FontWeight.w600),
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ],
+                        // Always navigate when tapped — pass empty string if null
+                        GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) => const PlansView(),
+                              ),
+                            );
+                          },
+                          child: Row(
+                            children: [
+                              const Icon(Icons.workspace_premium,
+                                  size: 16, color: AppColors.onSurfaceInverseMuted),
+                              const SizedBox(width: 6),
+                              Expanded(
+                                child: Row(
+                                  children: [
+                                    Text(
+                                      'Plan: ${planIdString == null || planIdString!.isEmpty ? '—' : planIdString!}',
+                                      style: const TextStyle(
+                                        color: AppColors.onSurfaceInverse,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    const SizedBox(width: 8),
+                                    // circular background with arrow
+                                    Container(
+                                      padding: const EdgeInsets.all(4),
+                                      decoration: const BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: AppColors.onSurfaceInverseMuted,
+                                      ),
+                                      child: const Icon(
+                                        Icons.chevron_right_rounded,
+                                        size: 16,
+                                        color: AppColors.onSurfaceInverse,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
@@ -1148,6 +1174,174 @@ class _NotificationsList extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+/// ─────────────────────────────────────────────────────────────────
+/// Plan details page — opened when user taps the "Plan" area in NameCard
+/// Always navigated to (even when planId is empty).
+/// ─────────────────────────────────────────────────────────────────
+class PlanDetailsPage extends StatefulWidget {
+  final String planId;
+  const PlanDetailsPage({required this.planId, super.key});
+
+  @override
+  State<PlanDetailsPage> createState() => _PlanDetailsPageState();
+}
+
+class _PlanDetailsPageState extends State<PlanDetailsPage> {
+  final FirebaseFirestore _fs = FirebaseFirestore.instance;
+  late Future<DocumentSnapshot<Map<String, dynamic>>>? _planFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.planId.isNotEmpty) {
+      _planFuture = _fs.collection('plans').doc(widget.planId).get();
+    } else {
+      _planFuture = null;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.planId.isEmpty ? 'Plan' : 'Plan: ${widget.planId}'),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.onSurface,
+        elevation: 0,
+      ),
+      backgroundColor: AppColors.background,
+      body: widget.planId.isEmpty
+          ? _buildNoPlanView(context)
+          : FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+              future: _planFuture,
+              builder: (context, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return const Center(child: CircularProgressIndicator());
+                }
+                if (snap.hasError) {
+                  return Center(child: Text('Failed to load plan: ${snap.error}'));
+                }
+                final doc = snap.data;
+                if (doc == null || !doc.exists) {
+                  return Center(child: Text('Plan "${widget.planId}" not found.'));
+                }
+                final data = doc.data() ?? <String, dynamic>{};
+                final title = (data['title'] ?? widget.planId).toString();
+                final price = data['price']?.toString() ?? '—';
+                final duration = data['duration_months']?.toString() ?? data['duration']?.toString() ?? '—';
+                final perks = (data['perks'] as List?)?.map((e) => e.toString()).toList() ?? [];
+
+                return Padding(
+                  padding: const EdgeInsets.all(16.0),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.onSurface)),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          Text('Price: ', style: AppText.tileTitle),
+                          Text(price, style: AppText.tileSubtitle),
+                          const Spacer(),
+                          Text('Duration: ', style: AppText.tileTitle),
+                          Text('$duration months', style: AppText.tileSubtitle),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      const Text('Perks', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      if (perks.isEmpty)
+                        const Text('No perks listed for this plan.', style: AppText.tileSubtitle)
+                      else
+                        ...perks.map((p) => Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 4),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.check, size: 18),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: Text(p, style: AppText.tileSubtitle)),
+                                ],
+                              ),
+                            )),
+                      const Spacer(),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: AppColors.onSurfaceInverse,
+                          minimumSize: const Size.fromHeight(48),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+                        ),
+                        onPressed: () {
+                          // Example CTA: navigate to purchase/upgrade flow or show more info.
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Purchase/Upgrade flow not implemented.')));
+                        },
+                        child: const Text('Purchase / Manage Plan'),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+    );
+  }
+
+  Widget _buildNoPlanView(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(20.0),
+      child: Column(
+        children: [
+          const SizedBox(height: 24),
+          Icon(Icons.workspace_premium, size: 72, color: AppColors.onSurfaceMuted),
+          const SizedBox(height: 18),
+          const Text(
+            'No active plan assigned',
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'You currently don\'t have an active plan. Explore available plans or contact support to get started.',
+            textAlign: TextAlign.center,
+            style: AppText.tileSubtitle,
+          ),
+          const Spacer(),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: () {
+                    Navigator.pop(context);
+                  },
+                  child: const Text('Close'),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: () {
+                    // Directly push the PlansView page
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(builder: (_) => const PlansView()),
+                    );
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: AppColors.onSurfaceInverse,
+                    minimumSize: const Size.fromHeight(48),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+                  ),
+                  child: const Text('Explore Plans'),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
     );
   }
 }
