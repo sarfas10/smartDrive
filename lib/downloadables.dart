@@ -1,21 +1,29 @@
 // lib/downloadables.dart
 // Page to generate Form 14, Form 15 and Form 5 DOCX and open them.
-// Form 15 collects user attendance rows for the logged-in user and sends only:
-//   trainee_name, date_of_enrolment, entries[] { date, start_time, end_time }
-// Form 5 collects: name, relation_of, permanent_address, enrolment_number, date_of_enrolment, completion_date
-// Both Form 14 and Form 15 payloads will include `enrolment_number`.
-// UI: compact "list" cards like assignment list — title, small tag/date row below, actions on right (view/download/generate).
-// Uses your app_theme.dart tokens (AppText, AppColors, AppRadii).
+// Additionally: show Admin-uploaded documents for the logged-in user and allow
+// downloading for offline viewing.
+//
+// Required packages (add to pubspec.yaml):
+//   path_provider: ^2.0.0
+//   shared_preferences: ^2.0.0
+//   open_file: ^3.2.1
+// (versions indicative — use latest compatible versions)
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io' show File, Platform;
+import 'dart:typed_data';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:intl/intl.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:open_file/open_file.dart';
 
 import 'theme/app_theme.dart';
 
@@ -34,10 +42,38 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
   String? _form15Url;
   String? _form5Url;
 
+  // Admin uploads state
+  bool _loadingAdminUploads = true;
+  List<Map<String, dynamic>> _adminUploads = []; // each map includes docId + metadata + sender_role
+  Map<String, String> _downloadedLocalPaths = {}; // docId -> localPath
+
   @override
   void initState() {
     super.initState();
     _loadFromFirestore();
+    _loadDownloadedMap();
+    _loadAdminUploads(); // fetch admin uploads for current user
+  }
+
+  Future<void> _loadDownloadedMap() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      final jsonStr = sp.getString('downloaded_docs_map') ?? '{}';
+      final Map<String, dynamic> m = jsonDecode(jsonStr) as Map<String, dynamic>;
+      setState(() {
+        _downloadedLocalPaths = m.map((k, v) => MapEntry(k, v as String));
+      });
+    } catch (_) {
+      // ignore
+      setState(() => _downloadedLocalPaths = {});
+    }
+  }
+
+  Future<void> _saveDownloadedMap() async {
+    try {
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString('downloaded_docs_map', jsonEncode(_downloadedLocalPaths));
+    } catch (_) {}
   }
 
   Future<void> _loadFromFirestore() async {
@@ -84,8 +120,6 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
     }
   }
 
-  /// Collects name, enrolment date and enrolment_number (and other fallbacks) from users & user_profiles.
-  /// Also extracts `enrolment_seq` which is the part before the '/' in enrolment_number.
   Future<Map<String, dynamic>> _collectCommonPayload() async {
     final user = FirebaseAuth.instance.currentUser!;
     final profDoc = await FirebaseFirestore.instance
@@ -103,19 +137,16 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
         user.displayName ??
         '';
 
-    // enrolment_number: prefer users collection, fallback to user_profiles
     final enrolmentNumber = (userRecord['enrolment_number'] as String?) ??
         (profile['enrolment_number'] as String?) ??
         '';
 
-    // extract seq part (left side before slash)
     String enrolmentSeq = '';
     if (enrolmentNumber.isNotEmpty) {
       final parts = enrolmentNumber.split('/');
       if (parts.isNotEmpty) enrolmentSeq = parts.first.trim();
     }
 
-    // use createdAt or profile.date_of_enrolment or userRecord.date_of_enrolment
     final createdAtValue = userRecord['createdAt'];
     final fallbackDateOfEnrolment = profile['date_of_enrolment'] ?? userRecord['date_of_enrolment'];
     final dateOfEnrolment = _toDateString(createdAtValue ?? fallbackDateOfEnrolment) ?? '';
@@ -126,12 +157,10 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
       'enrolment_number': enrolmentNumber,
       'enrolment_seq': enrolmentSeq,
       'date_of_enrolment': dateOfEnrolment,
-      // keep other fields available if needed later
       'photo_url': profile['photo_url'] ?? userRecord['photo_url'] ?? '',
     };
   }
 
-  /// Collect specific fields needed for Form 5
   Future<Map<String, dynamic>> _collectForm5Payload() async {
     final user = FirebaseAuth.instance.currentUser!;
     final profDoc = await FirebaseFirestore.instance
@@ -161,7 +190,6 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
         (profile['enrolment_number'] as String?) ??
         '';
 
-    // extract seq part
     String enrolmentSeq = '';
     if (enrolmentNumber.isNotEmpty) {
       final parts = enrolmentNumber.split('/');
@@ -250,7 +278,6 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
   }
 
   Future<void> _generateForm14() async {
-    // _collectCommonPayload already includes enrolment_seq now, so no extraFields required.
     await _generateForm(
       'generate_form14.php',
       'form14_url',
@@ -296,8 +323,6 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
     );
   }
 
-  /// Fetch attendance rows for currently logged in user and return list of maps
-  /// Each map: { date, start_time, end_time } (strings)
   Future<List<Map<String, String>>> _fetchAttendanceEntries() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return [];
@@ -408,6 +433,174 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
     );
   }
 
+  /// Load admin uploads for current user:
+  /// - Query user_document where recipient_uid == currentUser.uid
+  /// - For each doc, fetch sender's role and include only those with role == 'admin'
+  Future<void> _loadAdminUploads() async {
+    setState(() {
+      _loadingAdminUploads = true;
+      _adminUploads = [];
+    });
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      setState(() => _loadingAdminUploads = false);
+      return;
+    }
+
+    try {
+      final q = await FirebaseFirestore.instance
+          .collection('user_document')
+          .where('recipient_uid', isEqualTo: user.uid)
+          .orderBy('created_at', descending: true)
+          .get();
+
+      final results = <Map<String, dynamic>>[];
+
+      for (final doc in q.docs) {
+        final data = doc.data();
+        final senderUid = (data['sender_uid'] as String?) ?? '';
+        String senderRole = '';
+        if (senderUid.isNotEmpty) {
+          try {
+            final sDoc = await FirebaseFirestore.instance.collection('users').doc(senderUid).get();
+            senderRole = (sDoc.exists ? (sDoc.data()?['role'] as String?) ?? '' : '');
+          } catch (_) {
+            senderRole = '';
+          }
+        }
+
+        // If sender role is admin, include the document
+        if (senderRole.toLowerCase() == 'admin') {
+          results.add({
+            'docId': doc.id,
+            'data': data,
+            'sender_uid': senderUid,
+            'sender_role': senderRole,
+          });
+        }
+      }
+
+      if (!mounted) return;
+      setState(() {
+        _adminUploads = results;
+      });
+    } catch (e) {
+      // ignore errors silently, but keep empty list
+    } finally {
+      if (mounted) setState(() => _loadingAdminUploads = false);
+    }
+  }
+
+  // Download remote file and save to local app documents directory for offline viewing.
+  // Saves mapping docId -> localPath into SharedPreferences so it persists.
+  Future<String?> _downloadAndSaveLocally(String docId, String remoteUrl, {String? suggestedFileName}) async {
+    if (kIsWeb) {
+      // web: cannot reliably save to app dir; fallback to opening in new tab
+      return null;
+    }
+
+    try {
+      final resp = await http.get(Uri.parse(remoteUrl));
+      if (resp.statusCode != 200) throw Exception('Download failed ${resp.statusCode}');
+
+      final bytes = resp.bodyBytes;
+      final dir = await getApplicationDocumentsDirectory();
+      final safeName = (suggestedFileName ?? docId).replaceAll(RegExp(r'[^A-Za-z0-9_\-\.]'), '_');
+      final filePath = '${dir.path}/$safeName';
+      final file = File(filePath);
+      await file.writeAsBytes(bytes);
+      // store mapping
+      setState(() {
+        _downloadedLocalPaths[docId] = filePath;
+      });
+      await _saveDownloadedMap();
+      return filePath;
+    } catch (e) {
+      rethrow;
+    }
+  }
+
+  Future<void> _openDocument(Map<String, dynamic> doc) async {
+    final docId = doc['docId'] as String;
+    final data = doc['data'] as Map<String, dynamic>;
+    final remoteUrl = data['document_url'] as String?;
+    final filename = (data['file_name'] as String?) ?? docId;
+
+    // If we have local copy, open it
+    final local = _downloadedLocalPaths[docId];
+    if (local != null) {
+      try {
+        await OpenFile.open(local);
+        return;
+      } catch (e) {
+        // fallthrough to remote open
+      }
+    }
+
+    // else open remote url (web/in-app)
+    if (remoteUrl != null) {
+      await _openUrl(remoteUrl);
+    } else {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No document URL available')));
+    }
+  }
+
+  Future<void> _downloadDocAction(Map<String, dynamic> doc) async {
+    final docId = doc['docId'] as String;
+    final data = doc['data'] as Map<String, dynamic>;
+    final remoteUrl = data['document_url'] as String?;
+    final filename = (data['file_name'] as String?) ?? docId;
+
+    if (remoteUrl == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No URL to download')));
+      return;
+    }
+
+    if (kIsWeb) {
+      // On web just open the URL in a new tab to allow browser download
+      await _openUrl(remoteUrl);
+      return;
+    }
+
+    // If already downloaded
+    if (_downloadedLocalPaths.containsKey(docId)) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Already downloaded for offline use')));
+      return;
+    }
+
+    // show progress indicator dialog
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => WillPopScope(
+        onWillPop: () async => false,
+        child: AlertDialog(
+          content: Row(
+            children: const [
+              SizedBox(width: 20, height: 20, child: CircularProgressIndicator()),
+              SizedBox(width: 16),
+              Expanded(child: Text('Downloading — please wait...')),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    try {
+      final localPath = await _downloadAndSaveLocally(docId, remoteUrl, suggestedFileName: filename);
+      Navigator.of(context).pop(); // close progress
+      if (localPath != null) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Downloaded for offline use')));
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Opened in browser (web)')));
+      }
+    } catch (e) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Download failed: $e')));
+    }
+  }
+
   /// Build compact list item similar to the assignment list in the screenshot.
   Widget _buildListItem({
     required IconData icon,
@@ -432,11 +625,9 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
         padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
         child: LayoutBuilder(builder: (context, constraints) {
           final isNarrow = constraints.maxWidth < 560;
-          // left column: icon + text, right column: actions
           final left = Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: [
-              // icon circle
               Container(
                 width: 44,
                 height: 44,
@@ -448,12 +639,10 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
                 child: Icon(icon, size: 22, color: c.onSurface.withOpacity(0.9)),
               ),
               const SizedBox(width: 12),
-              // title & tag/date row
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Title row with small trailing status (on wide screens)
                     Row(
                       children: [
                         Expanded(child: Text(title, style: AppText.tileTitle.copyWith(color: c.onSurface))),
@@ -462,7 +651,6 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
                       ],
                     ),
                     const SizedBox(height: 8),
-                    // Tag + date (chip style on left), small subtitle expanded
                     Row(
                       children: [
                         Container(
@@ -496,7 +684,6 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
             runSpacing: 6,
             alignment: WrapAlignment.end,
             children: [
-              // Generate button (compact)
               ElevatedButton.icon(
                 onPressed: loading ? null : onGenerate,
                 icon: loading
@@ -510,16 +697,12 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
               ),
-
-              // Quick view (eye)
               IconButton(
                 onPressed: url == null ? null : onOpen,
                 icon: const Icon(Icons.remove_red_eye_rounded),
                 color: url != null ? c.onSurface : c.onSurface.withOpacity(0.4),
                 tooltip: 'Open',
               ),
-
-              // Download (same as open in this flow - opens docx link)
               IconButton(
                 onPressed: url == null ? null : onOpen,
                 icon: const Icon(Icons.download_rounded),
@@ -530,7 +713,6 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
           );
 
           if (isNarrow) {
-            // stacked layout: left (title) then actions below
             return Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -546,7 +728,6 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
               ],
             );
           } else {
-            // inline: left and actions to the right
             return Row(
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
@@ -568,11 +749,81 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
     );
   }
 
+  Widget _buildAdminDocCard(Map<String, dynamic> doc) {
+    final data = doc['data'] as Map<String, dynamic>;
+    final docId = doc['docId'] as String;
+    final name = (data['document_name'] as String?) ?? (data['file_name'] as String?) ?? 'Document';
+    final uploadedAt = data['created_at'];
+    String dateLabel = '';
+    if (uploadedAt is Timestamp) {
+      dateLabel = DateFormat('dd MMM yyyy').format(uploadedAt.toDate());
+    } else if (uploadedAt is String) {
+      dateLabel = uploadedAt;
+    } else {
+      dateLabel = DateFormat('dd MMM yyyy').format(DateTime.now());
+    }
+    final subtitle = (data['remarks'] as String?) ?? (data['file_name'] as String?) ?? '';
+
+    final hasLocal = _downloadedLocalPaths.containsKey(docId);
+
+    return Card(
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+      elevation: 1,
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text(name, style: AppText.tileTitle),
+                const SizedBox(height: 8),
+                Row(children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withOpacity(0.08),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Row(children: [
+                      Text('Admin', style: AppText.hintSmall.copyWith(color: AppColors.primary)),
+                      const SizedBox(width: 8),
+                      Text(dateLabel, style: AppText.hintSmall),
+                    ]),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(subtitle, style: AppText.tileSubtitle, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                ]),
+              ]),
+            ),
+            const SizedBox(width: 12),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                // View / Open
+                IconButton(
+                  tooltip: hasLocal ? 'Open (offline)' : 'View',
+                  onPressed: () => _openDocument(doc),
+                  icon: Icon(hasLocal ? Icons.folder_open : Icons.remove_red_eye_rounded),
+                ),
+                // Download
+                IconButton(
+                  tooltip: hasLocal ? 'Downloaded' : 'Download for offline',
+                  onPressed: hasLocal ? null : () => _downloadDocAction(doc),
+                  icon: Icon(hasLocal ? Icons.check_circle_outline : Icons.download_rounded),
+                ),
+              ],
+            )
+          ],
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final c = context.c;
 
-    // small helper to format "tag date" — for simplicity we show today for forms that use completion
     final todayStr = DateFormat('dd MMM yyyy').format(DateTime.now());
 
     return Scaffold(
@@ -610,6 +861,7 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
                     IconButton(
                       onPressed: () {
                         _loadFromFirestore();
+                        _loadAdminUploads();
                         ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Refreshing...')));
                       },
                       tooltip: 'Refresh status',
@@ -620,7 +872,6 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
 
                 const SizedBox(height: 12),
 
-                // List items
                 _buildListItem(
                   icon: Icons.description_rounded,
                   title: 'Form 14 — Application for licence',
@@ -661,14 +912,35 @@ class _DownloadablesPageState extends State<DownloadablesPage> {
                 ),
 
                 const SizedBox(height: 28),
+
+                // -----------------------
+                // Admin Documents section
+                // -----------------------
+                Text('Admin documents', style: AppText.sectionTitle.copyWith(color: c.onSurface)),
+                const SizedBox(height: 8),
+                Text('Documents uploaded by the admin for you. Download once to keep for offline viewing.', style: AppText.tileSubtitle.copyWith(color: c.onSurface)),
+                const SizedBox(height: 12),
+
+                if (_loadingAdminUploads)
+                  const Center(child: CircularProgressIndicator())
+                else if (_adminUploads.isEmpty)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF6F7FB),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: const Text('No admin documents found.'),
+                  )
+                else
+                  ..._adminUploads.map((d) => _buildAdminDocCard(d)).toList(),
+
+                const SizedBox(height: 48),
               ],
             ),
           ),
         ),
       ),
-
-      // fixed footer similar to previous but slightly taller
-      
     );
   }
 }

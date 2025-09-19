@@ -1,12 +1,18 @@
 // lib/student_documents_options.dart
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:io' show File;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 import 'package:intl/intl.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 import 'theme/app_theme.dart';
 
@@ -28,10 +34,22 @@ class _StudentDocumentsOptionsPageState
   String? _form15Url;
   String? _form5Url;
 
-  // UI-only controllers for "Send Document" feature
+  // UI-only controllers for "Send Document" feature (now functional)
   final TextEditingController _docHeaderCtrl = TextEditingController();
   final TextEditingController _docMessageCtrl = TextEditingController();
-  List<String> _chosenFiles = []; // UI placeholder: list of selected filenames
+
+  // File picker / upload state for Send Document section
+  PlatformFile? _pickedSendFile;
+  bool _uploadingSend = false;
+
+  // Cloudinary signing endpoint & config (same as your upload page)
+  static const String _cloudName = 'dxeunc4vd';
+  static const String _baseFolder = 'smartDrive';
+  static const String _hostingerBase =
+      'https://tajdrivingschool.in/smartDrive/cloudinary';
+
+  final _allowed = const ['pdf', 'doc', 'docx', 'jpg', 'jpeg', 'png'];
+  static const int _maxBytes = 10 * 1024 * 1024; // 10MB
 
   @override
   void initState() {
@@ -80,8 +98,9 @@ class _StudentDocumentsOptionsPageState
       if (v is Timestamp) dt = v.toDate();
       else if (v is DateTime) dt = v;
       else if (v is int) {
-        if (v > 1000000000000) dt = DateTime.fromMillisecondsSinceEpoch(v);
-        else dt = DateTime.fromMillisecondsSinceEpoch(v * 1000);
+        final s = v.toString();
+        if (s.length <= 10) dt = DateTime.fromMillisecondsSinceEpoch(v * 1000);
+        else dt = DateTime.fromMillisecondsSinceEpoch(v);
       } else if (v is String) {
         try {
           dt = DateTime.parse(v);
@@ -404,7 +423,186 @@ class _StudentDocumentsOptionsPageState
   }
 
   // -----------------------------
-  // UI-only "Send Document" helpers
+  // Cloudinary signed upload helpers (copied from upload_document_page)
+  // -----------------------------
+  String _clean(String s) => s.replaceAll(RegExp(r'\s+'), '');
+
+  Future<Map<String, dynamic>> _getSignature({
+    required String publicId,
+    required String folder,
+    String overwrite = 'true',
+  }) async {
+    final uri = Uri.parse('$_hostingerBase/signature.php');
+    final body = {
+      'public_id': _clean(publicId),
+      'folder': _clean(folder),
+      'overwrite': overwrite,
+    };
+    final res = await http.post(uri, body: body);
+    if (res.statusCode != 200) {
+      throw Exception('Signature server error: ${res.statusCode} ${res.body}');
+    }
+    final json = jsonDecode(res.body) as Map<String, dynamic>;
+    if (json['signature'] == null ||
+        json['api_key'] == null ||
+        json['timestamp'] == null) {
+      throw Exception('Invalid signature response: $json');
+    }
+    return json;
+  }
+
+  MediaType _mediaTypeForExt(String ext) {
+    ext = ext.toLowerCase();
+    if (ext == 'pdf') return MediaType('application', 'pdf');
+    if (ext == 'doc' || ext == 'docx') return MediaType('application', 'msword');
+    if (ext == 'jpg' || ext == 'jpeg') return MediaType('image', 'jpeg');
+    if (ext == 'png') return MediaType('image', 'png');
+    return MediaType('application', 'octet-stream');
+  }
+
+  Future<String> _uploadToCloudinarySigned({
+    required Uint8List bytes,
+    required String filename,
+    required String publicId,
+    required String folder,
+    String overwrite = 'true',
+    required String ext,
+  }) async {
+    final signed =
+        await _getSignature(publicId: publicId, folder: folder, overwrite: overwrite);
+
+    final uri =
+        Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/auto/upload');
+
+    final req = http.MultipartRequest('POST', uri)
+      ..fields['api_key'] = signed['api_key'].toString()
+      ..fields['timestamp'] = signed['timestamp'].toString()
+      ..fields['signature'] = signed['signature'].toString()
+      ..fields['public_id'] = _clean(publicId)
+      ..fields['folder'] = _clean(folder)
+      ..fields['overwrite'] = overwrite;
+
+    final mediaType = _mediaTypeForExt(ext);
+    req.files.add(http.MultipartFile.fromBytes('file', bytes,
+        filename: filename, contentType: mediaType));
+
+    final streamed = await req.send();
+    final body = await streamed.stream.bytesToString();
+    if (streamed.statusCode != 200) {
+      throw Exception('Cloudinary upload failed: ${streamed.statusCode} $body');
+    }
+    final json = jsonDecode(body) as Map<String, dynamic>;
+    return (json['secure_url'] as String?) ?? (json['url'] as String);
+  }
+
+  // -----------------------------
+  // Send Document helpers (file pick + upload + Firestore save)
+  // -----------------------------
+  Future<void> _pickSendFile() async {
+    final res = await FilePicker.platform.pickFiles(
+      withData: true,
+      type: FileType.custom,
+      allowedExtensions: _allowed,
+    );
+    if (res == null || res.files.isEmpty) return;
+
+    final f = res.files.single;
+    final ext = (f.extension ?? '').toLowerCase();
+
+    if (!_allowed.contains(ext)) {
+      _snack('Unsupported file type. Use PDF, DOC, DOCX, JPG, or PNG.');
+      return;
+    }
+    if (f.size > _maxBytes) {
+      _snack('Maximum file size is 10MB.');
+      return;
+    }
+    setState(() {
+      _pickedSendFile = f;
+    });
+  }
+
+  Future<void> _submitSendDocument() async {
+    if (_docHeaderCtrl.text.trim().isEmpty) {
+      _snack('Please provide a document header/title.');
+      return;
+    }
+    if (_pickedSendFile == null) {
+      _snack('Please choose a file to upload.');
+      return;
+    }
+
+    final currentUser = FirebaseAuth.instance.currentUser;
+    if (currentUser == null) {
+      _snack('You must be signed in to send documents.');
+      return;
+    }
+
+    setState(() => _uploadingSend = true);
+
+    try {
+      // Prepare Cloudinary path (we upload for the student widget.uid)
+      final now = DateTime.now();
+      final datePart = '${now.year}-${now.month.toString().padLeft(2, '0')}';
+      final folder = _clean('$_baseFolder/users/${widget.uid}/uploads/$datePart');
+
+      final fileName = _pickedSendFile!.name;
+      final publicIdSafe = _clean('${widget.uid}_${fileName.split('.').first}');
+
+      // Read bytes (web/native)
+      late Uint8List bytes;
+      if (kIsWeb) {
+        bytes = _pickedSendFile!.bytes!;
+      } else {
+        bytes = await File(_pickedSendFile!.path!).readAsBytes();
+      }
+
+      final ext = (_pickedSendFile!.extension ?? '').toLowerCase();
+
+      // Upload to Cloudinary (signed)
+      final fileUrl = await _uploadToCloudinarySigned(
+        bytes: bytes,
+        filename: fileName,
+        publicId: publicIdSafe,
+        folder: folder,
+        ext: ext,
+      );
+
+      // Save metadata into `user_document` collection
+      await FirebaseFirestore.instance.collection('user_document').add({
+        'recipient_uid': widget.uid,
+        'sender_uid': currentUser.uid,
+        'document_name': _docHeaderCtrl.text.trim(),
+        'remarks': _docMessageCtrl.text.trim().isEmpty ? null : _docMessageCtrl.text.trim(),
+        'file_name': fileName,
+        'file_ext': ext,
+        'file_size': _pickedSendFile!.size,
+        'document_url': fileUrl,
+        'cloudinary_folder': folder,
+        'cloudinary_public_id': publicIdSafe,
+        'uploaded_for_recipient': widget.uid != currentUser.uid,
+        'created_at': FieldValue.serverTimestamp(),
+        'updated_at': FieldValue.serverTimestamp(),
+      });
+
+      _snack('Document sent successfully.');
+
+      if (mounted) {
+        setState(() {
+          _pickedSendFile = null;
+          _docHeaderCtrl.clear();
+          _docMessageCtrl.clear();
+        });
+      }
+    } catch (e) {
+      _snack('Send failed: $e');
+    } finally {
+      if (mounted) setState(() => _uploadingSend = false);
+    }
+  }
+
+  // -----------------------------
+  // UI-only "Send Document" card updated to use real upload behavior
   // -----------------------------
   Widget _buildSendDocumentCard(BuildContext context, double maxWidth) {
     final cs = Theme.of(context).colorScheme;
@@ -444,22 +642,14 @@ class _StudentDocumentsOptionsPageState
 
             const SizedBox(height: 12),
 
-            // Upload box (UI-only)
+            // Upload box (now functional)
             GestureDetector(
-              onTap: () {
-                // UI only — show snackbar
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('File picker not implemented (UI only)')));
-              },
-              child: DottedUploadBox(
+              onTap: _uploadingSend ? null : _pickSendFile,
+              child: DottedUploadBoxSend(
                 isNarrow: isNarrow,
-                files: _chosenFiles,
-                onChoose: () {
-                  // UI-only placeholder: add a fake filename for visualization
-                  setState(() {
-                    _chosenFiles.add('document_${_chosenFiles.length + 1}.pdf');
-                  });
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Choose files (UI-only) — added placeholder filename')));
-                },
+                pickedFile: _pickedSendFile,
+                onChoose: _uploadingSend ? null : _pickSendFile,
+                uploading: _uploadingSend,
               ),
             ),
 
@@ -490,27 +680,35 @@ class _StudentDocumentsOptionsPageState
               children: [
                 Expanded(
                   child: ElevatedButton(
-                    onPressed: () {
-                      // UI-only: not implemented
-                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Send document not implemented (UI only)')));
-                    },
+                    onPressed: _uploadingSend ? null : _submitSendDocument,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
-                    child: const Text('Send Documents'),
+                    child: _uploadingSend
+                        ? Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: const [
+                              SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white))),
+                              SizedBox(width: 10),
+                              Text('Uploading...')
+                            ],
+                          )
+                        : const Text('Send Documents'),
                   ),
                 ),
                 const SizedBox(width: 12),
                 OutlinedButton(
-                  onPressed: () {
-                    setState(() {
-                      _docHeaderCtrl.clear();
-                      _docMessageCtrl.clear();
-                      _chosenFiles.clear();
-                    });
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cleared (UI only)')));
-                  },
+                  onPressed: _uploadingSend
+                      ? null
+                      : () {
+                          setState(() {
+                            _docHeaderCtrl.clear();
+                            _docMessageCtrl.clear();
+                            _pickedSendFile = null;
+                          });
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cleared')));
+                        },
                   style: OutlinedButton.styleFrom(
                     padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -817,7 +1015,7 @@ class _StudentDocumentsOptionsPageState
                   const SizedBox(height: 18),
 
                   // -------------------------
-                  // SEND DOCUMENT SECTION (moved to bottom)
+                  // SEND DOCUMENT SECTION (now functional)
                   // -------------------------
                   LayoutBuilder(builder: (context, constraints) {
                     return _buildSendDocumentCard(context, constraints.maxWidth);
@@ -832,25 +1030,31 @@ class _StudentDocumentsOptionsPageState
       ),
     );
   }
+
+  void _snack(String msg) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 }
 
-/// Small dotted upload box widget used as a visual placeholder.
-/// UI-only: onChoose triggers a callback but no real file selection is implemented.
-class DottedUploadBox extends StatelessWidget {
+/// Small dotted upload box widget used as a visual placeholder for other UI.
+/// This variant supports showing the picked file and upload state.
+class DottedUploadBoxSend extends StatelessWidget {
   final bool isNarrow;
-  final List<String> files;
-  final VoidCallback onChoose;
+  final PlatformFile? pickedFile;
+  final VoidCallback? onChoose;
+  final bool uploading;
 
-  const DottedUploadBox({
+  const DottedUploadBoxSend({
     super.key,
     required this.isNarrow,
-    required this.files,
+    required this.pickedFile,
     required this.onChoose,
+    required this.uploading,
   });
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
+    final hasFile = pickedFile != null;
     return Container(
       width: double.infinity,
       padding: EdgeInsets.symmetric(vertical: isNarrow ? 18 : 24, horizontal: isNarrow ? 12 : 16),
@@ -861,33 +1065,35 @@ class DottedUploadBox extends StatelessWidget {
       ),
       child: Column(
         children: [
-          // Upper area with icon and text
           Icon(Icons.cloud_upload_outlined, size: isNarrow ? 36 : 48, color: cs.onSurface.withOpacity(0.45)),
           const SizedBox(height: 8),
-          Text('Upload Documents', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600, color: cs.onSurface)),
+          Text('Upload Document', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600, color: cs.onSurface)),
           const SizedBox(height: 6),
-          Text('Drag and drop files here or click to browse', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurface.withOpacity(0.7)), textAlign: TextAlign.center),
+          Text('Tap to choose a file', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurface.withOpacity(0.7)), textAlign: TextAlign.center),
           const SizedBox(height: 12),
 
-          // Choose files button
           ElevatedButton(
             onPressed: onChoose,
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
-            child: const Text('Choose Files'),
+            child: uploading
+                ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
+                : const Text('Choose File'),
           ),
 
-          // Chosen filenames UI-only preview
-          if (files.isNotEmpty) ...[
+          if (hasFile) ...[
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerLeft,
-              child: Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: files.map((f) => Chip(label: Text(f), visualDensity: VisualDensity.compact)).toList(),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(pickedFile!.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 4),
+                  Text('${(pickedFile!.size / (1024 * 1024)).toStringAsFixed(2)} MB', style: const TextStyle(color: Colors.black54)),
+                ],
               ),
             ),
           ],
