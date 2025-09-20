@@ -1053,16 +1053,43 @@ class NotificationBell extends StatelessWidget {
     );
   }
 
+  /// Mark a notification as read.
+  ///
+  /// This writes a read entry into users/{uid}/notif_reads/{notifId} (existing pattern),
+  /// and also updates the notification doc in user_notification/{notifId} setting:
+  ///   read: true
+  ///   read_at: FieldValue.serverTimestamp()
+  ///   expires_at: Timestamp.fromDate(DateTime.now().toUtc().add(Duration(days:5)))
+  ///
+  /// The expires_at is a concrete timestamp that can be used with Firestore TTL.
   Future<void> _markRead(BuildContext context, String notifId) async {
     try {
-      await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .collection('notif_reads')
-          .doc(notifId)
-          .set({'readAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+      final fs = FirebaseFirestore.instance;
+      final batch = fs.batch();
+
+      // 1) user read receipt (keeps existing design)
+      final readRef = fs.collection('users').doc(uid).collection('notif_reads').doc(notifId);
+      batch.set(readRef, {'readAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+
+      // 2) Update user_notification doc (if exists)
+      final notifRef = fs.collection('user_notification').doc(notifId);
+
+      // compute expires_at 5 days from now (client-side wall-clock in UTC)
+      final expiresAtDate = DateTime.now().toUtc().add(const Duration(days: 5));
+      final expiresAtTimestamp = Timestamp.fromDate(expiresAtDate);
+
+      batch.set(notifRef, {
+        'read': true,
+        'read_at': FieldValue.serverTimestamp(),
+        'expires_at': expiresAtTimestamp,
+      }, SetOptions(merge: true));
+
+      await batch.commit();
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to mark read: $e')));
+      debugPrint('NBELL: _markRead error: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to mark read: $e')));
+      }
     }
   }
 }

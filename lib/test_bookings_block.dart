@@ -2,6 +2,7 @@
 import 'dart:convert';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:smart_drive/theme/app_theme.dart';
@@ -73,72 +74,194 @@ class _TestBookingsBlockState extends State<TestBookingsBlock> with SingleTicker
     }
   }
 
+  Future<void> _markUserTestAttempted(String userId) async {
+    try {
+      final usersCol = FirebaseFirestore.instance.collection('users');
+      await usersCol.doc(userId).update({'test_attempted': true});
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to update user: $e')),
+        );
+      }
+    }
+  }
+
   /// Confirm booking from admin:
   /// - sets status = 'confirmed'
   /// - sets rescheduled flag (true if this is a reschedule)
   /// - optionally updates date (for reschedule)
-  
-  
-  
-  Future<void> _markUserTestAttempted(String userId) async {
-  try {
-    final usersCol = FirebaseFirestore.instance.collection('users');
-    await usersCol.doc(userId).update({'test_attempted': true});
-  } catch (e) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update user: $e')),
-      );
-    }
-  }
-}
-
+  ///
+  /// Also:
+  /// - creates a user_notification document when a userId exists
+  /// - uses a WriteBatch so booking + user update + notification are committed together
   Future<void> _confirmBooking(String id, {bool rescheduled = false, DateTime? date}) async {
-  try {
-    final updateData = <String, dynamic>{
-      'status': 'confirmed',
-      'rescheduled': rescheduled,
-      'updated_at': FieldValue.serverTimestamp(),
-    };
-    if (date != null) {
-      updateData['date'] = Timestamp.fromDate(DateTime(date.year, date.month, date.day));
-    }
+    final bookingsCol = _col; // 'test_bookings'
+    final usersCol = FirebaseFirestore.instance.collection('users');
+    final notificationsCol = FirebaseFirestore.instance.collection('user_notification');
+    final adminUid = FirebaseAuth.instance.currentUser?.uid;
 
-    // get booking document (to know which user made the booking)
-    final bookingSnap = await _col.doc(id).get();
-    final bookingData = bookingSnap.data();
-    final userId = bookingData?['user_id'] ?? bookingData?['userId'];
+    try {
+      // Read booking doc to determine user ID and existing date (so we can archive previous date if needed)
+      final bookingSnap = await bookingsCol.doc(id).get();
+      if (!bookingSnap.exists) throw 'Booking document not found';
 
-    await _col.doc(id).update(updateData);
+      final bookingData = bookingSnap.data() ?? <String, dynamic>{};
+      final userId = bookingData['user_id'] ?? bookingData['userId'];
 
-    // update user document if available
-    if (userId != null) {
-      await _markUserTestAttempted(userId.toString());
-    }
+      // Build update map for booking
+      final updateData = <String, dynamic>{
+        'status': 'confirmed',
+        'rescheduled': rescheduled,
+        'updated_at': FieldValue.serverTimestamp(),
+      };
 
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Booking confirmed')));
-      _tabController.animateTo(1); // move to confirmed tab
-    }
-  } catch (e) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to confirm: $e')));
+      // If a new date is provided, normalise it (midnight) and include in update.
+      if (date != null) {
+        final normalized = DateTime(date.year, date.month, date.day);
+        updateData['date'] = Timestamp.fromDate(normalized);
+
+        // If there's an existing date and it's different, append it to previous_dates array.
+        // We append the old date as a Timestamp so history is queryable.
+        final existingDateRaw = bookingData['date'];
+        Timestamp? existingTs;
+        if (existingDateRaw is Timestamp) {
+          existingTs = existingDateRaw;
+        } else if (existingDateRaw is Map && existingDateRaw.containsKey('_seconds')) {
+          try {
+            final seconds = existingDateRaw['_seconds'] as int;
+            existingTs = Timestamp(seconds, existingDateRaw['_nanoseconds'] ?? 0);
+          } catch (_) {}
+        } else if (existingDateRaw is String) {
+          try {
+            final parsed = DateTime.parse(existingDateRaw);
+            existingTs = Timestamp.fromDate(DateTime(parsed.year, parsed.month, parsed.day));
+          } catch (_) {}
+        }
+
+        // Append only if existingTs is present and different from the new normalized date
+        if (existingTs != null) {
+          final existingDt = existingTs.toDate();
+          final existingNormalized = DateTime(existingDt.year, existingDt.month, existingDt.day);
+          if (existingNormalized != DateTime(date.year, date.month, date.day)) {
+            // we'll include this with FieldValue.arrayUnion in the batch below
+          } else {
+            // same day -> no need to push into previous_dates
+            existingTs = null;
+          }
+        }
+
+        // Note: we don't modify updateData for previous_dates here; handle it in the batch using existingTs
+      }
+
+      // Prepare notification payload
+      String title = rescheduled ? 'Test Rescheduled' : 'Booking Confirmed';
+      String formattedDate = date != null ? DateFormat.yMMMd().format(date) : '';
+      String message;
+      if (rescheduled && date != null) {
+        message = 'Your test has been rescheduled to $formattedDate. Please arrive on time.';
+      } else {
+        message = 'Your booking has been confirmed. Please follow further instructions.';
+      }
+
+      // Start a write batch to do all updates atomically
+      final batch = FirebaseFirestore.instance.batch();
+
+      // Update booking
+      batch.update(bookingsCol.doc(id), updateData);
+
+      // If we decided to archive an old date, add arrayUnion to booking doc
+      if (date != null) {
+        final existingDateRaw = bookingData['date'];
+        Timestamp? existingTs;
+        if (existingDateRaw is Timestamp) {
+          existingTs = existingDateRaw;
+        } else if (existingDateRaw is Map && existingDateRaw.containsKey('_seconds')) {
+          try {
+            final seconds = existingDateRaw['_seconds'] as int;
+            final nanos = existingDateRaw['_nanoseconds'] ?? 0;
+            existingTs = Timestamp(seconds, nanos);
+          } catch (_) {}
+        } else if (existingDateRaw is String) {
+          try {
+            final parsed = DateTime.parse(existingDateRaw);
+            existingTs = Timestamp.fromDate(DateTime(parsed.year, parsed.month, parsed.day));
+          } catch (_) {}
+        }
+        if (existingTs != null) {
+          final existingDt = existingTs.toDate();
+          final existingNormalized = DateTime(existingDt.year, existingDt.month, existingDt.day);
+          final newNormalized = DateTime(date.year, date.month, date.day);
+          if (existingNormalized != newNormalized) {
+            batch.update(bookingsCol.doc(id), {
+              'previous_dates': FieldValue.arrayUnion([existingTs]),
+            });
+          }
+        }
+      }
+
+      // Update user doc if available
+      if (userId != null) {
+        batch.update(usersCol.doc(userId.toString()), {'test_attempted': true});
+        // Create notification doc targeted to user
+        final notifDoc = notificationsCol.doc(); // auto-id
+        batch.set(notifDoc, <String, dynamic>{
+          'action_url': null,
+          'created_at': FieldValue.serverTimestamp(),
+          'delivered_at': null,
+          'delivered_by': adminUid,
+          'message': message,
+          'read': false,
+          'title': title,
+          'uid': userId.toString(),
+        });
+      } else {
+        // If there is no userId, skip user update and notification.
+      }
+
+      // Commit batch
+      await batch.commit();
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Booking confirmed')));
+        _tabController.animateTo(1);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to confirm: $e')));
+      }
     }
   }
-}
-
 
   /// Reschedule flow: pick a date, then mark booking as confirmed + rescheduled
   Future<void> _rescheduleFlow(BuildContext ctx, String id, DateTime? current) async {
-    final picked = await showDatePicker(
-      context: ctx,
-      initialDate: current ?? DateTime.now(),
-      firstDate: DateTime.now(),
-      lastDate: DateTime.now().add(const Duration(days: 365)),
-      builder: (c, child) => Theme(data: Theme.of(c).copyWith(colorScheme: Theme.of(c).colorScheme), child: child!),
-    );
-    if (picked != null) {
-      await _confirmBooking(id, rescheduled: true, date: picked);
+    try {
+      // If the current booking date is in the past, we must not use it as initialDate (DatePicker requires initialDate >= firstDate)
+      final now = DateTime.now();
+      DateTime initial = current ?? now;
+      if (initial.isBefore(DateTime(now.year, now.month, now.day))) {
+        initial = now;
+      }
+
+      final picked = await showDatePicker(
+        context: ctx,
+        initialDate: initial,
+        firstDate: DateTime.now(),
+        lastDate: DateTime.now().add(const Duration(days: 365)),
+        builder: (c, child) => Theme(
+          data: Theme.of(c).copyWith(colorScheme: Theme.of(c).colorScheme),
+          // protect against child being null
+          child: child ?? const SizedBox.shrink(),
+        ),
+      );
+
+      if (picked != null) {
+        await _confirmBooking(id, rescheduled: true, date: picked);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(content: Text('Failed to reschedule: $e')));
+      }
     }
   }
 
@@ -412,7 +535,7 @@ class _TestBookingsBlockState extends State<TestBookingsBlock> with SingleTicker
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
-          TextButton(onPressed: () => _showRawJson(ctx, b.id), child: const Text('View raw JSON')),
+          // VIEW RAW JSON option removed as requested
         ],
       ),
     );

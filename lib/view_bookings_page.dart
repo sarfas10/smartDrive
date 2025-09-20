@@ -1,6 +1,5 @@
 // lib/view_bookings_page.dart
 // Page to view current user's test bookings (reads from `test_bookings` collection).
-// Uses design tokens from app_theme.dart for colors, typography, radii and shadows.
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -57,6 +56,15 @@ class ViewBookingsPage extends StatelessWidget {
     }
   }
 
+  /// Helper to interpret a "rescheduled" value that might be bool, string, number, etc.
+  bool _isRescheduledValue(dynamic v) {
+    if (v == null) return false;
+    if (v is bool) return v;
+    if (v is num) return v != 0;
+    final s = v.toString().toLowerCase();
+    return s == 'true' || s == 'yes' || s == '1';
+  }
+
   @override
   Widget build(BuildContext context) {
     final user = FirebaseAuth.instance.currentUser;
@@ -111,6 +119,7 @@ class ViewBookingsPage extends StatelessWidget {
               final status = (d['status'] ?? 'pending').toString();
               final paid = d['paid_amount'] ?? d['paid'] ?? 0;
               final created = d['created_at'];
+              final isRescheduled = _isRescheduledValue(d['rescheduled']);
 
               return Material(
                 color: AppColors.surface,
@@ -149,7 +158,28 @@ class ViewBookingsPage extends StatelessWidget {
                             children: [
                               Text(types.isNotEmpty ? types.join(', ') : 'Test', style: AppText.tileTitle),
                               const SizedBox(height: 6),
-                              Text(_formatDate(date), style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
+                              Row(
+                                children: [
+                                  Text(_formatDate(date), style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
+                                  if (isRescheduled) ...[
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 6),
+                                      decoration: BoxDecoration(
+                                        color: Colors.orange.withOpacity(0.12),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Text(
+                                        'RESCHEDULED',
+                                        style: AppText.hintSmall.copyWith(
+                                          color: Colors.orange,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ]
+                                ],
+                              ),
                               const SizedBox(height: 6),
                               Text('Booked: ${_formatCreated(created)}', style: AppText.hintSmall),
                             ],
@@ -203,6 +233,7 @@ class ViewBookingsPage extends StatelessWidget {
     final created = data['created_at'];
     final special = data['special_requests'] ?? '';
     final payment = data['payment'] ?? data['razorpay_payment'] ?? data['razorpay_payment_id'];
+    final isRescheduled = _isRescheduledValue(data['rescheduled']);
 
     showDialog<void>(
       context: context,
@@ -210,7 +241,28 @@ class ViewBookingsPage extends StatelessWidget {
         return AlertDialog(
           backgroundColor: AppColors.surface,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
-          title: Text('Booking Details', style: AppText.sectionTitle),
+          title: Row(
+            children: [
+              Text('Booking Details', style: AppText.sectionTitle),
+              if (isRescheduled) ...[
+                const SizedBox(width: 8),
+                Container(
+                  padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 6),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    'RESCHEDULED',
+                    style: AppText.hintSmall.copyWith(
+                      color: Colors.orange,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                ),
+              ]
+            ],
+          ),
           content: SingleChildScrollView(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
