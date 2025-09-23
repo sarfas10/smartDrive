@@ -3,6 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
+// Analytics
+import 'package:firebase_analytics/firebase_analytics.dart';
+import 'package:firebase_analytics/observer.dart';
+
 import 'package:smart_drive/reusables/branding.dart';
 import 'app_bootstrap.dart';
 import 'firebase_options.dart';
@@ -12,8 +16,12 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Background isolate must initialize Firebase.
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Optional: handle message.data here (e.g. prefetch, analytics).
-  // Do NOT use Navigator here — this runs in background isolate.
+  // Optional: you can log a background event here if needed:
+  // FirebaseAnalytics.instance.logEvent(
+  //   name: 'fcm_background_message',
+  //   parameters: message.data,
+  // );
+  // Note: keep background work minimal and do not use UI APIs.
 }
 
 Future<void> main() async {
@@ -31,13 +39,20 @@ Future<void> main() async {
 
 class SmartDriveApp extends StatelessWidget {
   const SmartDriveApp({super.key});
+
   @override
   Widget build(BuildContext context) {
+    // Use FirebaseAnalytics.instance directly when logging events from widgets.
+    final analytics = FirebaseAnalytics.instance;
+
     return MaterialApp(
       title: AppBrand.appName,
       theme: ThemeData(
         useMaterial3: true,
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF6366F1)),
+        colorScheme: ColorScheme.fromSeed(
+          seedColor: const Color(0xFF6366F1),
+          brightness: Brightness.light,
+        ),
         fontFamily: 'Inter',
       ),
       darkTheme: ThemeData(
@@ -49,6 +64,13 @@ class SmartDriveApp extends StatelessWidget {
         fontFamily: 'Inter',
       ),
       debugShowCheckedModeBanner: false,
+      themeMode: ThemeMode.light,
+
+      // Use the built-in observer that references FirebaseAnalytics.instance
+      navigatorObservers: [
+        FirebaseAnalyticsObserver(analytics: analytics),
+      ],
+
       home: const AppBootstrap(),
     );
   }

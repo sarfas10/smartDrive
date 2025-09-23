@@ -1,4 +1,5 @@
 // lib/admin_dashboard.dart
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -322,6 +323,14 @@ class _DashboardBlockState extends State<DashboardBlock> {
   int selectedDays = _kDefaultRevenueDays;
 
   @override
+  void initState() {
+    super.initState();
+    // start client-side cleanup of old notifications when the dashboard loads
+    // non-blocking: we don't await here because we want UI to show immediately
+    _cleanupOldNotifications(daysToKeep: 30);
+  }
+
+  @override
   Widget build(BuildContext context) {
     return FutureBuilder<_DashData>(
       future: _fetchDashboardData(selectedDays),
@@ -415,6 +424,49 @@ class _DashboardBlockState extends State<DashboardBlock> {
     final double revenue = (results[3] as double?) ?? 0.0;
 
     return _DashData(slotsTotal: slots, instructorsActive: instructors, studentsActive: students, revenue: revenue);
+  }
+
+  /// Client-side cleanup: delete notifications older than [daysToKeep]
+  /// This runs once when DashboardBlock initializes. It deletes in batches
+  /// to respect Firestore batch limits. Shows a SnackBar if any documents were deleted.
+  Future<void> _cleanupOldNotifications({int daysToKeep = 30}) async {
+    try {
+      final cutoff = DateTime.now().toUtc().subtract(Duration(days: daysToKeep));
+      final cutoffTs = Timestamp.fromDate(cutoff);
+
+      final col = FirebaseFirestore.instance.collection('notifications');
+      // Query documents older than cutoff. We limit to 1000 per run to be safe.
+      final qSnap = await col.where('created_at', isLessThan: cutoffTs).limit(1000).get();
+      final docs = qSnap.docs;
+      if (docs.isEmpty) {
+        debugPrint('Cleanup: no old notifications found.');
+        return;
+      }
+
+      // Delete in batches of 400 to be safe (Firestore max 500 per batch).
+      const int batchSize = 400;
+      int deleted = 0;
+      for (var i = 0; i < docs.length; i += batchSize) {
+        final end = (i + batchSize < docs.length) ? i + batchSize : docs.length;
+        final batch = FirebaseFirestore.instance.batch();
+        for (var j = i; j < end; ++j) {
+          batch.delete(docs[j].reference);
+        }
+        await batch.commit();
+        deleted += (end - i);
+      }
+
+      debugPrint('Cleanup: deleted $deleted old notifications.');
+      if (mounted && deleted > 0) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Deleted $deleted old notifications'), backgroundColor: Colors.green));
+      }
+    } catch (e, st) {
+      debugPrint('Cleanup failed: $e\n$st');
+      // Non-fatal: show a lightweight debug message in the banner
+      if (mounted) {
+        _razorpayDebug.value = 'Cleanup failed';
+      }
+    }
   }
 }
 
@@ -624,6 +676,7 @@ Color _statusColor(String status, BuildContext ctx) {
   final s = status.toLowerCase();
   if (s.contains('confirm') || s.contains('completed') || s.contains('paid')) return Colors.green.shade50;
   if (s.contains('fail') || s.contains('cancel') || s.contains('rejected')) return Colors.red.shade50;
+  if (s.contains('notification')) return Colors.blue.shade50;
   return Colors.grey.shade100;
 }
 
@@ -631,6 +684,7 @@ Color _statusTextColor(String status) {
   final s = status.toLowerCase();
   if (s.contains('confirm') || s.contains('completed') || s.contains('paid')) return Colors.green.shade800;
   if (s.contains('fail') || s.contains('cancel') || s.contains('rejected')) return Colors.red.shade800;
+  if (s.contains('notification')) return Colors.blue.shade800;
   return Colors.grey.shade700;
 }
 
@@ -680,7 +734,7 @@ class _RecentActivitiesState extends State<_RecentActivities> {
               onChanged: (v) => setState(() => _search = v.trim()),
               decoration: InputDecoration(
                 isDense: true,
-                hintText: 'Search student/slot/type',
+                hintText: 'Search student/slot/type/message',
                 prefixIcon: const Icon(Icons.search, size: 18),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
@@ -697,6 +751,7 @@ class _RecentActivitiesState extends State<_RecentActivities> {
               const PopupMenuItem(value: 'confirmed', child: Text('Confirmed')),
               const PopupMenuItem(value: 'pending', child: Text('Pending')),
               const PopupMenuItem(value: 'cancelled', child: Text('Cancelled')),
+              const PopupMenuItem(value: 'notification', child: Text('Notifications')),
             ],
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
@@ -720,59 +775,61 @@ class _RecentActivitiesState extends State<_RecentActivities> {
       ),
       const SizedBox(height: 10),
       Expanded(
-        child: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-          // increased limit to give a longer scrollable list
-          stream: FirebaseFirestore.instance.collection('bookings').orderBy('created_at', descending: true).limit(200).snapshots(),
+        child: StreamBuilder<List<Map<String, dynamic>>>(
+          // merged stream (bookings + admin_notifications)
+          stream: _mergedActivitiesStream(limit: 200),
           builder: (context, snapshot) {
             if (snapshot.connectionState == ConnectionState.waiting) return const Center(child: CircularProgressIndicator());
             if (snapshot.hasError) return Text('Failed to load activities: ${snapshot.error}');
-            final docs = snapshot.data?.docs ?? <QueryDocumentSnapshot<Map<String, dynamic>>>[];
-            var bookings = docs.map((d) => d.data()).toList();
+            final combined = snapshot.data ?? <Map<String, dynamic>>[];
 
             // apply client-side search + status filters
+            var activities = combined;
             if (_search.isNotEmpty) {
               final q = _search.toLowerCase();
-              bookings = bookings.where((b) {
+              activities = activities.where((b) {
                 final slot = (b['slot_id'] ?? '').toString().toLowerCase();
-                final student = ((b['student_id'] ?? b['user_id']) ?? '').toString().toLowerCase();
-                final activity = _inferActivityType(b).toLowerCase();
-                return slot.contains(q) || student.contains(q) || activity.contains(q);
+                final student = ((b['student_name'] ?? b['userName'] ?? b['user_id'] ?? b['user_id_raw']) ?? '').toString().toLowerCase();
+                final activity = (b['activity_type'] ?? '').toString().toLowerCase();
+                final message = (b['message'] ?? b['title'] ?? b['note'] ?? '').toString().toLowerCase();
+                return slot.contains(q) || student.contains(q) || activity.contains(q) || message.contains(q);
               }).toList();
             }
 
             if (_statusFilter != 'all') {
-              bookings = bookings.where((b) {
-                final s = (b['status'] ?? '').toString().toLowerCase();
-                return s.contains(_statusFilter);
+              activities = activities.where((b) {
+                final s = (b['status'] ?? b['type'] ?? '').toString().toLowerCase();
+                return s.contains(_statusFilter.toLowerCase());
               }).toList();
             }
 
-            if (bookings.isEmpty) return const Center(child: Text('No recent activities'));
+            if (activities.isEmpty) return const Center(child: Text('No recent activities'));
 
             // Compact/mobile: vertical ListTiles
             if (widget.isCompact) {
               return ListView.separated(
                 physics: const AlwaysScrollableScrollPhysics(),
-                itemCount: bookings.length,
+                itemCount: activities.length,
                 separatorBuilder: (_, __) => const Divider(height: 1),
                 itemBuilder: (_, i) {
-                  final b = bookings[i];
-                  final createdAt = (b['created_at'] is Timestamp) ? (b['created_at'] as Timestamp).toDate() : null;
-                  final status = (b['status'] ?? '-').toString();
+                  final b = activities[i];
+                  final createdAt = (b['createdAt'] is Timestamp) ? (b['createdAt'] as Timestamp).toDate() : (b['created_at'] is Timestamp) ? (b['created_at'] as Timestamp).toDate() : null;
+                  final status = (b['status'] ?? b['type'] ?? '-').toString();
                   final slotId = (b['slot_id'] ?? '-').toString();
-                  final userId = (b['student_id'] ?? b['user_id'] ?? '-').toString();
-                  final activityType = _inferActivityType(b);
+                  final userId = (b['userId'] ?? b['student_id'] ?? b['user_id'] ?? '-').toString();
+                  final activityType = (b['activity_type'] ?? _inferActivityType(b)).toString();
+                  final userNameCached = b['userName'] as String?; // may already be present for notifications
 
                   return FutureBuilder<String>(
-                    future: _getUserName(userId),
+                    future: userNameCached != null ? Future.value(userNameCached) : _getUserName(userId),
                     builder: (ctx, snap) {
-                      final userName = snap.data ?? userId;
+                      final userName = snap.data ?? (b['userName'] ?? userId);
                       return ListTile(
                         contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                         leading: CircleAvatar(
                           radius: 20,
                           backgroundColor: Colors.grey[50],
-                          child: Text(_shortLabel(userName, slotId), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700)),
+                          child: _leadingContentForActivity(b, userName, slotId),
                         ),
                         title: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -782,7 +839,7 @@ class _RecentActivitiesState extends State<_RecentActivities> {
                             Text(activityType, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                           ],
                         ),
-                        subtitle: Text(createdAt != null ? createdAt.toString().split('.').first : '-'),
+                        subtitle: _subtitleForActivity(b, createdAt),
                         trailing: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
@@ -792,7 +849,7 @@ class _RecentActivitiesState extends State<_RecentActivities> {
                           child: Text(status, style: TextStyle(color: _statusTextColor(status), fontWeight: FontWeight.w600)),
                         ),
                         onTap: () {
-                          // Optional: show booking details
+                          // Optional: show booking/notification details
                         },
                       );
                     },
@@ -814,7 +871,7 @@ class _RecentActivitiesState extends State<_RecentActivities> {
                     children: const [
                       SizedBox(width: 64, child: Text('Slot', style: TextStyle(fontWeight: FontWeight.w600))),
                       SizedBox(width: 16),
-                      Expanded(child: Text('Student', style: TextStyle(fontWeight: FontWeight.w600))),
+                      Expanded(child: Text('Student / Source', style: TextStyle(fontWeight: FontWeight.w600))),
                       SizedBox(width: 220, child: Text('Date', style: TextStyle(fontWeight: FontWeight.w600))),
                       SizedBox(width: 160, child: Text('Activity', style: TextStyle(fontWeight: FontWeight.w600))),
                       SizedBox(width: 120, child: Text('Status', style: TextStyle(fontWeight: FontWeight.w600))),
@@ -825,25 +882,26 @@ class _RecentActivitiesState extends State<_RecentActivities> {
                 Expanded(
                   child: ListView.separated(
                     physics: const AlwaysScrollableScrollPhysics(),
-                    itemCount: bookings.length,
+                    itemCount: activities.length,
                     separatorBuilder: (_, __) => const Divider(height: 1),
                     itemBuilder: (ctx, i) {
-                      final b = bookings[i];
-                      final createdAt = (b['created_at'] is Timestamp) ? (b['created_at'] as Timestamp).toDate() : null;
-                      final status = (b['status'] ?? '-').toString();
+                      final b = activities[i];
+                      final createdAt = (b['createdAt'] is Timestamp) ? (b['createdAt'] as Timestamp).toDate() : (b['created_at'] is Timestamp) ? (b['created_at'] as Timestamp).toDate() : null;
+                      final status = (b['status'] ?? b['type'] ?? '-').toString();
                       final slotId = (b['slot_id'] ?? '-').toString();
-                      final userId = (b['student_id'] ?? b['user_id'] ?? '-').toString();
-                      final activityType = _inferActivityType(b);
+                      final userId = (b['userId'] ?? b['student_id'] ?? b['user_id'] ?? '-').toString();
+                      final activityType = (b['activity_type'] ?? _inferActivityType(b)).toString();
 
                       final bgColor = i.isEven ? Colors.white : Colors.grey.shade50;
+                      final userNameCached = b['userName'] as String?;
 
                       return FutureBuilder<String>(
-                        future: _getUserName(userId),
+                        future: userNameCached != null ? Future.value(userNameCached) : _getUserName(userId),
                         builder: (ctx, snap) {
-                          final userName = snap.data ?? userId;
+                          final userName = snap.data ?? (b['userName'] ?? userId);
                           return InkWell(
                             onTap: () {
-                              // optional: open booking details
+                              // optional: open booking/notification details
                             },
                             child: Container(
                               color: bgColor,
@@ -853,7 +911,7 @@ class _RecentActivitiesState extends State<_RecentActivities> {
                                   SizedBox(
                                     width: 64,
                                     child: Row(children: [
-                                      CircleAvatar(radius: 18, backgroundColor: Colors.grey[100], child: Text(_shortLabel(userName, slotId), style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700))),
+                                      CircleAvatar(radius: 18, backgroundColor: Colors.grey[100], child: _leadingContentForActivity(b, userName, slotId)),
                                       const SizedBox(width: 8),
                                       Flexible(child: Text(slotId, style: const TextStyle(fontWeight: FontWeight.w600))),
                                     ]),
@@ -893,10 +951,36 @@ class _RecentActivitiesState extends State<_RecentActivities> {
     ]);
   }
 
+  // Small helper: create leading widget content for activity (notification uses bell)
+  Widget _leadingContentForActivity(Map<String, dynamic> b, String userName, String slotId) {
+    final isNotification = ((b['source'] ?? b['type'] ?? b['activity_type'])?.toString().toLowerCase() ?? '').contains('notif') ||
+        (b['isNotification'] == true) ||
+        (b['type'] == 'new_student_registration') ||
+        (b['type'] == 'new_instructor_registration');
+
+    if (isNotification) {
+      return const Icon(Icons.notifications, size: 16, color: Colors.blueAccent);
+    }
+    // otherwise initials
+    final initials = _shortLabel(userName, slotId);
+    return Text(initials, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700));
+  }
+
+  Widget _subtitleForActivity(Map<String, dynamic> b, DateTime? createdAt) {
+    if ((b['type'] ?? '').toString().toLowerCase().contains('registration') || (b['isNotification'] == true) || (b['type']?.toString().toLowerCase() == 'notification')) {
+      final title = b['title'] ?? b['message'] ?? b['note'] ?? '';
+      return Text(title.toString(), maxLines: 2, overflow: TextOverflow.ellipsis);
+    }
+    // booking-like
+    return Text(createdAt != null ? createdAt.toString().split('.').first : '-');
+  }
+
   // Very small heuristic to label the type of activity. Adjust to match your schema.
   String _inferActivityType(Map<String, dynamic> b) {
+    final t = ((b['type'] ?? '') as String).toLowerCase();
+    if (t.contains('student') || t.contains('instructor') || t.contains('registration')) return 'Notification';
     if (b.containsKey('payment_id') || b.containsKey('amount')) return 'Payment';
-    if (b.containsKey('slot_id') && b.containsKey('user_id')) return 'Booking';
+    if (b.containsKey('slot_id') && (b.containsKey('user_id') || b.containsKey('student_id'))) return 'Booking';
     if (b.containsKey('action')) return b['action'].toString();
     final s = (b['status'] ?? '').toString();
     if (s.isNotEmpty) return 'Booking - ${s[0].toUpperCase()}${s.substring(1)}';
@@ -1043,4 +1127,109 @@ String _humanCurrency(double amount) {
   if (amount >= 1e5) return '₹' + (amount / 1e5).toStringAsFixed(2) + 'L';
   if (amount >= 1000) return '₹' + _formatNumber(amount.round());
   return '₹' + amount.toStringAsFixed(2);
+}
+
+// -------------------- NEW: merge bookings + admin_notifications into one stream --------------------
+
+/// Returns a broadcast stream that merges `bookings` (ordered by created_at desc)
+/// and `admin_notifications` (ordered by createdAt desc), normalizes fields and
+/// emits a combined sorted list on any update. Each emitted item is a Map with
+/// consistent keys (createdAt Timestamp, status/type, activity_type, userId, slot_id, title/message, etc).
+Stream<List<Map<String, dynamic>>> _mergedActivitiesStream({int limit = 200}) {
+  final controller = StreamController<List<Map<String, dynamic>>>.broadcast();
+  // Keep latest snapshots in memory
+  List<Map<String, dynamic>> latestBookings = [];
+  List<Map<String, dynamic>> latestNotifs = [];
+
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? bookSub;
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? notifSub;
+
+  void emitCombined() {
+    final combined = <Map<String, dynamic>>[];
+    combined.addAll(latestBookings);
+    combined.addAll(latestNotifs);
+    // sort by createdAt/created_at timestamp descending
+    combined.sort((a, b) {
+      Timestamp? ta = (a['createdAt'] as Timestamp?) ?? (a['created_at'] as Timestamp?);
+      Timestamp? tb = (b['createdAt'] as Timestamp?) ?? (b['created_at'] as Timestamp?);
+      final da = ta?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+      final db = tb?.toDate() ?? DateTime.fromMillisecondsSinceEpoch(0);
+      return db.compareTo(da);
+    });
+    // enforce limit
+    final limited = combined.take(limit).toList();
+    if (!controller.isClosed) controller.add(limited);
+  }
+
+  bookSub = FirebaseFirestore.instance
+      .collection('bookings')
+      .orderBy('created_at', descending: true)
+      .limit(limit)
+      .snapshots()
+      .listen((snap) {
+    latestBookings = snap.docs.map((d) {
+      final m = Map<String, dynamic>.from(d.data());
+      // normalize keys: ensure createdAt present as Timestamp under 'created_at' (bookings use created_at)
+      if (!m.containsKey('created_at') && m.containsKey('createdAt')) {
+        m['created_at'] = m['createdAt'];
+      }
+      m['__source'] = 'booking';
+      // also preserve doc id
+      m['docId'] = d.id;
+      return m;
+    }).toList();
+    emitCombined();
+  }, onError: (e) {
+    if (!controller.isClosed) controller.addError(e);
+  });
+
+  notifSub = FirebaseFirestore.instance
+      .collection('admin_notifications')
+      .orderBy('createdAt', descending: true)
+      .limit(limit)
+      .snapshots()
+      .listen((snap) {
+    latestNotifs = snap.docs.map((d) {
+      final m = Map<String, dynamic>.from(d.data());
+      // normalize: notifications may use 'createdAt' - keep that
+      if (!m.containsKey('createdAt') && m.containsKey('created_at')) {
+        m['createdAt'] = m['created_at'];
+      }
+      // mark as notification and include standardized fields
+      m['__source'] = 'notification';
+      m['type'] = m['type'] ?? 'notification';
+      // userId might be userId or user_id depending on how you saved it
+      if (m.containsKey('userId')) {
+        m['userId'] = m['userId'];
+      } else if (m.containsKey('user_id')) {
+        m['userId'] = m['user_id'];
+      } else if (m.containsKey('uid')) {
+        m['userId'] = m['uid'];
+      }
+      // keep userName if available
+      if (m.containsKey('userName')) {
+        // nothing
+      } else if (m.containsKey('user_name')) {
+        m['userName'] = m['user_name'];
+      } else if (m.containsKey('name')) {
+        m['userName'] = m['name'];
+      }
+      // doc id
+      m['docId'] = d.id;
+      // helpful flag
+      m['isNotification'] = true;
+      return m;
+    }).toList();
+    emitCombined();
+  }, onError: (e) {
+    if (!controller.isClosed) controller.addError(e);
+  });
+
+  controller.onCancel = () async {
+    await bookSub?.cancel();
+    await notifSub?.cancel();
+    if (!controller.isClosed) await controller.close();
+  };
+
+  return controller.stream;
 }

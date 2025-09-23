@@ -146,10 +146,10 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   /// Register user, create users doc and optionally user_plans.
-  ///
   /// This version allocates a concurrency-safe enrolment number of the form
   /// "<seq>/<year>" by using a Firestore transaction on `settings/app_settings`.
-    Future<void> _registerWithFirebase() async {
+  /// It also creates an admin_notifications entry and increments an unread counter.
+  Future<void> _registerWithFirebase() async {
     final email = _emailController.text.trim().toLowerCase();
     final password = _passwordController.text.trim();
     final displayName = _nameController.text.trim();
@@ -161,18 +161,18 @@ class _RegisterScreenState extends State<RegisterScreen>
         .createUserWithEmailAndPassword(email: email, password: password);
 
     await cred.user?.updateDisplayName(displayName);
-
     final uid = cred.user!.uid;
 
     // 2) Allocate enrolment number in a transaction
-    // Document path: settings/app_settings
-    final settingsRef = FirebaseFirestore.instance.collection('settings').doc('app_settings');
+    final settingsRef =
+        FirebaseFirestore.instance.collection('settings').doc('app_settings');
 
     final now = DateTime.now();
     final currentYear = now.year;
 
-    // We'll compute enrolmentSequence safely in a transaction.
-    final enrolmentResult = await FirebaseFirestore.instance.runTransaction<Map<String, dynamic>>((tx) async {
+    final enrolmentResult =
+        await FirebaseFirestore.instance.runTransaction<Map<String, dynamic>>(
+            (tx) async {
       final snap = await tx.get(settingsRef);
 
       int lastYear = 0;
@@ -180,15 +180,22 @@ class _RegisterScreenState extends State<RegisterScreen>
 
       if (snap.exists) {
         final data = snap.data()!;
-        lastYear = (data['last_enrolment_year'] is int) ? data['last_enrolment_year'] as int : (data['last_enrolment_year'] is String ? int.tryParse(data['last_enrolment_year']) ?? 0 : 0);
-        lastSeq = (data['last_enrolment_seq'] is int) ? data['last_enrolment_seq'] as int : (data['last_enrolment_seq'] is String ? int.tryParse(data['last_enrolment_seq']) ?? 0 : 0);
+        lastYear = (data['last_enrolment_year'] is int)
+            ? data['last_enrolment_year'] as int
+            : (data['last_enrolment_year'] is String
+                ? int.tryParse(data['last_enrolment_year']) ?? 0
+                : 0);
+        lastSeq = (data['last_enrolment_seq'] is int)
+            ? data['last_enrolment_seq'] as int
+            : (data['last_enrolment_seq'] is String
+                ? int.tryParse(data['last_enrolment_seq']) ?? 0
+                : 0);
       }
 
       // NEW: Do NOT reset sequence at new year. Always increment the global sequence.
       int nextSeq = lastSeq + 1;
       if (nextSeq <= 0) nextSeq = 1; // safety
 
-      // Write back the updated counters (we still keep the last_enrolment_year for reference)
       tx.set(settingsRef, {
         'last_enrolment_year': currentYear,
         'last_enrolment_seq': nextSeq,
@@ -220,10 +227,8 @@ class _RegisterScreenState extends State<RegisterScreen>
         'yearsExp': int.tryParse(_experienceController.text.trim()) ?? 0,
     };
 
-    await FirebaseFirestore.instance
-        .collection('users')
-        .doc(uid)
-        .set(data, SetOptions(merge: true));
+    final userRef = FirebaseFirestore.instance.collection('users').doc(uid);
+    await userRef.set(data, SetOptions(merge: true));
 
     // 4) If student, also create a user_plans record
     if (isStudent) {
@@ -239,8 +244,53 @@ class _RegisterScreenState extends State<RegisterScreen>
           .doc(uid)
           .set(planDoc, SetOptions(merge: true));
     }
-  }
 
+    // -------------------------
+    // 5) Create admin notification + increment unread counter (batched)
+    // -------------------------
+    final notifColl =
+        FirebaseFirestore.instance.collection('admin_notifications');
+    final newNotifRef = notifColl.doc(); // auto-id
+
+    final notifType =
+        isStudent ? 'new_student_registration' : 'new_instructor_registration';
+    final title =
+        isStudent ? 'New student registration' : 'New instructor registration';
+    final message = isStudent
+        ? '$displayName registered as a student.'
+        : '$displayName applied as an instructor.';
+
+    final notifPayload = <String, dynamic>{
+      'type': notifType,
+      'title': title,
+      'message': message,
+      'userId': uid,
+      'userName': displayName,
+      'userEmail': email,
+      'userPhone': phone,
+      'enrolment_number': enrolmentNumber,
+      'role': role,
+      'read': false,
+      'createdAt': FieldValue.serverTimestamp(),
+      // optional: useful to quickly route admin UI to the user
+      'userDocPath': userRef.path,
+      // you can add more metadata like 'source': 'mobile_app' etc.
+    };
+
+    // Use a batch so the notification and unread counter update happen together.
+    final batch = FirebaseFirestore.instance.batch();
+    batch.set(newNotifRef, notifPayload);
+
+    // Increment a simple unread counter in settings/app_settings (create if missing)
+    batch.set(settingsRef, {
+      'admin_unread_notifications': FieldValue.increment(1),
+      'last_notification_at': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    await batch.commit();
+
+    // Done
+  }
 
   String _friendlyAuthError(FirebaseAuthException e) {
     switch (e.code) {

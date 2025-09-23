@@ -18,8 +18,8 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
   final _msgCtrl = TextEditingController();
   final _urlCtrl = TextEditingController();
 
-  // segments
-  final Set<String> _segments = {'all'}; // default to 'all'
+  // segments — default to 'all', but user can change via filter
+  final Set<String> _segments = {'all'}; // default 'all'
   static const _segmentOptions = ['all', 'students', 'instructors', 'active', 'pending'];
   bool _busy = false;
 
@@ -56,7 +56,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                 key: _formKey,
                 child: Column(
                   children: [
-                    // Top row: Filters + quick summary
+                    // Top row: Filters + quick summary (filter available)
                     Row(
                       children: [
                         Tooltip(
@@ -78,9 +78,13 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                           ),
                         ),
                         const SizedBox(width: 8),
-                        if (_segments.isNotEmpty && !(_segments.length==1 && _segments.contains('all')))
+                        if (_segments.isNotEmpty && !(_segments.length == 1 && _segments.contains('all')))
                           TextButton.icon(
-                            onPressed: () => setState(_segments.clear),
+                            onPressed: () => setState(() {
+                              _segments
+                                ..clear()
+                                ..add('all');
+                            }),
                             icon: const Icon(Icons.close_rounded, size: 18),
                             label: const Text('Clear'),
                             style: TextButton.styleFrom(
@@ -144,7 +148,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                     ),
                     const SizedBox(height: 16),
 
-                    // Actions
+                    // Single "Send Now" action
                     Row(
                       children: [
                         Expanded(
@@ -156,34 +160,13 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
                                     child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onSurfaceInverse),
                                   )
                                 : const Icon(Icons.send_outlined),
-                            label: const Text('Send'),
+                            label: const Text('Send Now'),
                             onPressed: _busy ? null : _submit,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: AppColors.primary,
                               foregroundColor: AppColors.onSurfaceInverse,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppColors.warning,
-                              foregroundColor: AppColors.onSurfaceInverse,
-                            ),
-                            icon: const Icon(Icons.drafts_outlined),
-                            label: const Text('Save Draft (Firestore only)'),
-                            onPressed: _busy
-                                ? null
-                                : () async {
-                                    await _saveHistoryFirestore(status: 'draft');
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: const Text('Draft saved.'), backgroundColor: AppColors.success),
-                                      );
-                                    }
-                                  },
                           ),
                         ),
                       ],
@@ -194,7 +177,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
             ),
 
             const SizedBox(height: 8),
-            const SectionHeader(title: 'Notification History (Firestore)'),
+            const SectionHeader(title: 'Notification History'),
             const Divider(height: 1),
 
             // History — adaptive: cards on phones, table on wide
@@ -356,6 +339,7 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
         Offset.zero & overlay.size,
       );
 
+      // Use a simple checked menu: picking one toggles it (allow multiple via repeated picks)
       final selected = await showMenu<String>(
         context: context,
         position: position,
@@ -490,6 +474,10 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
     }
 
     setState(() => _busy = true);
+
+    String status = 'error';
+    String? errorMsg;
+
     try {
       final body = {
         'title': _titleCtrl.text.trim(),
@@ -507,41 +495,59 @@ class _NotificationsBlockState extends State<NotificationsBlock> {
       );
 
       if (res.statusCode >= 200 && res.statusCode < 300) {
-        await _saveHistoryFirestore(status: 'queued');
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: const Text('Queued to send.'), backgroundColor: AppColors.success),
-          );
-        }
-        _titleCtrl.clear();
-        _msgCtrl.clear();
-        _urlCtrl.clear();
-        setState(() {
-          _segments
-            ..clear()
-            ..add('all');
-        });
+        status = 'sent';
       } else {
-        throw Exception('API error ${res.statusCode}: ${res.body}');
+        status = 'error';
+        errorMsg = 'API error ${res.statusCode}: ${res.body}';
       }
     } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed: $e'), backgroundColor: AppColors.danger));
-      }
+      status = 'error';
+      errorMsg = e.toString();
     } finally {
-      if (mounted) setState(() => _busy = false);
+      // single write for every attempt
+      try {
+        await _saveHistoryFirestore(status: status, errorMessage: errorMsg);
+      } catch (e) {
+        // Firestore write failed — avoid attempting another write here.
+      }
+
+      if (mounted) {
+        if (status == 'sent') {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: const Text('Notification sent.'), backgroundColor: AppColors.success),
+          );
+          _titleCtrl.clear();
+          _msgCtrl.clear();
+          _urlCtrl.clear();
+          setState(() {
+            _segments
+              ..clear()
+              ..add('all');
+          });
+        } else {
+          final display = errorMsg ?? 'Failed to send notification.';
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(content: Text('Failed: $display'), backgroundColor: AppColors.danger),
+          );
+        }
+        setState(() => _busy = false);
+      }
     }
   }
 
-  Future<void> _saveHistoryFirestore({required String status}) async {
-    await FirebaseFirestore.instance.collection('notifications').add({
+  Future<void> _saveHistoryFirestore({required String status, String? errorMessage}) async {
+    final doc = <String, dynamic>{
       'title': _titleCtrl.text.trim(),
       'message': _msgCtrl.text.trim(),
       'segments': _segments.toList().isEmpty ? ['all'] : _segments.toList(),
       'action_url': _urlCtrl.text.trim(),
-      'status': status, // draft | queued
+      'status': status, // sent | error
       'created_at': FieldValue.serverTimestamp(),
-    });
+    };
+    if (errorMessage != null && errorMessage.isNotEmpty) {
+      doc['error'] = errorMessage;
+    }
+    await FirebaseFirestore.instance.collection('notifications').add(doc);
   }
 
   void _preview(BuildContext ctx, Map<String, dynamic> m) {
@@ -602,11 +608,11 @@ class _StatusPill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     Color c = switch (status) {
-      'draft' => AppColors.slate,
-      'queued' => AppColors.info,
-      'scheduled' => AppColors.warning,
       'sent' => AppColors.success,
       'error' => AppColors.danger,
+      'scheduled' => AppColors.warning, // kept for forward-compat if you add scheduling later
+      'draft' => AppColors.slate,       // legacy statuses still render gracefully
+      'queued' => AppColors.info,
       _ => AppColors.onSurfaceMuted,
     };
     return Container(

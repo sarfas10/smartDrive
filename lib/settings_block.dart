@@ -1,5 +1,7 @@
 // lib/settings_block.dart
 // SettingsBlock with Admin Popup (signed Cloudinary upload) integrated.
+// + Simplified "Generate Report" UI: preset date selectors (30D, 90D, 6 months, 1 year) + Generate button.
+// The Generate button now opens a dedicated ReportPage.
 
 import 'dart:async';
 import 'dart:convert';
@@ -11,6 +13,7 @@ import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:smart_drive/report_page.dart';
 
 import 'ui_common.dart';
 import 'package:smart_drive/reusables/vehicle_icons.dart';
@@ -26,6 +29,9 @@ import 'package:file_picker/file_picker.dart';
 import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+// Report page import
+
 
 class SettingsBlock extends StatefulWidget {
   const SettingsBlock({super.key});
@@ -60,6 +66,10 @@ class _SettingsBlockState extends State<SettingsBlock> {
   static const String _signatureEndpoint = 'https://tajdrivingschool.in/smartDrive/cloudinary/signature.php';
   static const String _cloudBaseFolder = 'smartDrive/admin_popups';
   static const String _cloudName = 'dxeunc4vd'; // update if different
+
+  // ===== Generate Report UI state (UI only) =====
+  // only selected preset is kept; date range is computed when Generate is pressed
+  String _selectedPreset = '30D'; // options: 30D, 90D, 6M, 1Y
 
   @override
   void dispose() {
@@ -160,6 +170,9 @@ class _SettingsBlockState extends State<SettingsBlock> {
                   _buildPaymentSettingsCard(doc, pad, cardRadius),
                   SizedBox(height: gap),
                   _buildAdminPopupCard(pad, gap, cardRadius),
+                  SizedBox(height: gap),
+                  // ── NEW: Generate Report UI (simplified preset selector + generate)
+                  _buildGenerateReportCard(pad, gap, cardRadius),
                   SizedBox(height: gap),
                   // 🔽 NEW: logout card
                   _buildLogoutCard(pad, cardRadius),
@@ -635,6 +648,149 @@ class _SettingsBlockState extends State<SettingsBlock> {
             },
           ),
       ]),
+    );
+  }
+
+  // ---------------- Generate Report UI (simplified) ----------------
+
+  Widget _buildGenerateReportCard(double pad, double gap, double radius) {
+    final labelStyle = AppText.tileSubtitle.copyWith(color: context.c.onSurface);
+
+    Widget _presetButton(String id, String label) {
+      final selected = _selectedPreset == id;
+      return ChoiceChip(
+        label: Text(label),
+        selected: selected,
+        onSelected: (_) => setState(() => _selectedPreset = id),
+        selectedColor: context.c.primary.withOpacity(0.14),
+        backgroundColor: AppColors.neuBg,
+        labelStyle: TextStyle(color: selected ? context.c.primary : context.c.onSurface),
+      );
+    }
+
+    return Container(
+      padding: EdgeInsets.all(pad),
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        border: Border.all(color: AppColors.divider),
+        borderRadius: BorderRadius.circular(radius),
+        boxShadow: AppShadows.card,
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        _title('Generate Report'),
+        SizedBox(height: gap * 0.4),
+        Text('Select period and generate report. (Opens Report page to create PDF.)', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
+        SizedBox(height: gap),
+
+        Text('Preset ranges', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700)),
+        SizedBox(height: 8),
+        Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            _presetButton('30D', '30 days'),
+            _presetButton('90D', '90 days'),
+            _presetButton('6M', '6 months'),
+            _presetButton('1Y', '1 year'),
+          ],
+        ),
+
+        SizedBox(height: gap),
+
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            // show computed range text next to the Generate button
+            Expanded(
+              child: Text(
+                _describeSelectedRange(),
+                style: labelStyle,
+              ),
+            ),
+            SizedBox(width: 12),
+            ElevatedButton.icon(
+              onPressed: () {
+                // Navigate to the ReportPage and pass the selected preset
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => ReportPage(initialPreset: _selectedPreset)),
+                );
+              },
+              icon: Icon(Icons.open_in_new, color: AppColors.onSurfaceInverse),
+              label: Text('Open Report', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+              style: ElevatedButton.styleFrom(backgroundColor: AppColors.brand),
+            ),
+          ],
+        ),
+
+        SizedBox(height: gap * 0.6),
+        Text('Note: Report page will query Firestore and call your server endpoint to fetch Razorpay totals and generate a PDF.', style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
+      ]),
+    );
+  }
+
+  String _describeSelectedRange() {
+    final now = DateTime.now();
+    final range = _computeRangeMillis(_selectedPreset, now);
+    final start = range.item1;
+    final end = range.item2;
+    return 'From ${_formatDate(start)} to ${_formatDate(end)}';
+  }
+
+  // returns (start, end) DateTimes
+  Tuple2<DateTime, DateTime> _computeRangeMillis(String preset, DateTime now) {
+    DateTime end = DateTime(now.year, now.month, now.day, 23, 59, 59);
+    DateTime start;
+    switch (preset) {
+      case '30D':
+        start = end.subtract(const Duration(days: 30)).copyWith(hour: 0, minute: 0, second: 0);
+        break;
+      case '90D':
+        start = end.subtract(const Duration(days: 90)).copyWith(hour: 0, minute: 0, second: 0);
+        break;
+      case '6M':
+        // subtracting months safely
+        final m = (now.month - 6);
+        final year = m <= 0 ? now.year - 1 : now.year;
+        final month = m <= 0 ? m + 12 : m;
+        // ensure day validity
+        final day = now.day.clamp(1, DateUtils.getDaysInMonth(year, month));
+        start = DateTime(year, month, day).copyWith(hour: 0, minute: 0, second: 0);
+        break;
+      case '1Y':
+        start = DateTime(now.year - 1, now.month, now.day).copyWith(hour: 0, minute: 0, second: 0);
+        break;
+      default:
+        start = end.subtract(const Duration(days: 30)).copyWith(hour: 0, minute: 0, second: 0);
+    }
+    return Tuple2(start, end);
+  }
+
+  void _onGeneratePressed() {
+    final now = DateTime.now();
+    final range = _computeRangeMillis(_selectedPreset, now);
+    final start = range.item1;
+    final end = range.item2;
+    final name = 'report_${_selectedPreset}_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}.pdf';
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('Generate requested for ${_selectedPreset}: ${_formatDate(start)} → ${_formatDate(end)} (simulated).', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+        backgroundColor: AppColors.warnBg,
+        behavior: SnackBarBehavior.floating,
+        duration: const Duration(seconds: 3),
+      ),
+    );
+
+    showDialog<void>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: Text('Generation Requested', style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
+        content: Text('Report: $name\nPeriod: ${_formatDate(start)} → ${_formatDate(end)}\n\nThis is a UI-only simulation. Integrate your backend export endpoint to generate the actual file.', style: AppText.tileSubtitle),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: Text('OK', style: AppText.tileSubtitle.copyWith(color: context.c.primary))),
+        ],
+      ),
     );
   }
 
@@ -1321,7 +1477,7 @@ class _SettingsBlockState extends State<SettingsBlock> {
       await unsubscribeRoleStatusTopics(alsoAll: false);
 
       // 2) Clear saved session
-      await SessionService().clear(); // removes userId/role/status
+      await SessionService().clear(); // removes userId/role,status
 
       // 3) Clear remember-me prefs so auto-redirect won’t happen
       final sp = await SharedPreferences.getInstance();
@@ -1357,6 +1513,10 @@ class _SettingsBlockState extends State<SettingsBlock> {
         style: AppText.sectionTitle.copyWith(color: context.c.onSurface, fontWeight: FontWeight.bold),
       );
 
+  String _formatDate(DateTime d) {
+    return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
+  }
+
   bool _deepEquals(Map a, Map b) {
     if (a.length != b.length) return false;
     for (final key in a.keys) {
@@ -1371,4 +1531,11 @@ class _SettingsBlockState extends State<SettingsBlock> {
     }
     return true;
   }
+}
+
+/// Small utility tuple to return start/end from _computeRangeMillis
+class Tuple2<T1, T2> {
+  final T1 item1;
+  final T2 item2;
+  Tuple2(this.item1, this.item2);
 }
