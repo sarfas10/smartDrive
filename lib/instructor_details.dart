@@ -42,7 +42,7 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
   bool _busyBlock = false; // NEW: block busy
 
   // Cloudinary (same as my_uploads.dart)
-  static const String _cloudName = 'dxeunc4vd';
+  static const String _cloudName = 'dnxj5r6rc';
   static const String _hostingerBase =
       'https://tajdrivingschool.in/smartDrive/cloudinary';
 
@@ -59,9 +59,9 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
     } else {
       _loading = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Missing instructor UID')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Missing instructor UID')));
         Navigator.of(context).pop();
       });
     }
@@ -83,8 +83,9 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
       _status = (_user['status'] ?? 'active').toString();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Failed to load: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to load: $e')));
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -103,7 +104,7 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
       addr['city'],
       addr['state'],
       addr['zip'],
-      addr['country']
+      addr['country'],
     ].any((v) => v != null && v.toString().trim().isNotEmpty);
 
     final pay = (_profile['payment'] as Map<String, dynamic>?) ?? {};
@@ -112,7 +113,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
     bool payOk = false;
     if (method == 'bank') {
       final bank = (pay['bank'] as Map<String, dynamic>?) ?? {};
-      payOk = _nonEmpty(bank['bankName']) &&
+      payOk =
+          _nonEmpty(bank['bankName']) &&
           _nonEmpty(bank['accountHolder']) &&
           _nonEmpty(bank['accountNumber']) &&
           _nonEmpty(bank['routingNumber']);
@@ -143,24 +145,29 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
     if (folder.trim().isEmpty || publicIdBase.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text('Delete failed: missing Cloudinary folder/public_id')),
+          content: Text('Delete failed: missing Cloudinary folder/public_id'),
+        ),
       );
       return;
     }
 
-    final ok = await showDialog<bool>(
+    final ok =
+        await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
             title: const Text('Delete document?'),
             content: const Text(
-                'This will permanently delete the file from Cloudinary and remove the record from Firestore.'),
+              'This will permanently delete the file from Cloudinary and remove the record from Firestore.',
+            ),
             actions: [
               TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Cancel')),
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
               FilledButton(
-                  onPressed: () => Navigator.pop(ctx, true),
-                  child: const Text('Delete')),
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Delete'),
+              ),
             ],
           ),
         ) ??
@@ -171,7 +178,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
       setState(() => _busyDelete = true);
 
       final fullPublicId = _composePublicId(folder, publicIdBase);
-      final primaryType = _resourceTypeFromUrl(fileUrl) ?? _resourceTypeFromExt(fileExt);
+      final primaryType =
+          _resourceTypeFromUrl(fileUrl) ?? _resourceTypeFromExt(fileExt);
 
       await _cloudinaryDestroyWithFallback(
         fullPublicId: fullPublicId,
@@ -181,13 +189,15 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
       await _db.collection('user_uploads').doc(docId).delete();
 
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(const SnackBar(content: Text('Deleted successfully')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Deleted successfully')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Delete failed: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _busyDelete = false);
@@ -210,8 +220,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
 
   String _resourceTypeFromExt(String ext) {
     final e = ext.toLowerCase();
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'svg']
-        .contains(e)) return 'image';
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'svg'].contains(e))
+      return 'image';
     if (['mp4', 'mov', 'avi', 'mkv', 'webm'].contains(e)) return 'video';
     return 'raw';
   }
@@ -243,8 +253,9 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
     required String resourceType, // image|raw|video
     required Map<String, dynamic> signed,
   }) async {
-    final uri =
-        Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/destroy');
+    final uri = Uri.parse(
+      'https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/destroy',
+    );
     final req = http.MultipartRequest('POST', uri)
       ..fields['api_key'] = signed['api_key'].toString()
       ..fields['timestamp'] = signed['timestamp'].toString()
@@ -256,7 +267,9 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
     final body = await streamed.stream.bytesToString();
 
     if (streamed.statusCode != 200) {
-      throw Exception('Cloudinary destroy failed: ${streamed.statusCode} $body');
+      throw Exception(
+        'Cloudinary destroy failed: ${streamed.statusCode} $body',
+      );
     }
 
     final json = jsonDecode(body) as Map<String, dynamic>;
@@ -288,7 +301,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
       }
     }
     throw Exception(
-        'Cloudinary destroy did not find the asset under any resource_type.');
+      'Cloudinary destroy did not find the asset under any resource_type.',
+    );
   }
 
   // ───────────────────── Notifications helper (direct-target) ─────────────────
@@ -330,8 +344,9 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Failed to approve: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to approve: $e')));
       }
     } finally {
       if (mounted) setState(() => _busyApprove = false);
@@ -342,7 +357,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
   Future<void> _blockUser() async {
     if (_uid == null || _busyBlock) return;
 
-    final confirm = await showDialog<bool>(
+    final confirm =
+        await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
             title: const Text('Block instructor?'),
@@ -352,8 +368,9 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
             ),
             actions: [
               TextButton(
-                  onPressed: () => Navigator.pop(ctx, false),
-                  child: const Text('Cancel')),
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
               FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('Block'),
@@ -372,7 +389,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
       await _sendUserNotification(
         targetUid: _uid!,
         title: 'Account Blocked',
-        message: 'Your instructor account has been blocked. Please contact support.',
+        message:
+            'Your instructor account has been blocked. Please contact support.',
       );
 
       if (mounted) {
@@ -382,8 +400,9 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Failed to block user: $e')));
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Failed to block user: $e')));
       }
     } finally {
       if (mounted) setState(() => _busyBlock = false);
@@ -433,25 +452,30 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
                                 color: AppColors.warnBg,
-                                borderRadius:
-                                    BorderRadius.circular(AppRadii.m),
-                                border: Border.all(color: AppColors.warnBg.withOpacity(0.9)),
+                                borderRadius: BorderRadius.circular(AppRadii.m),
+                                border: Border.all(
+                                  color: AppColors.warnBg.withOpacity(0.9),
+                                ),
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.hourglass_bottom_rounded,
-                                      color: AppColors.warning),
+                                  Icon(
+                                    Icons.hourglass_bottom_rounded,
+                                    color: AppColors.warning,
+                                  ),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Text(
                                       'This instructor is pending approval.',
-                                      style: context.t.bodyMedium
-                                          ?.copyWith(color: AppColors.warnFg),
+                                      style: context.t.bodyMedium?.copyWith(
+                                        color: AppColors.warnFg,
+                                      ),
                                     ),
                                   ),
                                   ElevatedButton.icon(
-                                    onPressed:
-                                        _busyApprove ? null : _approveUser,
+                                    onPressed: _busyApprove
+                                        ? null
+                                        : _approveUser,
                                     icon: _busyApprove
                                         ? SizedBox(
                                             width: 16,
@@ -460,20 +484,30 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
                                               strokeWidth: 2,
                                               valueColor:
                                                   AlwaysStoppedAnimation(
-                                                      context.c.onPrimary),
+                                                    context.c.onPrimary,
+                                                  ),
                                             ),
                                           )
-                                        : const Icon(Icons.check_circle_outline),
+                                        : const Icon(
+                                            Icons.check_circle_outline,
+                                          ),
                                     label: Text(
-                                        _busyApprove ? 'Approving…' : 'Approve User'),
+                                      _busyApprove
+                                          ? 'Approving…'
+                                          : 'Approve User',
+                                    ),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: AppColors.success,
                                       foregroundColor: context.c.onPrimary,
-                                      padding:
-                                          const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 10,
+                                      ),
                                       shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(AppRadii.m)),
+                                        borderRadius: BorderRadius.circular(
+                                          AppRadii.m,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -487,19 +521,24 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
                               padding: const EdgeInsets.all(14),
                               decoration: BoxDecoration(
                                 color: AppColors.errBg,
-                                borderRadius:
-                                    BorderRadius.circular(AppRadii.m),
-                                border: Border.all(color: AppColors.errBg.withOpacity(0.9)),
+                                borderRadius: BorderRadius.circular(AppRadii.m),
+                                border: Border.all(
+                                  color: AppColors.errBg.withOpacity(0.9),
+                                ),
                               ),
                               child: Row(
                                 children: [
-                                  Icon(Icons.verified_user_outlined,
-                                      color: AppColors.danger),
+                                  Icon(
+                                    Icons.verified_user_outlined,
+                                    color: AppColors.danger,
+                                  ),
                                   const SizedBox(width: 10),
                                   Expanded(
                                     child: Text(
                                       'This instructor is active. You can block access if needed.',
-                                      style: context.t.bodyMedium?.copyWith(color: AppColors.errFg),
+                                      style: context.t.bodyMedium?.copyWith(
+                                        color: AppColors.errFg,
+                                      ),
                                     ),
                                   ),
                                   ElevatedButton.icon(
@@ -511,19 +550,27 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
                                             child: CircularProgressIndicator(
                                               strokeWidth: 2,
                                               valueColor:
-                                                  AlwaysStoppedAnimation(context.c.onPrimary),
+                                                  AlwaysStoppedAnimation(
+                                                    context.c.onPrimary,
+                                                  ),
                                             ),
                                           )
                                         : const Icon(Icons.block),
-                                    label: Text(_busyBlock ? 'Blocking…' : 'Block User'),
+                                    label: Text(
+                                      _busyBlock ? 'Blocking…' : 'Block User',
+                                    ),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: AppColors.danger,
                                       foregroundColor: context.c.onPrimary,
-                                      padding:
-                                          const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 14,
+                                        vertical: 10,
+                                      ),
                                       shape: RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(AppRadii.m)),
+                                        borderRadius: BorderRadius.circular(
+                                          AppRadii.m,
+                                        ),
+                                      ),
                                     ),
                                   ),
                                 ],
@@ -544,7 +591,12 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Expanded(child: _ProfileCard(user: _user, profile: _profile)),
+                                Expanded(
+                                  child: _ProfileCard(
+                                    user: _user,
+                                    profile: _profile,
+                                  ),
+                                ),
                                 const SizedBox(width: 16),
                                 Expanded(child: _PayoutCard(profile: _profile)),
                               ],
@@ -564,7 +616,8 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
                           const SizedBox(height: 8),
                           _SearchField(
                             controller: _searchCtrl,
-                            onChanged: (v) => setState(() => _q = v.trim().toLowerCase()),
+                            onChanged: (v) =>
+                                setState(() => _q = v.trim().toLowerCase()),
                             hint: 'Search documents...',
                           ),
                           const SizedBox(height: 10),
@@ -573,14 +626,15 @@ class _InstructorDetailsPageState extends State<InstructorDetailsPage> {
                             filterText: _q,
                             onView: _openUrl,
                             onDownload: (url) => _openUrl(url, download: true),
-                            onDelete: (docId, folder, publicId, fileExt, fileUrl) =>
-                                _confirmDeleteAndDestroy(
-                              docId: docId,
-                              folder: folder,
-                              publicIdBase: publicId,
-                              fileExt: fileExt,
-                              fileUrl: fileUrl,
-                            ),
+                            onDelete:
+                                (docId, folder, publicId, fileExt, fileUrl) =>
+                                    _confirmDeleteAndDestroy(
+                                      docId: docId,
+                                      folder: folder,
+                                      publicIdBase: publicId,
+                                      fileExt: fileExt,
+                                      fileUrl: fileUrl,
+                                    ),
                             showDelete: true,
                             busy: _busyDelete,
                           ),
@@ -621,7 +675,9 @@ class _HeaderCard extends StatelessWidget {
     return Card(
       elevation: 0,
       color: context.c.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.l),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
@@ -631,7 +687,10 @@ class _HeaderCard extends StatelessWidget {
               backgroundColor: AppColors.brand,
               child: Text(
                 _initials(name),
-                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
             const SizedBox(width: 12),
@@ -639,21 +698,38 @@ class _HeaderCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name,
-                      style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
+                  Text(
+                    name,
+                    style: AppText.sectionTitle.copyWith(
+                      color: context.c.onSurface,
+                    ),
+                  ),
                   const SizedBox(height: 6),
                   Row(
                     children: [
                       Flexible(
-                        child: Text(email,
-                            style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
+                        child: Text(
+                          email,
+                          style: AppText.tileSubtitle.copyWith(
+                            color: AppColors.onSurfaceMuted,
+                          ),
+                        ),
                       ),
                       if (phone.isNotEmpty) ...[
                         const SizedBox(width: 10),
-                        Text('•', style: TextStyle(color: context.c.onSurface.withOpacity(.35))),
+                        Text(
+                          '•',
+                          style: TextStyle(
+                            color: context.c.onSurface.withOpacity(.35),
+                          ),
+                        ),
                         const SizedBox(width: 10),
-                        Text(phone,
-                            style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
+                        Text(
+                          phone,
+                          style: AppText.tileSubtitle.copyWith(
+                            color: AppColors.onSurfaceMuted,
+                          ),
+                        ),
                       ],
                     ],
                   ),
@@ -672,7 +748,9 @@ class _HeaderCard extends StatelessWidget {
                     width: 8,
                     height: 8,
                     decoration: BoxDecoration(
-                      color: active ? AppColors.success : AppColors.onSurfaceMuted,
+                      color: active
+                          ? AppColors.success
+                          : AppColors.onSurfaceMuted,
                       shape: BoxShape.circle,
                     ),
                   ),
@@ -706,16 +784,26 @@ class _SectionTitle extends StatelessWidget {
     return Row(
       children: [
         Container(
-          decoration:
-              BoxDecoration(color: AppColors.neuBg, borderRadius: BorderRadius.circular(10)),
+          decoration: BoxDecoration(
+            color: AppColors.neuBg,
+            borderRadius: BorderRadius.circular(10),
+          ),
           padding: const EdgeInsets.all(8),
           child: Icon(icon, color: context.c.primary, size: 18),
         ),
         const SizedBox(width: 8),
-        Text(title, style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
+        Text(
+          title,
+          style: AppText.sectionTitle.copyWith(color: context.c.onSurface),
+        ),
         const Spacer(),
         if (subtitle != null)
-          Text(subtitle!, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
+          Text(
+            subtitle!,
+            style: AppText.tileSubtitle.copyWith(
+              color: AppColors.onSurfaceMuted,
+            ),
+          ),
       ],
     );
   }
@@ -739,7 +827,10 @@ class _BannerWarning extends StatelessWidget {
           Icon(Icons.warning_amber_rounded, color: AppColors.warning),
           const SizedBox(width: 10),
           Expanded(
-            child: Text(text, style: context.t.bodyMedium?.copyWith(color: AppColors.warnFg)),
+            child: Text(
+              text,
+              style: context.t.bodyMedium?.copyWith(color: AppColors.warnFg),
+            ),
           ),
         ],
       ),
@@ -764,13 +855,18 @@ class _ProfileCard extends StatelessWidget {
     return Card(
       elevation: 0,
       color: context.c.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.l),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Profile', style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
+            Text(
+              'Profile',
+              style: AppText.sectionTitle.copyWith(color: context.c.onSurface),
+            ),
             const SizedBox(height: 10),
             _line('Name', (user['name'] ?? '—').toString()),
             _line('Email', (user['email'] ?? '—').toString()),
@@ -778,10 +874,17 @@ class _ProfileCard extends StatelessWidget {
             const SizedBox(height: 8),
             Divider(color: AppColors.divider),
             const SizedBox(height: 8),
-            Text('Address', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
+            Text(
+              'Address',
+              style: AppText.tileTitle.copyWith(color: context.c.onSurface),
+            ),
             const SizedBox(height: 8),
             Text(
-              _joinLines([street, _joinComma([city, state, zip]), country]),
+              _joinLines([
+                street,
+                _joinComma([city, state, zip]),
+                country,
+              ]),
               style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
             ),
           ],
@@ -796,11 +899,21 @@ class _ProfileCard extends StatelessWidget {
       child: Row(
         children: [
           SizedBox(
-              width: 120,
-              child:
-                  Text(label, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted))),
+            width: 120,
+            child: Text(
+              label,
+              style: AppText.tileSubtitle.copyWith(
+                color: AppColors.onSurfaceMuted,
+              ),
+            ),
+          ),
           const SizedBox(width: 12),
-          Expanded(child: Text(value, style: const TextStyle(fontWeight: FontWeight.w600))),
+          Expanded(
+            child: Text(
+              value,
+              style: const TextStyle(fontWeight: FontWeight.w600),
+            ),
+          ),
         ],
       ),
     );
@@ -843,14 +956,18 @@ class _PayoutCard extends StatelessWidget {
     return Card(
       elevation: 0,
       color: context.c.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.l),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text('Payout Preference',
-                style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
+            Text(
+              'Payout Preference',
+              style: AppText.sectionTitle.copyWith(color: context.c.onSurface),
+            ),
             const SizedBox(height: 10),
             _kv('Method', methodText),
             const SizedBox(height: 6),
@@ -870,10 +987,18 @@ class _PayoutCard extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         SizedBox(
-            width: 120,
-            child: Text(k, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted))),
+          width: 120,
+          child: Text(
+            k,
+            style: AppText.tileSubtitle.copyWith(
+              color: AppColors.onSurfaceMuted,
+            ),
+          ),
+        ),
         const SizedBox(width: 12),
-        Expanded(child: Text(v, style: const TextStyle(fontWeight: FontWeight.w600))),
+        Expanded(
+          child: Text(v, style: const TextStyle(fontWeight: FontWeight.w600)),
+        ),
       ],
     );
   }
@@ -900,8 +1025,14 @@ class _UploadsList extends StatelessWidget {
   final String filterText;
   final void Function(String url) onView;
   final void Function(String url) onDownload;
-  final void Function(String docId, String folder, String publicIdBase, String fileExt, String fileUrl)
-      onDelete;
+  final void Function(
+    String docId,
+    String folder,
+    String publicIdBase,
+    String fileExt,
+    String fileUrl,
+  )
+  onDelete;
   final bool showDelete;
   final bool busy;
 
@@ -929,17 +1060,24 @@ class _UploadsList extends StatelessWidget {
         if (snap.hasError) {
           return Padding(
             padding: const EdgeInsets.all(16),
-            child: Text('Could not load uploads: ${snap.error}',
-                style: TextStyle(color: AppColors.danger)),
+            child: Text(
+              'Could not load uploads: ${snap.error}',
+              style: TextStyle(color: AppColors.danger),
+            ),
           );
         }
 
         final docs = snap.data?.docs ?? const [];
-        final sorted = [...docs]..sort((a, b) {
+        final sorted = [...docs]
+          ..sort((a, b) {
             final ta = a.data()['created_at'];
             final tb = b.data()['created_at'];
-            final da = (ta is Timestamp) ? ta.toDate() : DateTime.fromMillisecondsSinceEpoch(0);
-            final db = (tb is Timestamp) ? tb.toDate() : DateTime.fromMillisecondsSinceEpoch(0);
+            final da = (ta is Timestamp)
+                ? ta.toDate()
+                : DateTime.fromMillisecondsSinceEpoch(0);
+            final db = (tb is Timestamp)
+                ? tb.toDate()
+                : DateTime.fromMillisecondsSinceEpoch(0);
             return db.compareTo(da);
           });
 
@@ -960,7 +1098,9 @@ class _UploadsList extends StatelessWidget {
               padding: const EdgeInsets.fromLTRB(4, 0, 4, 8),
               child: Text(
                 '${docs.length} document${docs.length == 1 ? '' : 's'} uploaded',
-                style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted),
+                style: AppText.hintSmall.copyWith(
+                  color: AppColors.onSurfaceMuted,
+                ),
               ),
             ),
             if (filtered.isEmpty)
@@ -976,7 +1116,8 @@ class _UploadsList extends StatelessWidget {
                   final m = d.data();
 
                   final folder = (m['cloudinary_folder'] ?? '').toString();
-                  final publicIdBase = (m['cloudinary_public_id'] ?? '').toString();
+                  final publicIdBase = (m['cloudinary_public_id'] ?? '')
+                      .toString();
                   final url = (m['cloudinary_url'] ?? '').toString();
                   final fileExt = (m['file_ext'] ?? '').toString();
 
@@ -992,7 +1133,13 @@ class _UploadsList extends StatelessWidget {
                     onDownload: () => onDownload(url),
                     onDelete: !showDelete || busy
                         ? null
-                        : () => onDelete(d.id, folder, publicIdBase, fileExt, url),
+                        : () => onDelete(
+                            d.id,
+                            folder,
+                            publicIdBase,
+                            fileExt,
+                            url,
+                          ),
                   );
                 },
               ),
@@ -1007,7 +1154,11 @@ class _SearchField extends StatelessWidget {
   final TextEditingController controller;
   final ValueChanged<String> onChanged;
   final String hint;
-  const _SearchField({required this.controller, required this.onChanged, this.hint = 'Search...'});
+  const _SearchField({
+    required this.controller,
+    required this.onChanged,
+    this.hint = 'Search...',
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1016,9 +1167,15 @@ class _SearchField extends StatelessWidget {
       onChanged: onChanged,
       decoration: InputDecoration(
         hintText: hint,
-        prefixIcon: Icon(Icons.search, color: context.c.onSurface.withOpacity(0.6)),
+        prefixIcon: Icon(
+          Icons.search,
+          color: context.c.onSurface.withOpacity(0.6),
+        ),
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
         filled: true,
         fillColor: context.c.surface,
         border: OutlineInputBorder(
@@ -1092,17 +1249,41 @@ class _UploadCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name, style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
+                      Text(
+                        name,
+                        style: AppText.tileTitle.copyWith(
+                          color: context.c.onSurface,
+                        ),
+                      ),
                       const SizedBox(height: 2),
-                      Text(fileName, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
+                      Text(
+                        fileName,
+                        style: AppText.tileSubtitle.copyWith(
+                          color: AppColors.onSurfaceMuted,
+                        ),
+                      ),
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          Icon(Icons.calendar_today, size: 14, color: AppColors.onSurfaceMuted),
+                          Icon(
+                            Icons.calendar_today,
+                            size: 14,
+                            color: AppColors.onSurfaceMuted,
+                          ),
                           const SizedBox(width: 6),
-                          Text(date, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
+                          Text(
+                            date,
+                            style: AppText.tileSubtitle.copyWith(
+                              color: AppColors.onSurfaceMuted,
+                            ),
+                          ),
                           const SizedBox(width: 14),
-                          Text(size, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
+                          Text(
+                            size,
+                            style: AppText.tileSubtitle.copyWith(
+                              color: AppColors.onSurfaceMuted,
+                            ),
+                          ),
                         ],
                       ),
                     ],
@@ -1118,15 +1299,28 @@ class _UploadCard extends StatelessWidget {
                   color: AppColors.neuBg,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 10,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Remarks: ',
-                        style: TextStyle(fontWeight: FontWeight.w600, color: context.c.onSurface)),
+                    Text(
+                      'Remarks: ',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: context.c.onSurface,
+                      ),
+                    ),
                     Expanded(
-                      child: Text(remarks,
-                          style: TextStyle(color: context.c.onSurface, height: 1.2)),
+                      child: Text(
+                        remarks,
+                        style: TextStyle(
+                          color: context.c.onSurface,
+                          height: 1.2,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -1137,21 +1331,42 @@ class _UploadCard extends StatelessWidget {
               children: [
                 TextButton.icon(
                   onPressed: onView,
-                  icon: Icon(Icons.visibility_outlined, size: 18, color: context.c.primary),
-                  label: Text('View', style: TextStyle(color: context.c.primary)),
+                  icon: Icon(
+                    Icons.visibility_outlined,
+                    size: 18,
+                    color: context.c.primary,
+                  ),
+                  label: Text(
+                    'View',
+                    style: TextStyle(color: context.c.primary),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 TextButton.icon(
                   onPressed: onDownload,
-                  icon: Icon(Icons.download_rounded, size: 18, color: context.c.onSurface),
-                  label: Text('Download', style: TextStyle(color: context.c.onSurface)),
+                  icon: Icon(
+                    Icons.download_rounded,
+                    size: 18,
+                    color: context.c.onSurface,
+                  ),
+                  label: Text(
+                    'Download',
+                    style: TextStyle(color: context.c.onSurface),
+                  ),
                 ),
                 const Spacer(),
                 if (onDelete != null)
                   TextButton.icon(
                     onPressed: onDelete,
-                    icon: Icon(Icons.delete_outline, size: 18, color: AppColors.danger),
-                    label: Text('Delete', style: TextStyle(color: AppColors.danger)),
+                    icon: Icon(
+                      Icons.delete_outline,
+                      size: 18,
+                      color: AppColors.danger,
+                    ),
+                    label: Text(
+                      'Delete',
+                      style: TextStyle(color: AppColors.danger),
+                    ),
                   ),
               ],
             ),
@@ -1187,7 +1402,20 @@ class _UploadCard extends StatelessWidget {
     if (ts is Timestamp) dt = ts.toDate();
     if (ts is DateTime) dt = ts;
     dt ??= DateTime.now();
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
   }
 
@@ -1219,7 +1447,12 @@ class _EmptyHint extends StatelessWidget {
           children: [
             Icon(Icons.folder_open, size: 48, color: AppColors.onSurfaceFaint),
             const SizedBox(height: 8),
-            Text('No uploads yet', style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
+            Text(
+              'No uploads yet',
+              style: AppText.hintSmall.copyWith(
+                color: AppColors.onSurfaceMuted,
+              ),
+            ),
           ],
         ),
       ),
@@ -1236,5 +1469,6 @@ String _initials(String name) {
     final s = parts.first;
     return (s.length >= 2 ? s.substring(0, 2) : s).toUpperCase();
   }
-  return (parts.first.substring(0, 1) + parts.last.substring(0, 1)).toUpperCase();
+  return (parts.first.substring(0, 1) + parts.last.substring(0, 1))
+      .toUpperCase();
 }

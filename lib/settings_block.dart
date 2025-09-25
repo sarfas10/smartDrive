@@ -32,7 +32,6 @@ import 'package:url_launcher/url_launcher.dart';
 
 // Report page import
 
-
 class SettingsBlock extends StatefulWidget {
   const SettingsBlock({super.key});
 
@@ -63,9 +62,10 @@ class _SettingsBlockState extends State<SettingsBlock> {
   bool _showRecentPopups = true;
 
   // Cloudinary signer endpoint (your signature.php)
-  static const String _signatureEndpoint = 'https://tajdrivingschool.in/smartDrive/cloudinary/signature.php';
+  static const String _signatureEndpoint =
+      'https://tajdrivingschool.in/smartDrive/cloudinary/signature.php';
   static const String _cloudBaseFolder = 'smartDrive/admin_popups';
-  static const String _cloudName = 'dxeunc4vd'; // update if different
+  static const String _cloudName = 'dnxj5r6rc'; // update if different
 
   // ===== Generate Report UI state (UI only) =====
   // only selected preset is kept; date range is computed when Generate is pressed
@@ -92,7 +92,9 @@ class _SettingsBlockState extends State<SettingsBlock> {
     final cardRadius = (pct(0.02)).clamp(8.0, 14.0);
     final maxContentWidth = isDesktop ? sw * 0.78 : sw;
 
-    final doc = FirebaseFirestore.instance.collection('settings').doc('app_settings');
+    final doc = FirebaseFirestore.instance
+        .collection('settings')
+        .doc('app_settings');
 
     return Container(
       color: AppColors.background,
@@ -101,17 +103,22 @@ class _SettingsBlockState extends State<SettingsBlock> {
         builder: (context, snap) {
           final m = (snap.data?.data() as Map<String, dynamic>?) ?? {};
 
-          if (_lastAppliedSettings == null || !_deepEquals(_lastAppliedSettings!, m)) {
+          if (_lastAppliedSettings == null ||
+              !_deepEquals(_lastAppliedSettings!, m)) {
             _lastAppliedSettings = Map<String, dynamic>.from(m);
 
             final radius = (m['free_radius_km'] ?? 5).toString();
             final perKm = (m['surcharge_per_km'] ?? 10).toString();
-            final policy = (m['cancellation_policy'] ?? 'Cancellations within 24 hours incur 20% fee.').toString();
+            final policy =
+                (m['cancellation_policy'] ??
+                        'Cancellations within 24 hours incur 20% fee.')
+                    .toString();
 
             // load separate charges (defaults to 0.0)
             final raw8 = m['test_charge_8'];
             final rawH = m['test_charge_h'];
-            final drivingTestIncluded = (m['driving_test_included'] ?? true) as bool;
+            final drivingTestIncluded =
+                (m['driving_test_included'] ?? true) as bool;
 
             if (_radiusCtrl.text != radius) _radiusCtrl.text = radius;
             if (_perKmCtrl.text != perKm) _perKmCtrl.text = perKm;
@@ -198,7 +205,7 @@ class _SettingsBlockState extends State<SettingsBlock> {
   }) {
     final savedText = hasSaved
         ? 'Lat: ${(savedLat as num).toDouble().toStringAsFixed(6)}\n'
-            'Lng: ${(savedLng as num).toDouble().toStringAsFixed(6)}'
+              'Lng: ${(savedLng as num).toDouble().toStringAsFixed(6)}'
         : 'No lat/long saved';
 
     final buttonLabel = hasSaved ? 'Update Location' : 'Add Location';
@@ -219,10 +226,14 @@ class _SettingsBlockState extends State<SettingsBlock> {
             width: double.infinity,
             padding: EdgeInsets.all(pad * 0.75),
             decoration: BoxDecoration(
-              color: hasSaved ? AppColors.brand.withOpacity(0.06) : AppColors.warnBg,
+              color: hasSaved
+                  ? AppColors.brand.withOpacity(0.06)
+                  : AppColors.warnBg,
               borderRadius: BorderRadius.circular(radius * 0.75),
               border: Border.all(
-                color: hasSaved ? AppColors.brand.withOpacity(0.25) : AppColors.warnBg,
+                color: hasSaved
+                    ? AppColors.brand.withOpacity(0.25)
+                    : AppColors.warnBg,
               ),
             ),
             child: Row(
@@ -254,14 +265,17 @@ class _SettingsBlockState extends State<SettingsBlock> {
                 // Navigate to the dedicated maps page to add/update
                 final result = await Navigator.push(
                   context,
-                  MaterialPageRoute(
-                    builder: (_) => const MapsPageAdmin(),
-                  ),
+                  MaterialPageRoute(builder: (_) => const MapsPageAdmin()),
                 );
                 if (mounted && result == true) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text(hasSaved ? 'Location updated' : 'Location added', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+                      content: Text(
+                        hasSaved ? 'Location updated' : 'Location added',
+                        style: AppText.tileSubtitle.copyWith(
+                          color: AppColors.onSurfaceInverse,
+                        ),
+                      ),
                       backgroundColor: AppColors.success,
                       behavior: SnackBarBehavior.floating,
                     ),
@@ -269,7 +283,12 @@ class _SettingsBlockState extends State<SettingsBlock> {
                 }
               },
               icon: Icon(Icons.map, color: AppColors.onSurfaceInverse),
-              label: Text(buttonLabel, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+              label: Text(
+                buttonLabel,
+                style: AppText.tileSubtitle.copyWith(
+                  color: AppColors.onSurfaceInverse,
+                ),
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: hasSaved ? AppColors.brand : AppColors.warning,
                 foregroundColor: AppColors.onSurfaceInverse,
@@ -285,7 +304,12 @@ class _SettingsBlockState extends State<SettingsBlock> {
   }
 
   /// Vehicles card
-  Widget _buildVehicleManagementCard(double pad, double gap, double radius, double sw) {
+  Widget _buildVehicleManagementCard(
+    double pad,
+    double gap,
+    double radius,
+    double sw,
+  ) {
     final iconBox = (sw * 0.12).clamp(44.0, 64.0);
     final iconSize = (iconBox * 0.56).clamp(22.0, 36.0);
 
@@ -308,13 +332,24 @@ class _SettingsBlockState extends State<SettingsBlock> {
               Expanded(
                 child: Text(
                   "Vehicles",
-                  style: AppText.sectionTitle.copyWith(color: context.c.onSurface),
+                  style: AppText.sectionTitle.copyWith(
+                    color: context.c.onSurface,
+                  ),
                 ),
               ),
               ElevatedButton.icon(
                 onPressed: () => _showAddVehicleDialog(context),
-                icon: Icon(Icons.add, size: 18, color: AppColors.onSurfaceInverse),
-                label: Text('Add', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+                icon: Icon(
+                  Icons.add,
+                  size: 18,
+                  color: AppColors.onSurfaceInverse,
+                ),
+                label: Text(
+                  'Add',
+                  style: AppText.tileSubtitle.copyWith(
+                    color: AppColors.onSurfaceInverse,
+                  ),
+                ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.brand,
                   foregroundColor: AppColors.onSurfaceInverse,
@@ -331,12 +366,17 @@ class _SettingsBlockState extends State<SettingsBlock> {
 
           // Vehicle List
           StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('vehicles').orderBy('created_at', descending: true).snapshots(),
+            stream: FirebaseFirestore.instance
+                .collection('vehicles')
+                .orderBy('created_at', descending: true)
+                .snapshots(),
             builder: (context, vehicleSnap) {
               if (vehicleSnap.connectionState == ConnectionState.waiting) {
                 return Padding(
                   padding: EdgeInsets.all(pad),
-                  child: Center(child: CircularProgressIndicator(color: context.c.primary)),
+                  child: Center(
+                    child: CircularProgressIndicator(color: context.c.primary),
+                  ),
                 );
               }
               if (!vehicleSnap.hasData || vehicleSnap.data!.docs.isEmpty) {
@@ -349,12 +389,18 @@ class _SettingsBlockState extends State<SettingsBlock> {
                   ),
                   child: Column(
                     children: [
-                      Icon(Icons.directions_car_filled, size: 40, color: AppColors.onSurfaceFaint),
+                      Icon(
+                        Icons.directions_car_filled,
+                        size: 40,
+                        color: AppColors.onSurfaceFaint,
+                      ),
                       const SizedBox(height: 8),
                       Text(
                         'No vehicles added yet.\nClick "Add" to get started.',
                         textAlign: TextAlign.center,
-                        style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
+                        style: AppText.hintSmall.copyWith(
+                          color: AppColors.onSurfaceFaint,
+                        ),
                       ),
                     ],
                   ),
@@ -364,7 +410,8 @@ class _SettingsBlockState extends State<SettingsBlock> {
               return Column(
                 children: vehicleSnap.data!.docs.map((vehicleDoc) {
                   final data = vehicleDoc.data() as Map<String, dynamic>? ?? {};
-                  final carType = (data['car_type'] ?? 'Unknown Vehicle').toString();
+                  final carType = (data['car_type'] ?? 'Unknown Vehicle')
+                      .toString();
                   final charge = data['vehicle_charge'] ?? 0;
                   final icon = VehicleIcons.forType(carType);
 
@@ -385,7 +432,11 @@ class _SettingsBlockState extends State<SettingsBlock> {
                             color: AppColors.brand.withOpacity(0.06),
                             borderRadius: BorderRadius.circular(radius * 0.75),
                           ),
-                          child: Icon(icon, color: AppColors.brand, size: iconSize),
+                          child: Icon(
+                            icon,
+                            color: AppColors.brand,
+                            size: iconSize,
+                          ),
                         ),
                         SizedBox(width: pad),
                         Expanded(
@@ -394,19 +445,27 @@ class _SettingsBlockState extends State<SettingsBlock> {
                             children: [
                               Text(
                                 carType,
-                                style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600),
+                                style: AppText.tileTitle.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
                               ),
                               SizedBox(height: (gap * 0.25)),
                               Text(
                                 '₹${charge.toString()} per session',
-                                style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted),
+                                style: AppText.hintSmall.copyWith(
+                                  color: AppColors.onSurfaceMuted,
+                                ),
                               ),
                             ],
                           ),
                         ),
                         IconButton(
-                          icon: Icon(Icons.delete_outline, color: AppColors.danger),
-                          onPressed: () async => await vehicleDoc.reference.delete(),
+                          icon: Icon(
+                            Icons.delete_outline,
+                            color: AppColors.danger,
+                          ),
+                          onPressed: () async =>
+                              await vehicleDoc.reference.delete(),
                         ),
                       ],
                     ),
@@ -420,7 +479,11 @@ class _SettingsBlockState extends State<SettingsBlock> {
     );
   }
 
-  Widget _buildPaymentSettingsCard(DocumentReference doc, double pad, double radius) {
+  Widget _buildPaymentSettingsCard(
+    DocumentReference doc,
+    double pad,
+    double radius,
+  ) {
     return Container(
       padding: EdgeInsets.all(pad),
       decoration: BoxDecoration(
@@ -428,101 +491,133 @@ class _SettingsBlockState extends State<SettingsBlock> {
         border: Border.all(color: AppColors.divider),
         borderRadius: BorderRadius.circular(radius),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _title('Payment Settings'),
-        SizedBox(height: pad * 0.75),
-        field('Free Radius (km)', _radiusCtrl, number: true),
-        SizedBox(height: pad * 0.5),
-        field('Surcharge per km (₹)', _perKmCtrl, number: true),
-        SizedBox(height: pad * 0.5),
-        area('Cancellation Policy', _policyCtrl),
-        SizedBox(height: pad * 0.5),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _title('Payment Settings'),
+          SizedBox(height: pad * 0.75),
+          field('Free Radius (km)', _radiusCtrl, number: true),
+          SizedBox(height: pad * 0.5),
+          field('Surcharge per km (₹)', _perKmCtrl, number: true),
+          SizedBox(height: pad * 0.5),
+          area('Cancellation Policy', _policyCtrl),
+          SizedBox(height: pad * 0.5),
 
-        // UPDATED: separate fields for 8-type and H-type test charges
-        Text('Driving Test Charge — 8 type (₹)', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _testCharge8Ctrl,
-          keyboardType: TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
-          decoration: InputDecoration(
-            labelText: '8 type charge',
-            prefixText: '₹',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
-            filled: true,
-            fillColor: AppColors.surface,
+          // UPDATED: separate fields for 8-type and H-type test charges
+          Text(
+            'Driving Test Charge — 8 type (₹)',
+            style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700),
           ),
-          style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
-        ),
-        SizedBox(height: pad * 0.5),
-
-        Text('Driving Test Charge — H type (₹)', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _testChargeHCtrl,
-          keyboardType: TextInputType.numberWithOptions(decimal: true),
-          inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}'))],
-          decoration: InputDecoration(
-            labelText: 'H type charge',
-            prefixText: '₹',
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
-            filled: true,
-            fillColor: AppColors.surface,
-          ),
-          style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
-        ),
-
-        SizedBox(height: pad * 0.5),
-        CheckboxListTile(
-          value: _drivingTestIncluded,
-          onChanged: (val) => setState(() => _drivingTestIncluded = val ?? true),
-          title: const Text('Driving Test Included'),
-          controlAffinity: ListTileControlAffinity.leading,
-        ),
-
-        SizedBox(height: pad * 0.75),
-        SizedBox(
-          width: double.infinity,
-          child: ElevatedButton(
-            onPressed: () async {
-              final test8 = double.tryParse(_testCharge8Ctrl.text.trim()) ?? _testCharge8;
-              final testH = double.tryParse(_testChargeHCtrl.text.trim()) ?? _testChargeH;
-
-              await doc.set({
-                'free_radius_km': double.tryParse(_radiusCtrl.text.trim()) ?? 5,
-                'surcharge_per_km': double.tryParse(_perKmCtrl.text.trim()) ?? 10,
-                'cancellation_policy': _policyCtrl.text.trim(),
-                // write both charges
-                'test_charge_8': test8,
-                'test_charge_h': testH,
-                'driving_test_included': _drivingTestIncluded,
-                'updated_at': FieldValue.serverTimestamp(),
-              }, SetOptions(merge: true));
-
-              setState(() {
-                _testCharge8 = test8;
-                _testChargeH = testH;
-              });
-
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('Payment settings saved', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
-                  backgroundColor: AppColors.success,
-                  behavior: SnackBarBehavior.floating,
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              padding: EdgeInsets.symmetric(
-                vertical: (pad * 0.6).clamp(10.0, 16.0),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _testCharge8Ctrl,
+            keyboardType: TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+            ],
+            decoration: InputDecoration(
+              labelText: '8 type charge',
+              prefixText: '₹',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.s),
               ),
-              backgroundColor: context.c.primary,
-              foregroundColor: context.c.onPrimary,
+              filled: true,
+              fillColor: AppColors.surface,
             ),
-            child: Text('Save Payment Settings', style: AppText.tileTitle.copyWith(color: context.c.onPrimary)),
+            style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
           ),
-        ),
-      ]),
+          SizedBox(height: pad * 0.5),
+
+          Text(
+            'Driving Test Charge — H type (₹)',
+            style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _testChargeHCtrl,
+            keyboardType: TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+            ],
+            decoration: InputDecoration(
+              labelText: 'H type charge',
+              prefixText: '₹',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.s),
+              ),
+              filled: true,
+              fillColor: AppColors.surface,
+            ),
+            style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
+          ),
+
+          SizedBox(height: pad * 0.5),
+          CheckboxListTile(
+            value: _drivingTestIncluded,
+            onChanged: (val) =>
+                setState(() => _drivingTestIncluded = val ?? true),
+            title: const Text('Driving Test Included'),
+            controlAffinity: ListTileControlAffinity.leading,
+          ),
+
+          SizedBox(height: pad * 0.75),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () async {
+                final test8 =
+                    double.tryParse(_testCharge8Ctrl.text.trim()) ??
+                    _testCharge8;
+                final testH =
+                    double.tryParse(_testChargeHCtrl.text.trim()) ??
+                    _testChargeH;
+
+                await doc.set({
+                  'free_radius_km':
+                      double.tryParse(_radiusCtrl.text.trim()) ?? 5,
+                  'surcharge_per_km':
+                      double.tryParse(_perKmCtrl.text.trim()) ?? 10,
+                  'cancellation_policy': _policyCtrl.text.trim(),
+                  // write both charges
+                  'test_charge_8': test8,
+                  'test_charge_h': testH,
+                  'driving_test_included': _drivingTestIncluded,
+                  'updated_at': FieldValue.serverTimestamp(),
+                }, SetOptions(merge: true));
+
+                setState(() {
+                  _testCharge8 = test8;
+                  _testChargeH = testH;
+                });
+
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      'Payment settings saved',
+                      style: AppText.tileSubtitle.copyWith(
+                        color: AppColors.onSurfaceInverse,
+                      ),
+                    ),
+                    backgroundColor: AppColors.success,
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+              },
+              style: ElevatedButton.styleFrom(
+                padding: EdgeInsets.symmetric(
+                  vertical: (pad * 0.6).clamp(10.0, 16.0),
+                ),
+                backgroundColor: context.c.primary,
+                foregroundColor: context.c.onPrimary,
+              ),
+              child: Text(
+                'Save Payment Settings',
+                style: AppText.tileTitle.copyWith(color: context.c.onPrimary),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -537,124 +632,224 @@ class _SettingsBlockState extends State<SettingsBlock> {
         borderRadius: BorderRadius.circular(radius),
         boxShadow: AppShadows.card,
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _title('Admin Popup (Image / Video / PDF)'),
-        SizedBox(height: gap * 0.5),
-        Text(
-          'Upload a one-time popup that will be shown to users after booking/payment. Supported: JPG, PNG, MP4, WEBM, PDF.',
-          style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
-        ),
-        SizedBox(height: gap),
-        Row(children: [
-          Expanded(
-            child: ElevatedButton.icon(
-              onPressed: _popupUploading ? null : _pickPopupFile,
-              icon: Icon(Icons.attach_file, color: AppColors.onSurfaceInverse),
-              label: Text(_pickedPopupFile == null ? 'Choose File' : 'Change File', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
-              style: ElevatedButton.styleFrom(backgroundColor: context.c.primary),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _title('Admin Popup (Image / Video / PDF)'),
+          SizedBox(height: gap * 0.5),
+          Text(
+            'Upload a one-time popup that will be shown to users after booking/payment. Supported: JPG, PNG, MP4, WEBM, PDF.',
+            style: AppText.tileSubtitle.copyWith(
+              color: AppColors.onSurfaceMuted,
             ),
           ),
-          SizedBox(width: 12),
-          ElevatedButton.icon(
-            onPressed: (_pickedPopupFile == null || _popupUploading) ? null : _uploadPickedPopupSigned,
-            icon: Icon(Icons.cloud_upload, color: AppColors.onSurfaceInverse),
-            label: Text('Upload & Activate', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.brand),
-          ),
-        ]),
-        if (_pickedPopupFile != null) ...[
-          SizedBox(height: gap * 0.6),
+          SizedBox(height: gap),
           Row(
             children: [
-              Icon(Icons.insert_drive_file, color: AppColors.onSurfaceMuted),
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: _popupUploading ? null : _pickPopupFile,
+                  icon: Icon(
+                    Icons.attach_file,
+                    color: AppColors.onSurfaceInverse,
+                  ),
+                  label: Text(
+                    _pickedPopupFile == null ? 'Choose File' : 'Change File',
+                    style: AppText.tileSubtitle.copyWith(
+                      color: AppColors.onSurfaceInverse,
+                    ),
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: context.c.primary,
+                  ),
+                ),
+              ),
               SizedBox(width: 12),
-              Expanded(child: Text('${_pickedPopupFile!.name} • ${( _pickedPopupFile!.size / (1024 * 1024)).toStringAsFixed(2)} MB', style: AppText.tileSubtitle)),
+              ElevatedButton.icon(
+                onPressed: (_pickedPopupFile == null || _popupUploading)
+                    ? null
+                    : _uploadPickedPopupSigned,
+                icon: Icon(
+                  Icons.cloud_upload,
+                  color: AppColors.onSurfaceInverse,
+                ),
+                label: Text(
+                  'Upload & Activate',
+                  style: AppText.tileSubtitle.copyWith(
+                    color: AppColors.onSurfaceInverse,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.brand,
+                ),
+              ),
             ],
           ),
-        ],
-        SizedBox(height: gap),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text('Recent popups', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700)),
-            TextButton.icon(
-              onPressed: () => setState(() => _showRecentPopups = !_showRecentPopups),
-              icon: Icon(_showRecentPopups ? Icons.expand_less : Icons.expand_more),
-              label: Text(_showRecentPopups ? 'Hide' : 'Show'),
+          if (_pickedPopupFile != null) ...[
+            SizedBox(height: gap * 0.6),
+            Row(
+              children: [
+                Icon(Icons.insert_drive_file, color: AppColors.onSurfaceMuted),
+                SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    '${_pickedPopupFile!.name} • ${(_pickedPopupFile!.size / (1024 * 1024)).toStringAsFixed(2)} MB',
+                    style: AppText.tileSubtitle,
+                  ),
+                ),
+              ],
             ),
           ],
-        ),
-        if (_showRecentPopups) SizedBox(height: 8),
-        if (_showRecentPopups)
-          StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('admin_popups').orderBy('created_at', descending: true).limit(5).snapshots(),
-            builder: (context, snap) {
-              if (snap.connectionState == ConnectionState.waiting) {
-                return Padding(
-                  padding: EdgeInsets.all(pad),
-                  child: Center(child: CircularProgressIndicator(color: context.c.primary)),
-                );
-              }
-              final docs = snap.data?.docs ?? [];
-              if (docs.isEmpty) {
-                return Text('No popups yet', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted));
-              }
-              return Column(
-                children: docs.map((d) {
-                  final data = d.data() as Map<String, dynamic>;
-                  final active = (data['active'] ?? false) as bool;
-                  final title = (data['title'] ?? '').toString();
-                  final url = (data['url'] ?? '').toString();
-                  final type = (data['type'] ?? '').toString();
-                  final cloudId = (data['cloudinary_public_id'] ?? '').toString();
-                  return ListTile(
-                    dense: true,
-                    contentPadding: EdgeInsets.zero,
-                    leading: Icon(
-                      type == 'image' ? Icons.image : (type == 'video' ? Icons.videocam : Icons.picture_as_pdf),
-                      color: active ? AppColors.brand : AppColors.onSurfaceMuted,
-                    ),
-                    title: Text(title.isEmpty ? url.split('/').last : title, style: AppText.tileSubtitle.copyWith(fontWeight: FontWeight.w600)),
-                    subtitle: Text('${type.toUpperCase()} • ${active ? 'ACTIVE' : 'inactive'}', style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
-                    trailing: PopupMenuButton<String>(
-                      onSelected: (choice) async {
-  try {
-    if (choice == 'deactivate') {
-      await d.reference.set({'active': false}, SetOptions(merge: true));
-    } else if (choice == 'activate') {
-      await _deactivateOtherPopups();
-      await d.reference.set({'active': true}, SetOptions(merge: true));
-    } else if (choice == 'delete') {
-      await _confirmAndDeletePopup(d);
-    } else if (choice == 'open') {
-      final uri = Uri.tryParse(url);
-      if (uri != null && await canLaunchUrl(uri)) await launchUrl(uri, mode: LaunchMode.externalApplication);
-      else ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Could not open URL')));
-    }
-  } catch (e) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Action failed: $e'), backgroundColor: AppColors.danger));
-  }
-},
-                      itemBuilder: (_) => <PopupMenuEntry<String>>[
-                        if (!active) PopupMenuItem(value: 'activate', child: Text('Activate')),
-                        if (active) PopupMenuItem(value: 'deactivate', child: Text('Deactivate')),
-                        PopupMenuItem(value: 'open', child: Text('Open')),
-                        PopupMenuItem(value: 'delete', child: Text('Delete'), textStyle: TextStyle(color: AppColors.danger)),
-                      ],
+          SizedBox(height: gap),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                'Recent popups',
+                style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700),
+              ),
+              TextButton.icon(
+                onPressed: () =>
+                    setState(() => _showRecentPopups = !_showRecentPopups),
+                icon: Icon(
+                  _showRecentPopups ? Icons.expand_less : Icons.expand_more,
+                ),
+                label: Text(_showRecentPopups ? 'Hide' : 'Show'),
+              ),
+            ],
+          ),
+          if (_showRecentPopups) SizedBox(height: 8),
+          if (_showRecentPopups)
+            StreamBuilder<QuerySnapshot>(
+              stream: FirebaseFirestore.instance
+                  .collection('admin_popups')
+                  .orderBy('created_at', descending: true)
+                  .limit(5)
+                  .snapshots(),
+              builder: (context, snap) {
+                if (snap.connectionState == ConnectionState.waiting) {
+                  return Padding(
+                    padding: EdgeInsets.all(pad),
+                    child: Center(
+                      child: CircularProgressIndicator(
+                        color: context.c.primary,
+                      ),
                     ),
                   );
-                }).toList(),
-              );
-            },
-          ),
-      ]),
+                }
+                final docs = snap.data?.docs ?? [];
+                if (docs.isEmpty) {
+                  return Text(
+                    'No popups yet',
+                    style: AppText.tileSubtitle.copyWith(
+                      color: AppColors.onSurfaceMuted,
+                    ),
+                  );
+                }
+                return Column(
+                  children: docs.map((d) {
+                    final data = d.data() as Map<String, dynamic>;
+                    final active = (data['active'] ?? false) as bool;
+                    final title = (data['title'] ?? '').toString();
+                    final url = (data['url'] ?? '').toString();
+                    final type = (data['type'] ?? '').toString();
+                    final cloudId = (data['cloudinary_public_id'] ?? '')
+                        .toString();
+                    return ListTile(
+                      dense: true,
+                      contentPadding: EdgeInsets.zero,
+                      leading: Icon(
+                        type == 'image'
+                            ? Icons.image
+                            : (type == 'video'
+                                  ? Icons.videocam
+                                  : Icons.picture_as_pdf),
+                        color: active
+                            ? AppColors.brand
+                            : AppColors.onSurfaceMuted,
+                      ),
+                      title: Text(
+                        title.isEmpty ? url.split('/').last : title,
+                        style: AppText.tileSubtitle.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '${type.toUpperCase()} • ${active ? 'ACTIVE' : 'inactive'}',
+                        style: AppText.hintSmall.copyWith(
+                          color: AppColors.onSurfaceMuted,
+                        ),
+                      ),
+                      trailing: PopupMenuButton<String>(
+                        onSelected: (choice) async {
+                          try {
+                            if (choice == 'deactivate') {
+                              await d.reference.set({
+                                'active': false,
+                              }, SetOptions(merge: true));
+                            } else if (choice == 'activate') {
+                              await _deactivateOtherPopups();
+                              await d.reference.set({
+                                'active': true,
+                              }, SetOptions(merge: true));
+                            } else if (choice == 'delete') {
+                              await _confirmAndDeletePopup(d);
+                            } else if (choice == 'open') {
+                              final uri = Uri.tryParse(url);
+                              if (uri != null && await canLaunchUrl(uri))
+                                await launchUrl(
+                                  uri,
+                                  mode: LaunchMode.externalApplication,
+                                );
+                              else
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(content: Text('Could not open URL')),
+                                );
+                            }
+                          } catch (e) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Action failed: $e'),
+                                backgroundColor: AppColors.danger,
+                              ),
+                            );
+                          }
+                        },
+                        itemBuilder: (_) => <PopupMenuEntry<String>>[
+                          if (!active)
+                            PopupMenuItem(
+                              value: 'activate',
+                              child: Text('Activate'),
+                            ),
+                          if (active)
+                            PopupMenuItem(
+                              value: 'deactivate',
+                              child: Text('Deactivate'),
+                            ),
+                          PopupMenuItem(value: 'open', child: Text('Open')),
+                          PopupMenuItem(
+                            value: 'delete',
+                            child: Text('Delete'),
+                            textStyle: TextStyle(color: AppColors.danger),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                );
+              },
+            ),
+        ],
+      ),
     );
   }
 
   // ---------------- Generate Report UI (simplified) ----------------
 
   Widget _buildGenerateReportCard(double pad, double gap, double radius) {
-    final labelStyle = AppText.tileSubtitle.copyWith(color: context.c.onSurface);
+    final labelStyle = AppText.tileSubtitle.copyWith(
+      color: context.c.onSurface,
+    );
 
     Widget _presetButton(String id, String label) {
       final selected = _selectedPreset == id;
@@ -664,7 +859,9 @@ class _SettingsBlockState extends State<SettingsBlock> {
         onSelected: (_) => setState(() => _selectedPreset = id),
         selectedColor: context.c.primary.withOpacity(0.14),
         backgroundColor: AppColors.neuBg,
-        labelStyle: TextStyle(color: selected ? context.c.primary : context.c.onSurface),
+        labelStyle: TextStyle(
+          color: selected ? context.c.primary : context.c.onSurface,
+        ),
       );
     }
 
@@ -676,56 +873,80 @@ class _SettingsBlockState extends State<SettingsBlock> {
         borderRadius: BorderRadius.circular(radius),
         boxShadow: AppShadows.card,
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        _title('Generate Report'),
-        SizedBox(height: gap * 0.4),
-        Text('Select period and generate report. (Opens Report page to create PDF.)', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
-        SizedBox(height: gap),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _title('Generate Report'),
+          SizedBox(height: gap * 0.4),
+          Text(
+            'Select period and generate report. (Opens Report page to create PDF.)',
+            style: AppText.tileSubtitle.copyWith(
+              color: AppColors.onSurfaceMuted,
+            ),
+          ),
+          SizedBox(height: gap),
 
-        Text('Preset ranges', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700)),
-        SizedBox(height: 8),
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          children: [
-            _presetButton('30D', '30 days'),
-            _presetButton('90D', '90 days'),
-            _presetButton('6M', '6 months'),
-            _presetButton('1Y', '1 year'),
-          ],
-        ),
+          Text(
+            'Preset ranges',
+            style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700),
+          ),
+          SizedBox(height: 8),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              _presetButton('30D', '30 days'),
+              _presetButton('90D', '90 days'),
+              _presetButton('6M', '6 months'),
+              _presetButton('1Y', '1 year'),
+            ],
+          ),
 
-        SizedBox(height: gap),
+          SizedBox(height: gap),
 
-        Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            // show computed range text next to the Generate button
-            Expanded(
-              child: Text(
-                _describeSelectedRange(),
-                style: labelStyle,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              // show computed range text next to the Generate button
+              Expanded(
+                child: Text(_describeSelectedRange(), style: labelStyle),
               ),
-            ),
-            SizedBox(width: 12),
-            ElevatedButton.icon(
-              onPressed: () {
-                // Navigate to the ReportPage and pass the selected preset
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => ReportPage(initialPreset: _selectedPreset)),
-                );
-              },
-              icon: Icon(Icons.open_in_new, color: AppColors.onSurfaceInverse),
-              label: Text('Open Report', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.brand),
-            ),
-          ],
-        ),
+              SizedBox(width: 12),
+              ElevatedButton.icon(
+                onPressed: () {
+                  // Navigate to the ReportPage and pass the selected preset
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                          ReportPage(initialPreset: _selectedPreset),
+                    ),
+                  );
+                },
+                icon: Icon(
+                  Icons.open_in_new,
+                  color: AppColors.onSurfaceInverse,
+                ),
+                label: Text(
+                  'Open Report',
+                  style: AppText.tileSubtitle.copyWith(
+                    color: AppColors.onSurfaceInverse,
+                  ),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.brand,
+                ),
+              ),
+            ],
+          ),
 
-        SizedBox(height: gap * 0.6),
-        Text('Note: Report page will query Firestore and call your server endpoint to fetch Razorpay totals and generate a PDF.', style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
-      ]),
+          SizedBox(height: gap * 0.6),
+          Text(
+            'Note: Report page will query Firestore and call your server endpoint to fetch Razorpay totals and generate a PDF.',
+            style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted),
+          ),
+        ],
+      ),
     );
   }
 
@@ -743,10 +964,14 @@ class _SettingsBlockState extends State<SettingsBlock> {
     DateTime start;
     switch (preset) {
       case '30D':
-        start = end.subtract(const Duration(days: 30)).copyWith(hour: 0, minute: 0, second: 0);
+        start = end
+            .subtract(const Duration(days: 30))
+            .copyWith(hour: 0, minute: 0, second: 0);
         break;
       case '90D':
-        start = end.subtract(const Duration(days: 90)).copyWith(hour: 0, minute: 0, second: 0);
+        start = end
+            .subtract(const Duration(days: 90))
+            .copyWith(hour: 0, minute: 0, second: 0);
         break;
       case '6M':
         // subtracting months safely
@@ -755,13 +980,23 @@ class _SettingsBlockState extends State<SettingsBlock> {
         final month = m <= 0 ? m + 12 : m;
         // ensure day validity
         final day = now.day.clamp(1, DateUtils.getDaysInMonth(year, month));
-        start = DateTime(year, month, day).copyWith(hour: 0, minute: 0, second: 0);
+        start = DateTime(
+          year,
+          month,
+          day,
+        ).copyWith(hour: 0, minute: 0, second: 0);
         break;
       case '1Y':
-        start = DateTime(now.year - 1, now.month, now.day).copyWith(hour: 0, minute: 0, second: 0);
+        start = DateTime(
+          now.year - 1,
+          now.month,
+          now.day,
+        ).copyWith(hour: 0, minute: 0, second: 0);
         break;
       default:
-        start = end.subtract(const Duration(days: 30)).copyWith(hour: 0, minute: 0, second: 0);
+        start = end
+            .subtract(const Duration(days: 30))
+            .copyWith(hour: 0, minute: 0, second: 0);
     }
     return Tuple2(start, end);
   }
@@ -771,11 +1006,17 @@ class _SettingsBlockState extends State<SettingsBlock> {
     final range = _computeRangeMillis(_selectedPreset, now);
     final start = range.item1;
     final end = range.item2;
-    final name = 'report_${_selectedPreset}_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}.pdf';
+    final name =
+        'report_${_selectedPreset}_${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}.pdf';
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Generate requested for ${_selectedPreset}: ${_formatDate(start)} → ${_formatDate(end)} (simulated).', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)),
+        content: Text(
+          'Generate requested for ${_selectedPreset}: ${_formatDate(start)} → ${_formatDate(end)} (simulated).',
+          style: AppText.tileSubtitle.copyWith(
+            color: AppColors.onSurfaceInverse,
+          ),
+        ),
         backgroundColor: AppColors.warnBg,
         behavior: SnackBarBehavior.floating,
         duration: const Duration(seconds: 3),
@@ -785,10 +1026,22 @@ class _SettingsBlockState extends State<SettingsBlock> {
     showDialog<void>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Generation Requested', style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
-        content: Text('Report: $name\nPeriod: ${_formatDate(start)} → ${_formatDate(end)}\n\nThis is a UI-only simulation. Integrate your backend export endpoint to generate the actual file.', style: AppText.tileSubtitle),
+        title: Text(
+          'Generation Requested',
+          style: AppText.sectionTitle.copyWith(color: context.c.onSurface),
+        ),
+        content: Text(
+          'Report: $name\nPeriod: ${_formatDate(start)} → ${_formatDate(end)}\n\nThis is a UI-only simulation. Integrate your backend export endpoint to generate the actual file.',
+          style: AppText.tileSubtitle,
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: Text('OK', style: AppText.tileSubtitle.copyWith(color: context.c.primary))),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(
+              'OK',
+              style: AppText.tileSubtitle.copyWith(color: context.c.primary),
+            ),
+          ),
         ],
       ),
     );
@@ -805,14 +1058,46 @@ class _SettingsBlockState extends State<SettingsBlock> {
     final pad = (sw * 0.04).clamp(12.0, 28.0);
 
     final predefinedVehicles = [
-      {'type': 'Manual Sedan', 'description': 'Standard transmission', 'defaultFee': 500},
-      {'type': 'Automatic Sedan', 'description': 'Automatic transmission', 'defaultFee': 600},
-      {'type': 'Manual Hatchback', 'description': 'Compact car with manual transmission', 'defaultFee': 450},
-      {'type': 'Automatic Hatchback', 'description': 'Compact car with automatic transmission', 'defaultFee': 550},
-      {'type': 'Manual SUV', 'description': 'Sports utility vehicle', 'defaultFee': 700},
-      {'type': 'Automatic SUV', 'description': 'Sports utility vehicle', 'defaultFee': 800},
-      {'type': 'Motorcycle', 'description': 'Two wheeler vehicle', 'defaultFee': 300},
-      {'type': 'Scooter', 'description': 'Automatic two wheeler', 'defaultFee': 250},
+      {
+        'type': 'Manual Sedan',
+        'description': 'Standard transmission',
+        'defaultFee': 500,
+      },
+      {
+        'type': 'Automatic Sedan',
+        'description': 'Automatic transmission',
+        'defaultFee': 600,
+      },
+      {
+        'type': 'Manual Hatchback',
+        'description': 'Compact car with manual transmission',
+        'defaultFee': 450,
+      },
+      {
+        'type': 'Automatic Hatchback',
+        'description': 'Compact car with automatic transmission',
+        'defaultFee': 550,
+      },
+      {
+        'type': 'Manual SUV',
+        'description': 'Sports utility vehicle',
+        'defaultFee': 700,
+      },
+      {
+        'type': 'Automatic SUV',
+        'description': 'Sports utility vehicle',
+        'defaultFee': 800,
+      },
+      {
+        'type': 'Motorcycle',
+        'description': 'Two wheeler vehicle',
+        'defaultFee': 300,
+      },
+      {
+        'type': 'Scooter',
+        'description': 'Automatic two wheeler',
+        'defaultFee': 250,
+      },
     ];
 
     showDialog(
@@ -823,7 +1108,9 @@ class _SettingsBlockState extends State<SettingsBlock> {
             horizontal: (sw * 0.04).clamp(12.0, 40.0),
             vertical: (sh * 0.04).clamp(12.0, 40.0),
           ),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular((sw * 0.02).clamp(8.0, 14.0))),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular((sw * 0.02).clamp(8.0, 14.0)),
+          ),
           child: SizedBox(
             width: dialogW,
             height: dialogH,
@@ -833,15 +1120,29 @@ class _SettingsBlockState extends State<SettingsBlock> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-                    Text('Add Vehicle Type', style: AppText.sectionTitle.copyWith(color: context.c.onSurface, fontWeight: FontWeight.bold)),
-                    IconButton(
-                      onPressed: () => Navigator.of(context).pop(),
-                      icon: Icon(Icons.close, color: context.c.onSurface),
-                    ),
-                  ]),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        'Add Vehicle Type',
+                        style: AppText.sectionTitle.copyWith(
+                          color: context.c.onSurface,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: Icon(Icons.close, color: context.c.onSurface),
+                      ),
+                    ],
+                  ),
                   SizedBox(height: pad * 0.75),
-                  Text('Select a vehicle type to add:', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted)),
+                  Text(
+                    'Select a vehicle type to add:',
+                    style: AppText.tileSubtitle.copyWith(
+                      color: AppColors.onSurfaceMuted,
+                    ),
+                  ),
                   SizedBox(height: pad * 0.75),
                   Flexible(
                     child: ListView.builder(
@@ -859,12 +1160,16 @@ class _SettingsBlockState extends State<SettingsBlock> {
                           margin: EdgeInsets.only(bottom: pad * 0.5),
                           child: InkWell(
                             onTap: () => _showFeeDialog(context, vehicle),
-                            borderRadius: BorderRadius.circular((sw * 0.02).clamp(8.0, 14.0)),
+                            borderRadius: BorderRadius.circular(
+                              (sw * 0.02).clamp(8.0, 14.0),
+                            ),
                             child: Container(
                               padding: EdgeInsets.all(pad),
                               decoration: BoxDecoration(
                                 border: Border.all(color: AppColors.divider),
-                                borderRadius: BorderRadius.circular((sw * 0.02).clamp(8.0, 14.0)),
+                                borderRadius: BorderRadius.circular(
+                                  (sw * 0.02).clamp(8.0, 14.0),
+                                ),
                               ),
                               child: Row(
                                 children: [
@@ -873,22 +1178,43 @@ class _SettingsBlockState extends State<SettingsBlock> {
                                     height: iconBox,
                                     decoration: BoxDecoration(
                                       color: AppColors.brand.withOpacity(0.06),
-                                      borderRadius: BorderRadius.circular((sw * 0.02).clamp(8.0, 14.0)),
+                                      borderRadius: BorderRadius.circular(
+                                        (sw * 0.02).clamp(8.0, 14.0),
+                                      ),
                                     ),
-                                    child: Icon(icon, color: AppColors.brand, size: iconSize),
+                                    child: Icon(
+                                      icon,
+                                      color: AppColors.brand,
+                                      size: iconSize,
+                                    ),
                                   ),
                                   SizedBox(width: pad),
                                   Expanded(
                                     child: Column(
-                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
                                       children: [
-                                        Text(carType, style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
+                                        Text(
+                                          carType,
+                                          style: AppText.tileTitle.copyWith(
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
                                         SizedBox(height: pad * 0.25),
-                                        Text(vehicle['description'] as String, style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
+                                        Text(
+                                          vehicle['description'] as String,
+                                          style: AppText.hintSmall.copyWith(
+                                            color: AppColors.onSurfaceMuted,
+                                          ),
+                                        ),
                                       ],
                                     ),
                                   ),
-                                  Icon(Icons.arrow_forward_ios, color: AppColors.onSurfaceFaint, size: 16),
+                                  Icon(
+                                    Icons.arrow_forward_ios,
+                                    color: AppColors.onSurfaceFaint,
+                                    size: 16,
+                                  ),
                                 ],
                               ),
                             ),
@@ -910,14 +1236,22 @@ class _SettingsBlockState extends State<SettingsBlock> {
     final sw = MediaQuery.of(context).size.width;
     final sh = MediaQuery.of(context).size.height;
     final isDesktop = sw >= 1024;
-    final feeController = TextEditingController(text: vehicle['defaultFee'].toString());
+    final feeController = TextEditingController(
+      text: vehicle['defaultFee'].toString(),
+    );
 
     showDialog(
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          insetPadding: EdgeInsets.symmetric(horizontal: (sw * 0.06).clamp(16.0, 60.0), vertical: (sh * 0.06).clamp(16.0, 60.0)),
-          title: Text('Set Fee for ${vehicle['type']}', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
+          insetPadding: EdgeInsets.symmetric(
+            horizontal: (sw * 0.06).clamp(16.0, 60.0),
+            vertical: (sh * 0.06).clamp(16.0, 60.0),
+          ),
+          title: Text(
+            'Set Fee for ${vehicle['type']}',
+            style: AppText.tileTitle.copyWith(color: context.c.onSurface),
+          ),
           content: SizedBox(
             width: sw * (isDesktop ? 0.4 : 0.9), // % width
             child: Column(
@@ -927,17 +1261,25 @@ class _SettingsBlockState extends State<SettingsBlock> {
                   controller: feeController,
                   keyboardType: TextInputType.number,
                   inputFormatters: [
-                    FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+                    FilteringTextInputFormatter.allow(
+                      RegExp(r'^\d*\.?\d{0,2}'),
+                    ),
                   ],
                   decoration: InputDecoration(
                     labelText: 'Fee (₹)',
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppRadii.s),
+                    ),
                     prefixText: '₹',
-                    labelStyle: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted),
+                    labelStyle: AppText.tileSubtitle.copyWith(
+                      color: AppColors.onSurfaceMuted,
+                    ),
                     filled: true,
                     fillColor: AppColors.surface,
                   ),
-                  style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
+                  style: AppText.tileSubtitle.copyWith(
+                    color: context.c.onSurface,
+                  ),
                 ),
               ],
             ),
@@ -945,11 +1287,16 @@ class _SettingsBlockState extends State<SettingsBlock> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(),
-              child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary)),
+              child: Text(
+                'Cancel',
+                style: AppText.tileSubtitle.copyWith(color: context.c.primary),
+              ),
             ),
             ElevatedButton(
               onPressed: () async {
-                final fee = double.tryParse(feeController.text.trim()) ?? vehicle['defaultFee'];
+                final fee =
+                    double.tryParse(feeController.text.trim()) ??
+                    vehicle['defaultFee'];
                 final carType = vehicle['type'] as String;
 
                 final col = FirebaseFirestore.instance.collection('vehicles');
@@ -964,8 +1311,14 @@ class _SettingsBlockState extends State<SettingsBlock> {
                 Navigator.of(context).pop(); // fee dialog
                 Navigator.of(context).pop(); // list dialog
               },
-              style: ElevatedButton.styleFrom(backgroundColor: context.c.primary, foregroundColor: context.c.onPrimary),
-              child: Text('Add Vehicle', style: AppText.tileTitle.copyWith(color: context.c.onPrimary)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: context.c.primary,
+                foregroundColor: context.c.onPrimary,
+              ),
+              child: Text(
+                'Add Vehicle',
+                style: AppText.tileTitle.copyWith(color: context.c.onPrimary),
+              ),
             ),
           ],
         );
@@ -979,21 +1332,27 @@ class _SettingsBlockState extends State<SettingsBlock> {
     try {
       final res = await FilePicker.platform.pickFiles(
         type: FileType.custom,
-        allowedExtensions: ['jpg','jpeg','png','mp4','webm','pdf'],
+        allowedExtensions: ['jpg', 'jpeg', 'png', 'mp4', 'webm', 'pdf'],
         withData: true,
       );
       if (res == null || res.files.isEmpty) return;
       final f = res.files.first;
       setState(() => _pickedPopupFile = f);
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('File pick error: $e'), backgroundColor: AppColors.danger));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('File pick error: $e'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
     }
   }
 
   // NOTE: keep this helper for internal cleaning when you want to store safe identifiers.
   // We will NOT use it for signing because signature must be calculated on exactly the string
   // the signer expects (no client-side transformation before sending to signer).
-  String _clean(String s) => s.replaceAll(RegExp(r'\s+'), '_').replaceAll('/', '_');
+  String _clean(String s) =>
+      s.replaceAll(RegExp(r'\s+'), '_').replaceAll('/', '_');
 
   /// Request a signature from your PHP signer.
   /// Simple contract: send public_id, folder, overwrite and get { api_key, timestamp, signature, cloud_name }.
@@ -1016,12 +1375,13 @@ class _SettingsBlockState extends State<SettingsBlock> {
     }
     final json = jsonDecode(res.body) as Map<String, dynamic>;
     debugPrint('Signer response: $json'); // remove in prod
-    if (json['signature'] == null || json['api_key'] == null || json['timestamp'] == null) {
+    if (json['signature'] == null ||
+        json['api_key'] == null ||
+        json['timestamp'] == null) {
       throw Exception('Invalid signature response: $json');
     }
     return json;
   }
-
 
   /// Upload bytes to Cloudinary, using the exact params returned by the signer.
   /// This avoids mismatches between what was signed and what is uploaded.
@@ -1035,7 +1395,11 @@ class _SettingsBlockState extends State<SettingsBlock> {
     required String folder,
     String overwrite = 'false',
   }) async {
-    final signed = await _getSignature(publicId: publicId, folder: folder, overwrite: overwrite);
+    final signed = await _getSignature(
+      publicId: publicId,
+      folder: folder,
+      overwrite: overwrite,
+    );
 
     final cloudName = (signed['cloud_name'] ?? '').toString();
     final apiKey = signed['api_key'].toString();
@@ -1051,9 +1415,18 @@ class _SettingsBlockState extends State<SettingsBlock> {
       ..fields['folder'] = folder
       ..fields['overwrite'] = overwrite;
 
-    final ext = filename.contains('.') ? filename.split('.').last.toLowerCase() : '';
+    final ext = filename.contains('.')
+        ? filename.split('.').last.toLowerCase()
+        : '';
     final contentType = _inferMediaType(ext);
-    req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename, contentType: contentType));
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: filename,
+        contentType: contentType,
+      ),
+    );
 
     debugPrint('Uploading to Cloudinary (auto): $endpoint');
     debugPrint('Upload fields: ${req.fields}');
@@ -1097,12 +1470,16 @@ class _SettingsBlockState extends State<SettingsBlock> {
 
       // folder per-day
       final now = DateTime.now();
-      final datePart = '${now.year}${now.month.toString().padLeft(2,'0')}${now.day.toString().padLeft(2,'0')}';
+      final datePart =
+          '${now.year}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
       final folder = '$_cloudBaseFolder/$datePart';
 
       // generate safer publicId: base + ts
-      final baseName = filename.contains('.') ? filename.split('.').first : filename;
-      final publicId = '${_clean(baseName)}_${DateTime.now().millisecondsSinceEpoch}';
+      final baseName = filename.contains('.')
+          ? filename.split('.').first
+          : filename;
+      final publicId =
+          '${_clean(baseName)}_${DateTime.now().millisecondsSinceEpoch}';
 
       // obtain bytes (web or native)
       late Uint8List bytes;
@@ -1139,29 +1516,41 @@ class _SettingsBlockState extends State<SettingsBlock> {
         'cloudinary_public_id': '$folder/$publicId',
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Popup uploaded & activated'), backgroundColor: AppColors.success));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Popup uploaded & activated'),
+          backgroundColor: AppColors.success,
+        ),
+      );
       setState(() {
         _pickedPopupFile = null;
       });
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Upload failed: $e'), backgroundColor: AppColors.danger));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Upload failed: $e'),
+          backgroundColor: AppColors.danger,
+        ),
+      );
     } finally {
       setState(() => _popupUploading = false);
     }
   }
 
-
   String _mapCloudinaryTypeFromExt(String ext) {
     final e = ext.toLowerCase();
-    if (['jpg','jpeg','png','gif','webp'].contains(e)) return 'image';
-    if (['mp4','webm','mov','mkv'].contains(e)) return 'video';
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp'].contains(e)) return 'image';
+    if (['mp4', 'webm', 'mov', 'mkv'].contains(e)) return 'video';
     if (['pdf'].contains(e)) return 'pdf';
     return 'image';
   }
 
   Future<void> _deactivateOtherPopups() async {
     final fs = FirebaseFirestore.instance;
-    final q = await fs.collection('admin_popups').where('active', isEqualTo: true).get();
+    final q = await fs
+        .collection('admin_popups')
+        .where('active', isEqualTo: true)
+        .get();
     final batch = fs.batch();
     for (final d in q.docs) {
       batch.update(d.reference, {'active': false});
@@ -1181,8 +1570,9 @@ class _SettingsBlockState extends State<SettingsBlock> {
 
   String _resourceTypeFromExt(String ext) {
     final e = ext.toLowerCase();
-    if (['jpg','jpeg','png','gif','webp','bmp','tiff','svg'].contains(e)) return 'image';
-    if (['mp4','mov','avi','mkv','webm'].contains(e)) return 'video';
+    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'svg'].contains(e))
+      return 'image';
+    if (['mp4', 'mov', 'avi', 'mkv', 'webm'].contains(e)) return 'video';
     return 'raw';
   }
 
@@ -1200,7 +1590,9 @@ class _SettingsBlockState extends State<SettingsBlock> {
       throw Exception('Signature server error: ${res.statusCode} ${res.body}');
     }
     final json = jsonDecode(res.body) as Map<String, dynamic>;
-    if (json['signature'] == null || json['api_key'] == null || json['timestamp'] == null) {
+    if (json['signature'] == null ||
+        json['api_key'] == null ||
+        json['timestamp'] == null) {
       throw Exception('Invalid signature response: $json');
     }
     return json;
@@ -1211,20 +1603,24 @@ class _SettingsBlockState extends State<SettingsBlock> {
     required String resourceType, // image|raw|video
     required Map<String, dynamic> signed,
   }) async {
-    final uri = Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/destroy');
+    final uri = Uri.parse(
+      'https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/destroy',
+    );
 
     final req = http.MultipartRequest('POST', uri)
-      ..fields['api_key']    = signed['api_key'].toString()
-      ..fields['timestamp']  = signed['timestamp'].toString()
-      ..fields['signature']  = signed['signature'].toString()
-      ..fields['public_id']  = fullPublicId
+      ..fields['api_key'] = signed['api_key'].toString()
+      ..fields['timestamp'] = signed['timestamp'].toString()
+      ..fields['signature'] = signed['signature'].toString()
+      ..fields['public_id'] = fullPublicId
       ..fields['invalidate'] = 'true';
 
     final streamed = await req.send();
     final body = await streamed.stream.bytesToString();
 
     if (streamed.statusCode != 200) {
-      throw Exception('Cloudinary destroy failed: ${streamed.statusCode} $body');
+      throw Exception(
+        'Cloudinary destroy failed: ${streamed.statusCode} $body',
+      );
     }
 
     final json = jsonDecode(body) as Map<String, dynamic>;
@@ -1259,7 +1655,9 @@ class _SettingsBlockState extends State<SettingsBlock> {
       }
       // else continue to next candidate
     }
-    throw Exception('Cloudinary destroy did not find the asset under any resource_type.');
+    throw Exception(
+      'Cloudinary destroy did not find the asset under any resource_type.',
+    );
   }
 
   /// Delete an admin_popup document and its Cloudinary asset (if present).
@@ -1268,7 +1666,9 @@ class _SettingsBlockState extends State<SettingsBlock> {
   Future<void> _confirmAndDeletePopup(DocumentSnapshot docSnap) async {
     final docRef = docSnap.reference;
     final data = docSnap.data() as Map<String, dynamic>? ?? {};
-    final storedCloudId = (data['cloudinary_public_id'] ?? '').toString().trim();
+    final storedCloudId = (data['cloudinary_public_id'] ?? '')
+        .toString()
+        .trim();
     final storedFolder = (data['cloudinary_folder'] ?? '').toString().trim();
     final title = (data['title'] ?? docSnap.id).toString();
     final fileUrl = (data['url'] ?? '').toString();
@@ -1276,11 +1676,31 @@ class _SettingsBlockState extends State<SettingsBlock> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (_) => AlertDialog(
-        title: Text('Delete popup', style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
-        content: Text('Delete \"$title\"? This will remove the Firestore record and the Cloudinary asset.'),
+        title: Text(
+          'Delete popup',
+          style: AppText.sectionTitle.copyWith(color: context.c.onSurface),
+        ),
+        content: Text(
+          'Delete \"$title\"? This will remove the Firestore record and the Cloudinary asset.',
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context, false), child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary))),
-          ElevatedButton(onPressed: () => Navigator.pop(context, true), style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger), child: Text('Delete', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse))),
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(
+              'Cancel',
+              style: AppText.tileSubtitle.copyWith(color: context.c.primary),
+            ),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.pop(context, true),
+            style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
+            child: Text(
+              'Delete',
+              style: AppText.tileTitle.copyWith(
+                color: AppColors.onSurfaceInverse,
+              ),
+            ),
+          ),
         ],
       ),
     );
@@ -1307,9 +1727,21 @@ class _SettingsBlockState extends State<SettingsBlock> {
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation(context.c.primary))),
+                    SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation(context.c.primary),
+                      ),
+                    ),
                     const SizedBox(width: 12),
-                    Text('Deleting...', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
+                    Text(
+                      'Deleting...',
+                      style: AppText.tileSubtitle.copyWith(
+                        color: context.c.onSurface,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -1323,7 +1755,17 @@ class _SettingsBlockState extends State<SettingsBlock> {
       await docRef.delete();
       // ensure any progress dialog is closed
       if (Navigator.canPop(context)) Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Popup deleted', style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse)), backgroundColor: AppColors.success));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Popup deleted',
+            style: AppText.tileSubtitle.copyWith(
+              color: AppColors.onSurfaceInverse,
+            ),
+          ),
+          backgroundColor: AppColors.success,
+        ),
+      );
     }
 
     try {
@@ -1346,7 +1788,10 @@ class _SettingsBlockState extends State<SettingsBlock> {
         if (last.isNotEmpty && last != storedCloudId) candidates.add(last);
       } else {
         // storedCloudId is just a name — if folder exists, try folder/publicId
-        if (storedFolder.isNotEmpty) candidates.add('${storedFolder.replaceAll(RegExp(r'\/$'), '')}/$storedCloudId');
+        if (storedFolder.isNotEmpty)
+          candidates.add(
+            '${storedFolder.replaceAll(RegExp(r'\/$'), '')}/$storedCloudId',
+          );
       }
 
       // cleaned variant (spaces -> underscores)
@@ -1355,7 +1800,11 @@ class _SettingsBlockState extends State<SettingsBlock> {
 
       // Map popup type -> resource_type for initial detection (image, video => video, else raw)
       final popupType = (data['type'] ?? '').toString().toLowerCase();
-      String primaryFromType = (popupType == 'image') ? 'image' : (popupType == 'video') ? 'video' : 'raw';
+      String primaryFromType = (popupType == 'image')
+          ? 'image'
+          : (popupType == 'video')
+          ? 'video'
+          : 'raw';
 
       // But prefer detection from stored URL if available
       final detectedFromUrl = _resourceTypeFromUrl(fileUrl);
@@ -1364,7 +1813,10 @@ class _SettingsBlockState extends State<SettingsBlock> {
       Exception? lastError;
       for (final cand in candidates) {
         try {
-          await _cloudinaryDestroyWithFallback(fullPublicId: cand, primaryType: primaryType);
+          await _cloudinaryDestroyWithFallback(
+            fullPublicId: cand,
+            primaryType: primaryType,
+          );
           // success — remove doc
           await _deleteDocOnly();
           return;
@@ -1375,7 +1827,8 @@ class _SettingsBlockState extends State<SettingsBlock> {
       }
 
       // If we reach here none of the attempts worked
-      throw lastError ?? Exception('All delete attempts failed for stored id: $storedCloudId');
+      throw lastError ??
+          Exception('All delete attempts failed for stored id: $storedCloudId');
     } catch (e) {
       // ensure progress dialog is closed
       if (Navigator.canPop(context)) Navigator.pop(context);
@@ -1384,17 +1837,32 @@ class _SettingsBlockState extends State<SettingsBlock> {
       final proceed = await showDialog<bool>(
         context: context,
         builder: (_) => AlertDialog(
-          title: Text('Delete failed', style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
-          content: Text('Could not delete Cloudinary asset: $e\n\nDelete Firestore record only?'),
+          title: Text(
+            'Delete failed',
+            style: AppText.sectionTitle.copyWith(color: context.c.onSurface),
+          ),
+          content: Text(
+            'Could not delete Cloudinary asset: $e\n\nDelete Firestore record only?',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary)),
+              child: Text(
+                'Cancel',
+                style: AppText.tileSubtitle.copyWith(color: context.c.primary),
+              ),
             ),
             ElevatedButton(
               onPressed: () => Navigator.pop(context, true),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.danger),
-              child: Text('Delete doc only', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.danger,
+              ),
+              child: Text(
+                'Delete doc only',
+                style: AppText.tileTitle.copyWith(
+                  color: AppColors.onSurfaceInverse,
+                ),
+              ),
             ),
           ],
         ),
@@ -1402,9 +1870,24 @@ class _SettingsBlockState extends State<SettingsBlock> {
 
       if (proceed == true) {
         await docRef.delete();
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Popup record deleted (Cloud asset may still exist)', style: AppText.tileSubtitle), backgroundColor: AppColors.warning));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Popup record deleted (Cloud asset may still exist)',
+              style: AppText.tileSubtitle,
+            ),
+            backgroundColor: AppColors.warning,
+          ),
+        );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Delete failed: $e', style: AppText.tileSubtitle.copyWith(color: AppColors.danger))));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Delete failed: $e',
+              style: AppText.tileSubtitle.copyWith(color: AppColors.danger),
+            ),
+          ),
+        );
       }
     }
   }
@@ -1436,12 +1919,27 @@ class _SettingsBlockState extends State<SettingsBlock> {
                 showDialog(
                   context: context,
                   builder: (_) => AlertDialog(
-                    title: Text('Logout', style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
-                    content: Text('Are you sure you want to logout?', style: AppText.tileSubtitle.copyWith(color: context.c.onSurface)),
+                    title: Text(
+                      'Logout',
+                      style: AppText.tileTitle.copyWith(
+                        color: context.c.onSurface,
+                      ),
+                    ),
+                    content: Text(
+                      'Are you sure you want to logout?',
+                      style: AppText.tileSubtitle.copyWith(
+                        color: context.c.onSurface,
+                      ),
+                    ),
                     actions: [
                       TextButton(
                         onPressed: () => Navigator.pop(context),
-                        child: Text('Cancel', style: AppText.tileSubtitle.copyWith(color: context.c.primary)),
+                        child: Text(
+                          'Cancel',
+                          style: AppText.tileSubtitle.copyWith(
+                            color: context.c.primary,
+                          ),
+                        ),
                       ),
                       ElevatedButton(
                         onPressed: () {
@@ -1452,14 +1950,24 @@ class _SettingsBlockState extends State<SettingsBlock> {
                           backgroundColor: AppColors.danger,
                           foregroundColor: AppColors.onSurfaceInverse,
                         ),
-                        child: Text('Logout', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
+                        child: Text(
+                          'Logout',
+                          style: AppText.tileTitle.copyWith(
+                            color: AppColors.onSurfaceInverse,
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 );
               },
               icon: Icon(Icons.logout, color: AppColors.onSurfaceInverse),
-              label: Text('Logout', style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
+              label: Text(
+                'Logout',
+                style: AppText.tileTitle.copyWith(
+                  color: AppColors.onSurfaceInverse,
+                ),
+              ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.danger,
                 foregroundColor: AppColors.onSurfaceInverse,
@@ -1501,7 +2009,12 @@ class _SettingsBlockState extends State<SettingsBlock> {
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error logging out: $e', style: AppText.tileSubtitle.copyWith(color: AppColors.danger))),
+        SnackBar(
+          content: Text(
+            'Error logging out: $e',
+            style: AppText.tileSubtitle.copyWith(color: AppColors.danger),
+          ),
+        ),
       );
     }
   }
@@ -1509,9 +2022,12 @@ class _SettingsBlockState extends State<SettingsBlock> {
   // ---------------- Utils ----------------
 
   Text _title(String s) => Text(
-        s,
-        style: AppText.sectionTitle.copyWith(color: context.c.onSurface, fontWeight: FontWeight.bold),
-      );
+    s,
+    style: AppText.sectionTitle.copyWith(
+      color: context.c.onSurface,
+      fontWeight: FontWeight.bold,
+    ),
+  );
 
   String _formatDate(DateTime d) {
     return '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';

@@ -45,7 +45,9 @@ class _QDraft {
     for (int i = 0; i < 4; i++) {
       options[i] = (i < opts.length ? opts[i].toString() : '');
     }
-    answerIndex = (m['answer_index'] is num) ? (m['answer_index'] as num).toInt() : 0;
+    answerIndex = (m['answer_index'] is num)
+        ? (m['answer_index'] as num).toInt()
+        : 0;
     expectedAnswer = (m['expected_answer'] ?? '').toString();
     explanation = (m['explanation'] ?? '').toString();
     imageUrl = (m['image_url']?.toString());
@@ -56,20 +58,29 @@ class _QDraft {
   bool get isComplete {
     if (question.trim().isEmpty) return false;
     if (type == QuestionType.mcq) {
-      return options.every((e) => e.trim().isNotEmpty) && answerIndex >= 0 && answerIndex < 4;
+      return options.every((e) => e.trim().isNotEmpty) &&
+          answerIndex >= 0 &&
+          answerIndex < 4;
     } else {
       return expectedAnswer.trim().isNotEmpty;
     }
   }
 
-  Map<String, dynamic> toJsonForSet(String poolId, {bool includeCreatedAt = false}) {
+  Map<String, dynamic> toJsonForSet(
+    String poolId, {
+    bool includeCreatedAt = false,
+  }) {
     final map = <String, dynamic>{
       'pool_id': poolId,
       'type': type == QuestionType.mcq ? 'mcq' : 'paragraph',
       'question': question.trim(),
-      'options': type == QuestionType.mcq ? options.map((e) => e.trim()).toList() : [],
+      'options': type == QuestionType.mcq
+          ? options.map((e) => e.trim()).toList()
+          : [],
       'answer_index': type == QuestionType.mcq ? answerIndex : null,
-      'expected_answer': type == QuestionType.paragraph ? expectedAnswer.trim() : null,
+      'expected_answer': type == QuestionType.paragraph
+          ? expectedAnswer.trim()
+          : null,
       'explanation': explanation.trim(),
       'image_url': imageUrl,
       'image_public_id': imagePublicId,
@@ -100,8 +111,9 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
   // Upload on edit is disabled by default — set to true if you want it.
   static const bool _allowImageReplace = false;
 
-  static const String _cloudName = 'dxeunc4vd';
-  static const String _baseFolder = 'tests'; // stored under smartDrive/tests on server
+  static const String _cloudName = 'dnxj5r6rc';
+  static const String _baseFolder =
+      'tests'; // stored under smartDrive/tests on server
   static const String _host = 'tajdrivingschool.in';
   static const String _basePath = '/smartDrive/cloudinary';
   Uri _api(String endpoint) => Uri.https(_host, '$_basePath/$endpoint');
@@ -124,7 +136,9 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
   Future<void> _load() async {
     try {
       // Load basic
-      final poolRef = FirebaseFirestore.instance.collection('test_pool').doc(widget.poolId);
+      final poolRef = FirebaseFirestore.instance
+          .collection('test_pool')
+          .doc(widget.poolId);
       final p = await poolRef.get();
       final pm = p.data() ?? {};
       _title.text = (pm['title'] ?? '').toString();
@@ -133,7 +147,10 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
       _passing.text = (pm['passing_score_pct'] ?? 70).toString();
 
       // Load questions
-      final qs = await poolRef.collection('questions').orderBy('created_at', descending: false).get();
+      final qs = await poolRef
+          .collection('questions')
+          .orderBy('created_at', descending: false)
+          .get();
 
       _drafts
         ..clear()
@@ -148,7 +165,8 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
   }
 
   // ===== Helpers =====
-  void _toast(String m) => ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
+  void _toast(String m) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(m)));
 
   double _progress() {
     int need = 4, got = 0; // title, duration, passing, at least one question
@@ -182,7 +200,9 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
     try {
       setState(() => _saving = true);
 
-      final poolRef = FirebaseFirestore.instance.collection('test_pool').doc(widget.poolId);
+      final poolRef = FirebaseFirestore.instance
+          .collection('test_pool')
+          .doc(widget.poolId);
 
       // 1) Update pool basics
       await poolRef.update({
@@ -239,17 +259,24 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
     required String resourceType, // 'image'
     String overwrite = 'true',
   }) async {
-    final res = await http.post(_api('signature.php'), body: {
-      'public_id': publicId.trim(),
-      'folder': folder.trim(),
-      'overwrite': overwrite,
-      'resource_type': resourceType,
-    }).timeout(const Duration(seconds: 20));
+    final res = await http
+        .post(
+          _api('signature.php'),
+          body: {
+            'public_id': publicId.trim(),
+            'folder': folder.trim(),
+            'overwrite': overwrite,
+            'resource_type': resourceType,
+          },
+        )
+        .timeout(const Duration(seconds: 20));
     if (res.statusCode != 200) {
       throw Exception('Signature server error: ${res.statusCode} ${res.body}');
     }
     final json = jsonDecode(res.body) as Map<String, dynamic>;
-    if (json['signature'] == null || json['api_key'] == null || json['timestamp'] == null) {
+    if (json['signature'] == null ||
+        json['api_key'] == null ||
+        json['timestamp'] == null) {
       throw Exception('Invalid signature response: $json');
     }
     return json;
@@ -268,7 +295,9 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
       resourceType: resourceType,
       overwrite: 'true',
     );
-    final uri = Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/upload');
+    final uri = Uri.parse(
+      'https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/upload',
+    );
     final req = http.MultipartRequest('POST', uri)
       ..fields['api_key'] = signed['api_key'].toString()
       ..fields['timestamp'] = signed['timestamp'].toString()
@@ -303,7 +332,10 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
     }
     try {
       final picker = ImagePicker();
-      final x = await picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
+      final x = await picker.pickImage(
+        source: ImageSource.gallery,
+        imageQuality: 90,
+      );
       if (x == null) return;
 
       Uint8List bytes;
@@ -314,7 +346,9 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
       }
 
       final ts = DateTime.now().millisecondsSinceEpoch;
-      final basename = _slug(draft.question).isEmpty ? 'question' : _slug(draft.question);
+      final basename = _slug(draft.question).isEmpty
+          ? 'question'
+          : _slug(draft.question);
       final publicId = '${basename}_$ts';
 
       final meta = await _uploadImageToCloudinary(
@@ -347,7 +381,12 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
         elevation: 0,
         backgroundColor: AppColors.brand,
         foregroundColor: AppColors.onSurfaceInverse,
-        title: Text('Edit Test Pool', style: AppText.sectionTitle.copyWith(color: AppColors.onSurfaceInverse)),
+        title: Text(
+          'Edit Test Pool',
+          style: AppText.sectionTitle.copyWith(
+            color: AppColors.onSurfaceInverse,
+          ),
+        ),
       ),
 
       floatingActionButton: _loading
@@ -365,7 +404,12 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
           : SafeArea(
               top: false,
               child: Container(
-                padding: EdgeInsets.fromLTRB(pad.horizontal / 2, 10, pad.horizontal / 2, 10),
+                padding: EdgeInsets.fromLTRB(
+                  pad.horizontal / 2,
+                  10,
+                  pad.horizontal / 2,
+                  10,
+                ),
                 decoration: BoxDecoration(
                   color: AppColors.surface,
                   border: Border(top: BorderSide(color: AppColors.divider)),
@@ -386,7 +430,9 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
                           const SizedBox(height: 6),
                           Text(
                             '${_drafts.length} ${_drafts.length == 1 ? 'question' : 'questions'}',
-                            style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted),
+                            style: AppText.hintSmall.copyWith(
+                              color: AppColors.onSurfaceMuted,
+                            ),
                           ),
                         ],
                       ),
@@ -397,18 +443,30 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppColors.brand,
                         foregroundColor: AppColors.onSurfaceInverse,
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 16,
+                          vertical: 12,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(AppRadii.l),
+                        ),
                       ),
                       icon: _saving
                           ? SizedBox(
                               height: 16,
                               width: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.onSurfaceInverse),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: AppColors.onSurfaceInverse,
+                              ),
                             )
                           : const Icon(Icons.save_alt),
-                      label: Text(_saving ? 'Saving...' : 'Save Changes',
-                          style: AppText.tileTitle.copyWith(color: AppColors.onSurfaceInverse)),
+                      label: Text(
+                        _saving ? 'Saving...' : 'Save Changes',
+                        style: AppText.tileTitle.copyWith(
+                          color: AppColors.onSurfaceInverse,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -436,7 +494,8 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
                                   _LabeledTextField(
                                     label: 'Test Title *',
                                     controller: _title,
-                                    hint: 'e.g., Learner\'s Licence Mock Test – Set 1',
+                                    hint:
+                                        'e.g., Learner\'s Licence Mock Test – Set 1',
                                   ),
                                   const SizedBox(height: 10),
                                   _LabeledTextField(
@@ -475,14 +534,23 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
 
                             _SectionCard(
                               titleWidget: Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                mainAxisAlignment:
+                                    MainAxisAlignment.spaceBetween,
                                 children: [
-                                  Text('Questions', style: AppText.sectionTitle.copyWith(fontSize: 16)),
+                                  Text(
+                                    'Questions',
+                                    style: AppText.sectionTitle.copyWith(
+                                      fontSize: 16,
+                                    ),
+                                  ),
                                   TextButton.icon(
-                                    onPressed: () => setState(() => _drafts.add(_QDraft())),
+                                    onPressed: () =>
+                                        setState(() => _drafts.add(_QDraft())),
                                     icon: const Icon(Icons.add),
                                     label: const Text('Add Question'),
-                                    style: TextButton.styleFrom(foregroundColor: AppColors.brand),
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: AppColors.brand,
+                                    ),
                                   ),
                                 ],
                               ),
@@ -494,11 +562,13 @@ class _EditTestPoolPageState extends State<EditTestPoolPage> {
                                       draft: _drafts[i],
                                       onDelete: () async {
                                         final d = _drafts[i];
-                                        if (d.docId != null) _deletedIds.add(d.docId!);
+                                        if (d.docId != null)
+                                          _deletedIds.add(d.docId!);
                                         setState(() => _drafts.removeAt(i));
                                       },
                                       onChanged: () => setState(() {}),
-                                      onPickImage: () => _pickAndUploadImage(_drafts[i]),
+                                      onPickImage: () =>
+                                          _pickAndUploadImage(_drafts[i]),
                                       onRemoveImage: () {
                                         _drafts[i].imageUrl = null;
                                         _drafts[i].imagePublicId = null;
@@ -534,14 +604,19 @@ class _SectionCard extends StatelessWidget {
       margin: EdgeInsets.zero,
       elevation: 0,
       color: AppColors.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.l),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (titleWidget != null)
-              Padding(padding: const EdgeInsets.only(bottom: 8), child: titleWidget!)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: titleWidget!,
+              )
             else if (title != null)
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
@@ -584,10 +659,17 @@ class _LabeledTextField extends StatelessWidget {
           style: AppText.tileTitle.copyWith(color: AppColors.onSurface),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+            hintStyle: AppText.hintSmall.copyWith(
+              color: AppColors.onSurfaceFaint,
+            ),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(AppRadii.m),
+            ),
             isDense: dense,
-            contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: dense ? 12 : 14),
+            contentPadding: EdgeInsets.symmetric(
+              horizontal: 12,
+              vertical: dense ? 12 : 14,
+            ),
             filled: true,
             fillColor: AppColors.surface,
           ),
@@ -652,7 +734,10 @@ class _QuestionEditor extends StatelessWidget {
           Row(
             children: [
               Expanded(
-                child: Text('Question $index', style: AppText.sectionTitle.copyWith(fontSize: 16)),
+                child: Text(
+                  'Question $index',
+                  style: AppText.sectionTitle.copyWith(fontSize: 16),
+                ),
               ),
               DropdownButton<QuestionType>(
                 value: draft.type,
@@ -664,11 +749,21 @@ class _QuestionEditor extends StatelessWidget {
                 items: [
                   DropdownMenuItem(
                     value: QuestionType.mcq,
-                    child: Text('MCQ', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
+                    child: Text(
+                      'MCQ',
+                      style: AppText.tileTitle.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                   DropdownMenuItem(
                     value: QuestionType.paragraph,
-                    child: Text('Paragraph', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
+                    child: Text(
+                      'Paragraph',
+                      style: AppText.tileTitle.copyWith(
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -714,14 +809,24 @@ class _QuestionEditor extends StatelessWidget {
                     OutlinedButton.icon(
                       onPressed: onPickImage,
                       icon: const Icon(Icons.image),
-                      label: Text(draft.imageUrl == null ? 'Add/Replace image' : 'Replace image'),
-                      style: OutlinedButton.styleFrom(foregroundColor: AppColors.brand, side: BorderSide(color: AppColors.divider)),
+                      label: Text(
+                        draft.imageUrl == null
+                            ? 'Add/Replace image'
+                            : 'Replace image',
+                      ),
+                      style: OutlinedButton.styleFrom(
+                        foregroundColor: AppColors.brand,
+                        side: BorderSide(color: AppColors.divider),
+                      ),
                     ),
                     if (draft.imageUrl != null)
                       TextButton.icon(
                         onPressed: onRemoveImage,
                         icon: Icon(Icons.close, color: AppColors.danger),
-                        label: Text('Remove', style: TextStyle(color: AppColors.danger)),
+                        label: Text(
+                          'Remove',
+                          style: TextStyle(color: AppColors.danger),
+                        ),
                       ),
                   ],
                 ),
@@ -731,7 +836,10 @@ class _QuestionEditor extends StatelessWidget {
           const SizedBox(height: 10),
 
           if (draft.type == QuestionType.mcq) ...[
-            Text('Answer Options *', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
+            Text(
+              'Answer Options *',
+              style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 8),
 
             _OptionRow(
@@ -782,7 +890,12 @@ class _QuestionEditor extends StatelessWidget {
               },
             ),
             const SizedBox(height: 6),
-            Text('Select the radio button next to the correct answer', style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted)),
+            Text(
+              'Select the radio button next to the correct answer',
+              style: AppText.hintSmall.copyWith(
+                color: AppColors.onSurfaceMuted,
+              ),
+            ),
             const SizedBox(height: 12),
           ] else ...[
             _LabeledTextField(
@@ -797,7 +910,9 @@ class _QuestionEditor extends StatelessWidget {
           _LabeledTextField(
             label: 'Explanation (Optional)',
             controller: exp,
-            hint: draft.type == QuestionType.mcq ? 'Why is this option correct? Add rule reference if needed.' : 'Key points to look for in a good answer.',
+            hint: draft.type == QuestionType.mcq
+                ? 'Why is this option correct? Add rule reference if needed.'
+                : 'Key points to look for in a good answer.',
             multiline: true,
           ),
 
@@ -845,10 +960,17 @@ class _OptionRow extends StatelessWidget {
             style: AppText.tileTitle.copyWith(color: AppColors.onSurface),
             decoration: InputDecoration(
               hintText: label,
-              hintStyle: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+              hintStyle: AppText.hintSmall.copyWith(
+                color: AppColors.onSurfaceFaint,
+              ),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.m),
+              ),
               isDense: dense,
-              contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: dense ? 12 : 14),
+              contentPadding: EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: dense ? 12 : 14,
+              ),
               filled: true,
               fillColor: AppColors.surface,
             ),

@@ -24,7 +24,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
   final _personalKey = GlobalKey<FormState>();
 
   // ===== Cloudinary & Server Config =====
-  static const String _cloudName = 'dxeunc4vd'; // keep in sync with .env
+  static const String _cloudName = 'dnxj5r6rc'; // keep in sync with .env
   static const String _baseFolder = 'smartDrive';
   static const String _hostingerBase =
       'https://tajdrivingschool.in/smartDrive/cloudinary';
@@ -91,14 +91,17 @@ class _OnboardingFormState extends State<OnboardingForm> {
     }
 
     try {
-      final profRef = FirebaseFirestore.instance.collection('user_profiles').doc(user.uid);
+      final profRef = FirebaseFirestore.instance
+          .collection('user_profiles')
+          .doc(user.uid);
       final profSnap = await profRef.get();
 
       if (profSnap.exists) {
         final data = profSnap.data();
         _onboardingStatus = data?['onboarding_status'] as String?;
         _photoUrl = data?['photo_url'] as String?;
-        _permanentAddressCtrl.text = (data?['permanent_address'] ?? '') as String;
+        _permanentAddressCtrl.text =
+            (data?['permanent_address'] ?? '') as String;
         _relationCtrl.text = (data?['relation_of'] ?? '') as String? ?? '';
 
         final ts = data?['dob'] as Timestamp?;
@@ -123,7 +126,8 @@ class _OnboardingFormState extends State<OnboardingForm> {
         // NEW: hydrate license issue date + authority
         final licIssuedTs = data?['license_issue_date'] as Timestamp?;
         _licenseIssued = licIssuedTs?.toDate();
-        _licenseAuthorityCtrl.text = (data?['license_authority'] ?? '') as String;
+        _licenseAuthorityCtrl.text =
+            (data?['license_authority'] ?? '') as String;
       }
     } catch (_) {
       // ignore and let user fill
@@ -134,7 +138,10 @@ class _OnboardingFormState extends State<OnboardingForm> {
 
   // Pick image (you can switch to file_picker if you truly want ANY file from UI)
   Future<XFile?> _pickImage() async {
-    return await _picker.pickImage(source: ImageSource.gallery, imageQuality: 90);
+    return await _picker.pickImage(
+      source: ImageSource.gallery,
+      imageQuality: 90,
+    );
   }
 
   Future<void> _pickAvatar() async {
@@ -159,7 +166,9 @@ class _OnboardingFormState extends State<OnboardingForm> {
       throw Exception('Signature server error: ${res.statusCode} ${res.body}');
     }
     final json = jsonDecode(res.body) as Map<String, dynamic>;
-    if (json['signature'] == null || json['api_key'] == null || json['timestamp'] == null) {
+    if (json['signature'] == null ||
+        json['api_key'] == null ||
+        json['timestamp'] == null) {
       throw Exception('Invalid signature response: $json');
     }
     return json;
@@ -172,13 +181,19 @@ class _OnboardingFormState extends State<OnboardingForm> {
     required String folder,
     String overwrite = 'true',
   }) async {
-    final signed = await _getSignature(publicId: publicId, folder: folder, overwrite: overwrite);
+    final signed = await _getSignature(
+      publicId: publicId,
+      folder: folder,
+      overwrite: overwrite,
+    );
     final timestamp = signed['timestamp'].toString();
     final signature = signed['signature'] as String;
     final apiKey = signed['api_key'] as String;
 
     // Use /auto/upload to accept any format (image, video, raw, pdf, etc.)
-    final uri = Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/auto/upload');
+    final uri = Uri.parse(
+      'https://api.cloudinary.com/v1_1/$_cloudName/auto/upload',
+    );
 
     final req = http.MultipartRequest('POST', uri)
       ..fields['api_key'] = apiKey
@@ -194,10 +209,24 @@ class _OnboardingFormState extends State<OnboardingForm> {
     if (kIsWeb) {
       final bytes = await xfile.readAsBytes();
       final filename = xfile.name.isNotEmpty ? xfile.name : 'upload.bin';
-      req.files.add(http.MultipartFile.fromBytes('file', bytes, filename: filename, contentType: mediaType));
+      req.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: filename,
+          contentType: mediaType,
+        ),
+      );
     } else {
       final filename = xfile.name.isNotEmpty ? xfile.name : 'upload.bin';
-      req.files.add(await http.MultipartFile.fromPath('file', xfile.path, filename: filename, contentType: mediaType));
+      req.files.add(
+        await http.MultipartFile.fromPath(
+          'file',
+          xfile.path,
+          filename: filename,
+          contentType: mediaType,
+        ),
+      );
     }
 
     final streamed = await req.send();
@@ -215,62 +244,96 @@ class _OnboardingFormState extends State<OnboardingForm> {
 
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Not logged in')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Not logged in')));
       return;
     }
 
     // Date validations: DOB and license issue date must be in the past; expiry dates must be in the future
     final now = DateTime.now();
     if (_dob == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick date of birth')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please pick date of birth')),
+      );
       return;
     }
-    if (! _dob!.isBefore(now)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Date of birth must be in the past')));
+    if (!_dob!.isBefore(now)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Date of birth must be in the past')),
+      );
       return;
     }
     if (_isLearnerHolder && _learnerExpiry == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick learner expiry date')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please pick learner expiry date')),
+      );
       return;
     }
-    if (_isLearnerHolder && _learnerExpiry != null && !_learnerExpiry!.isAfter(now)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Learner expiry must be a future date')));
+    if (_isLearnerHolder &&
+        _learnerExpiry != null &&
+        !_learnerExpiry!.isAfter(now)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Learner expiry must be a future date')),
+      );
       return;
     }
     if (_isLicenseHolder && _licenseExpiry == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick license expiry date')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please pick license expiry date')),
+      );
       return;
     }
-    if (_isLicenseHolder && _licenseExpiry != null && !_licenseExpiry!.isAfter(now)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('License expiry must be a future date')));
+    if (_isLicenseHolder &&
+        _licenseExpiry != null &&
+        !_licenseExpiry!.isAfter(now)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('License expiry must be a future date')),
+      );
       return;
     }
     if (_isLicenseHolder && _licenseIssued == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick license date of issue')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please pick license date of issue')),
+      );
       return;
     }
-    if (_isLicenseHolder && _licenseIssued != null && !_licenseIssued!.isBefore(now)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('License date of issue must be in the past')));
+    if (_isLicenseHolder &&
+        _licenseIssued != null &&
+        !_licenseIssued!.isBefore(now)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('License date of issue must be in the past'),
+        ),
+      );
       return;
     }
 
     // Additional validation: expiry dates when applicable
     if (_isLearnerHolder && _learnerExpiry == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick learner expiry date')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please pick learner expiry date')),
+      );
       return;
     }
     if (_isLicenseHolder && _licenseExpiry == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick license expiry date')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please pick license expiry date')),
+      );
       return;
     }
 
     // NEW: validate license issue date and authority when license holder
     if (_isLicenseHolder && _licenseIssued == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please pick license date of issue')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please pick license date of issue')),
+      );
       return;
     }
     if (_isLicenseHolder && (_licenseAuthorityCtrl.text.trim().isEmpty)) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter licensing authority')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please enter licensing authority')),
+      );
       return;
     }
 
@@ -294,32 +357,48 @@ class _OnboardingFormState extends State<OnboardingForm> {
         'dob': _dob != null ? Timestamp.fromDate(_dob!) : null,
         'photo_url': photoUrl,
         'is_learner_holder': _isLearnerHolder,
-        'learner_number': _isLearnerHolder ? _learnerNumberCtrl.text.trim() : null,
-        'learner_expiry': _isLearnerHolder && _learnerExpiry != null ? Timestamp.fromDate(_learnerExpiry!) : null,
+        'learner_number': _isLearnerHolder
+            ? _learnerNumberCtrl.text.trim()
+            : null,
+        'learner_expiry': _isLearnerHolder && _learnerExpiry != null
+            ? Timestamp.fromDate(_learnerExpiry!)
+            : null,
         'is_license_holder': _isLicenseHolder,
-        'license_number': _isLicenseHolder ? _licenseNumberCtrl.text.trim() : null,
-        'license_expiry': _isLicenseHolder && _licenseExpiry != null ? Timestamp.fromDate(_licenseExpiry!) : null,
+        'license_number': _isLicenseHolder
+            ? _licenseNumberCtrl.text.trim()
+            : null,
+        'license_expiry': _isLicenseHolder && _licenseExpiry != null
+            ? Timestamp.fromDate(_licenseExpiry!)
+            : null,
         // NEW: save issue date + authority
-        'license_issue_date': _isLicenseHolder && _licenseIssued != null ? Timestamp.fromDate(_licenseIssued!) : null,
-        'license_authority': _isLicenseHolder ? _licenseAuthorityCtrl.text.trim() : null,
+        'license_issue_date': _isLicenseHolder && _licenseIssued != null
+            ? Timestamp.fromDate(_licenseIssued!)
+            : null,
+        'license_authority': _isLicenseHolder
+            ? _licenseAuthorityCtrl.text.trim()
+            : null,
         'onboarding_status': 'personal_saved',
         'updated_at': FieldValue.serverTimestamp(),
         'created_at': FieldValue.serverTimestamp(),
       };
 
-      await FirebaseFirestore.instance.collection('user_profiles').doc(user.uid).set(
-            data,
-            SetOptions(merge: true),
-          );
+      await FirebaseFirestore.instance
+          .collection('user_profiles')
+          .doc(user.uid)
+          .set(data, SetOptions(merge: true));
 
       _photoUrl = photoUrl;
       setState(() {
         _onboardingStatus = 'personal_saved';
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Personal info saved')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Personal info saved')));
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       if (mounted) setState(() => _saving = false);
     }
@@ -341,14 +420,20 @@ class _OnboardingFormState extends State<OnboardingForm> {
         elevation: 0.5,
       ),
       body: _loadingState
-          ? Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)))
+          ? Center(
+              child: CircularProgressIndicator(
+                valueColor: AlwaysStoppedAnimation(context.c.primary),
+              ),
+            )
           : Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 640),
                 child: Card(
                   color: surface,
                   elevation: 0,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.xl)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(AppRadii.xl),
+                  ),
                   margin: const EdgeInsets.all(16),
                   child: Padding(
                     padding: const EdgeInsets.all(18),
@@ -357,9 +442,7 @@ class _OnboardingFormState extends State<OnboardingForm> {
                         _SimpleHeader(),
                         const SizedBox(height: 12),
                         const SizedBox(height: 8),
-                        Expanded(
-                          child: _buildPersonalForm(),
-                        ),
+                        Expanded(child: _buildPersonalForm()),
                       ],
                     ),
                   ),
@@ -383,22 +466,33 @@ class _OnboardingFormState extends State<OnboardingForm> {
                   child: Stack(
                     alignment: Alignment.bottomRight,
                     children: [
-                      _AvatarPreview(xfile: _profilePhoto, networkUrl: _photoUrl, radius: 48),
+                      _AvatarPreview(
+                        xfile: _profilePhoto,
+                        networkUrl: _photoUrl,
+                        radius: 48,
+                      ),
                       Container(
                         decoration: BoxDecoration(
                           color: AppColors.brand,
                           borderRadius: BorderRadius.circular(16),
                         ),
                         padding: const EdgeInsets.all(6),
-                        child: const Icon(Icons.edit, size: 16, color: Colors.white),
-                      )
+                        child: const Icon(
+                          Icons.edit,
+                          size: 16,
+                          color: Colors.white,
+                        ),
+                      ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 8),
                 TextButton(
                   onPressed: _pickAvatar,
-                  child: Text('Add / Change Passport Photo', style: TextStyle(color: context.c.primary)),
+                  child: Text(
+                    'Add / Change Passport Photo',
+                    style: TextStyle(color: context.c.primary),
+                  ),
                 ),
               ],
             ),
@@ -409,8 +503,11 @@ class _OnboardingFormState extends State<OnboardingForm> {
             'Permanent Address*',
             child: TextFormField(
               controller: _permanentAddressCtrl,
-              decoration: _inputDecoration('Flat, Street, Area, City, State, PIN'),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              decoration: _inputDecoration(
+                'Flat, Street, Area, City, State, PIN',
+              ),
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
           ),
           const SizedBox(height: 12),
@@ -420,7 +517,8 @@ class _OnboardingFormState extends State<OnboardingForm> {
             child: TextFormField(
               controller: _relationCtrl,
               decoration: _inputDecoration('Name of parent or spouse'),
-              validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+              validator: (v) =>
+                  (v == null || v.trim().isEmpty) ? 'Required' : null,
             ),
           ),
 
@@ -445,9 +543,13 @@ class _OnboardingFormState extends State<OnboardingForm> {
                   _dob == null
                       ? 'Tap to select'
                       : '${_dob!.day.toString().padLeft(2, '0')}-'
-                          '${_dob!.month.toString().padLeft(2, '0')}-'
-                          '${_dob!.year}',
-                  style: TextStyle(color: _dob == null ? AppColors.onSurfaceFaint : context.c.onSurface),
+                            '${_dob!.month.toString().padLeft(2, '0')}-'
+                            '${_dob!.year}',
+                  style: TextStyle(
+                    color: _dob == null
+                        ? AppColors.onSurfaceFaint
+                        : context.c.onSurface,
+                  ),
                 ),
               ),
             ),
@@ -464,22 +566,30 @@ class _OnboardingFormState extends State<OnboardingForm> {
                 DropdownMenuItem(value: false, child: Text('No')),
                 DropdownMenuItem(value: true, child: Text('Yes')),
               ],
-              onChanged: _isLicenseHolder ? null : (v) => setState(() => _isLearnerHolder = v ?? false),
+              onChanged: _isLicenseHolder
+                  ? null
+                  : (v) => setState(() => _isLearnerHolder = v ?? false),
             ),
           ),
           const SizedBox(height: 8),
           if (_isLicenseHolder)
             Padding(
               padding: const EdgeInsets.only(top: 8, left: 4),
-              child: Text('Learner details are disabled when license details are provided.', style: TextStyle(color: AppColors.onSurfaceFaint, fontSize: 12)),
+              child: Text(
+                'Learner details are disabled when license details are provided.',
+                style: TextStyle(color: AppColors.onSurfaceFaint, fontSize: 12),
+              ),
             ),
-          if (_isLearnerHolder)  ...[
+          if (_isLearnerHolder) ...[
             _Labeled(
               'Learner Number*',
               child: TextFormField(
                 controller: _learnerNumberCtrl,
                 decoration: _inputDecoration('Enter learner number'),
-                validator: (v) => (_isLearnerHolder && (v == null || v.trim().isEmpty)) ? 'Required' : null,
+                validator: (v) =>
+                    (_isLearnerHolder && (v == null || v.trim().isEmpty))
+                    ? 'Required'
+                    : null,
               ),
             ),
             const SizedBox(height: 12),
@@ -502,9 +612,13 @@ class _OnboardingFormState extends State<OnboardingForm> {
                     _learnerExpiry == null
                         ? 'Tap to select'
                         : '${_learnerExpiry!.day.toString().padLeft(2, '0')}-'
-                            '${_learnerExpiry!.month.toString().padLeft(2, '0')}-'
-                            '${_learnerExpiry!.year}',
-                    style: TextStyle(color: _learnerExpiry == null ? AppColors.onSurfaceFaint : context.c.onSurface),
+                              '${_learnerExpiry!.month.toString().padLeft(2, '0')}-'
+                              '${_learnerExpiry!.year}',
+                    style: TextStyle(
+                      color: _learnerExpiry == null
+                          ? AppColors.onSurfaceFaint
+                          : context.c.onSurface,
+                    ),
                   ),
                 ),
               ),
@@ -541,7 +655,10 @@ class _OnboardingFormState extends State<OnboardingForm> {
               child: TextFormField(
                 controller: _licenseNumberCtrl,
                 decoration: _inputDecoration('Enter license number'),
-                validator: (v) => (_isLicenseHolder && (v == null || v.trim().isEmpty)) ? 'Required' : null,
+                validator: (v) =>
+                    (_isLicenseHolder && (v == null || v.trim().isEmpty))
+                    ? 'Required'
+                    : null,
               ),
             ),
             const SizedBox(height: 12),
@@ -566,9 +683,13 @@ class _OnboardingFormState extends State<OnboardingForm> {
                     _licenseIssued == null
                         ? 'Tap to select'
                         : '${_licenseIssued!.day.toString().padLeft(2, '0')}-'
-                            '${_licenseIssued!.month.toString().padLeft(2, '0')}-'
-                            '${_licenseIssued!.year}',
-                    style: TextStyle(color: _licenseIssued == null ? AppColors.onSurfaceFaint : context.c.onSurface),
+                              '${_licenseIssued!.month.toString().padLeft(2, '0')}-'
+                              '${_licenseIssued!.year}',
+                    style: TextStyle(
+                      color: _licenseIssued == null
+                          ? AppColors.onSurfaceFaint
+                          : context.c.onSurface,
+                    ),
                   ),
                 ),
               ),
@@ -580,8 +701,13 @@ class _OnboardingFormState extends State<OnboardingForm> {
               'Licensing Authority*',
               child: TextFormField(
                 controller: _licenseAuthorityCtrl,
-                decoration: _inputDecoration('E.g. RTO Ernakulam / Regional Transport Office'),
-                validator: (v) => (_isLicenseHolder && (v == null || v.trim().isEmpty)) ? 'Required' : null,
+                decoration: _inputDecoration(
+                  'E.g. RTO Ernakulam / Regional Transport Office',
+                ),
+                validator: (v) =>
+                    (_isLicenseHolder && (v == null || v.trim().isEmpty))
+                    ? 'Required'
+                    : null,
               ),
             ),
             const SizedBox(height: 12),
@@ -605,9 +731,13 @@ class _OnboardingFormState extends State<OnboardingForm> {
                     _licenseExpiry == null
                         ? 'Tap to select'
                         : '${_licenseExpiry!.day.toString().padLeft(2, '0')}-'
-                            '${_licenseExpiry!.month.toString().padLeft(2, '0')}-'
-                            '${_licenseExpiry!.year}',
-                    style: TextStyle(color: _licenseExpiry == null ? AppColors.onSurfaceFaint : context.c.onSurface),
+                              '${_licenseExpiry!.month.toString().padLeft(2, '0')}-'
+                              '${_licenseExpiry!.year}',
+                    style: TextStyle(
+                      color: _licenseExpiry == null
+                          ? AppColors.onSurfaceFaint
+                          : context.c.onSurface,
+                    ),
                   ),
                 ),
               ),
@@ -629,7 +759,9 @@ class _OnboardingFormState extends State<OnboardingForm> {
       hintText: hint,
       isDense: true,
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadii.s),
+      ),
     );
   }
 }
@@ -641,7 +773,10 @@ class _SimpleHeader extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Text('Onboarding', style: AppText.sectionTitle.copyWith(color: context.c.onSurface)),
+        Text(
+          'Onboarding',
+          style: AppText.sectionTitle.copyWith(color: context.c.onSurface),
+        ),
         const Spacer(),
       ],
     );
@@ -661,9 +796,13 @@ class _SubmitButton extends StatelessWidget {
         onPressed: onPressed,
         style: ElevatedButton.styleFrom(
           elevation: 0,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.l),
+          ),
           backgroundColor: context.c.primary,
-          foregroundColor: context.c.inverseSurface ?? AppColors.onSurfaceInverse, // fallback handled by theme
+          foregroundColor:
+              context.c.inverseSurface ??
+              AppColors.onSurfaceInverse, // fallback handled by theme
         ),
         child: Row(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -690,13 +829,19 @@ class _Labeled extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: AppText.tileTitle.copyWith(color: context.c.onSurface)),
+        Text(
+          label,
+          style: AppText.tileTitle.copyWith(color: context.c.onSurface),
+        ),
         const SizedBox(height: 8),
         child,
         if (errorText != null)
           Padding(
             padding: const EdgeInsets.only(top: 6, left: 4),
-            child: Text(errorText, style: TextStyle(color: AppColors.errFg, fontSize: 12)),
+            child: Text(
+              errorText,
+              style: TextStyle(color: AppColors.errFg, fontSize: 12),
+            ),
           ),
       ],
     );
@@ -707,13 +852,19 @@ class _AvatarPreview extends StatelessWidget {
   final XFile? xfile;
   final String? networkUrl;
   final double radius;
-  const _AvatarPreview({required this.xfile, this.networkUrl, this.radius = 48});
+  const _AvatarPreview({
+    required this.xfile,
+    this.networkUrl,
+    this.radius = 48,
+  });
 
   @override
   Widget build(BuildContext context) {
     ImageProvider? provider;
     if (xfile != null) {
-      provider = kIsWeb ? NetworkImage(xfile!.path) : FileImage(File(xfile!.path)) as ImageProvider;
+      provider = kIsWeb
+          ? NetworkImage(xfile!.path)
+          : FileImage(File(xfile!.path)) as ImageProvider;
     } else if (networkUrl != null && networkUrl!.isNotEmpty) {
       provider = NetworkImage(networkUrl!);
     }
@@ -743,7 +894,12 @@ class _ThumbPreview extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       child: kIsWeb
           ? Image.network(xfile.path, width: 64, height: 64, fit: BoxFit.cover)
-          : Image.file(File(xfile.path), width: 64, height: 64, fit: BoxFit.cover),
+          : Image.file(
+              File(xfile.path),
+              width: 64,
+              height: 64,
+              fit: BoxFit.cover,
+            ),
     );
   }
 }

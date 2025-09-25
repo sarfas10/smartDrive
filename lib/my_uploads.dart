@@ -31,7 +31,7 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
   bool _busy = false;
 
   // Cloudinary config
-  static const String _cloudName = 'dxeunc4vd';
+  static const String _cloudName = 'dnxj5r6rc';
   static const String _hostingerBase =
       'https://tajdrivingschool.in/smartDrive/cloudinary';
 
@@ -52,14 +52,24 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
     if (user == null) {
       return Scaffold(
         backgroundColor: context.c.background,
-        body: Center(child: Text('You must be signed in.', style: context.t.bodyMedium?.copyWith(color: context.c.onSurface))),
+        body: Center(
+          child: Text(
+            'You must be signed in.',
+            style: context.t.bodyMedium?.copyWith(color: context.c.onSurface),
+          ),
+        ),
       );
     }
 
     return Scaffold(
       backgroundColor: context.c.background,
       appBar: AppBar(
-        title: Text('My Uploads', style: AppText.sectionTitle.copyWith(color: AppColors.onSurfaceInverse)),
+        title: Text(
+          'My Uploads',
+          style: AppText.sectionTitle.copyWith(
+            color: AppColors.onSurfaceInverse,
+          ),
+        ),
         backgroundColor: context.c.surface,
         foregroundColor: context.c.onSurface,
         elevation: 0.5,
@@ -87,7 +97,8 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
                 Expanded(
                   child: _SearchField(
                     controller: _searchCtrl,
-                    onChanged: (v) => setState(() => _q = v.trim().toLowerCase()),
+                    onChanged: (v) =>
+                        setState(() => _q = v.trim().toLowerCase()),
                   ),
                 ),
               ],
@@ -99,14 +110,20 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
               stream: _baseQuery(user.uid).snapshots(),
               builder: (context, snap) {
                 if (snap.connectionState == ConnectionState.waiting) {
-                  return Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation(context.c.primary)));
+                  return Center(
+                    child: CircularProgressIndicator(
+                      valueColor: AlwaysStoppedAnimation(context.c.primary),
+                    ),
+                  );
                 }
                 if (snap.hasError) {
                   return Padding(
                     padding: const EdgeInsets.all(16),
                     child: Text(
                       'Could not load uploads: ${snap.error}',
-                      style: context.t.bodyMedium?.copyWith(color: AppColors.danger),
+                      style: context.t.bodyMedium?.copyWith(
+                        color: AppColors.danger,
+                      ),
                     ),
                   );
                 }
@@ -114,17 +131,22 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
                 final docs = snap.data?.docs ?? const [];
 
                 // Sort client-side by created_at desc (nulls last)
-                final sorted = [...docs]..sort((a, b) {
+                final sorted = [...docs]
+                  ..sort((a, b) {
                     final ma = a.data();
                     final mb = b.data();
                     final ta = ma['created_at'];
                     final tb = mb['created_at'];
                     final da = (ta is Timestamp)
                         ? ta.toDate()
-                        : (ta is DateTime ? ta : DateTime.fromMillisecondsSinceEpoch(0));
+                        : (ta is DateTime
+                              ? ta
+                              : DateTime.fromMillisecondsSinceEpoch(0));
                     final dbb = (tb is Timestamp)
                         ? tb.toDate()
-                        : (tb is DateTime ? tb : DateTime.fromMillisecondsSinceEpoch(0));
+                        : (tb is DateTime
+                              ? tb
+                              : DateTime.fromMillisecondsSinceEpoch(0));
                     return dbb.compareTo(da);
                   });
 
@@ -132,10 +154,14 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
                 final filtered = sorted.where((d) {
                   if (_q.isEmpty) return true;
                   final m = d.data();
-                  final name = (m['document_name'] ?? '').toString().toLowerCase();
+                  final name = (m['document_name'] ?? '')
+                      .toString()
+                      .toLowerCase();
                   final file = (m['file_name'] ?? '').toString().toLowerCase();
                   final remarks = (m['remarks'] ?? '').toString().toLowerCase();
-                  return name.contains(_q) || file.contains(_q) || remarks.contains(_q);
+                  return name.contains(_q) ||
+                      file.contains(_q) ||
+                      remarks.contains(_q);
                 }).toList();
 
                 return Column(
@@ -145,7 +171,10 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
                       padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
                       child: Text(
                         '${docs.length} document${docs.length == 1 ? '' : 's'} uploaded',
-                        style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: 12),
+                        style: context.t.bodySmall?.copyWith(
+                          color: AppColors.onSurfaceMuted,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                     Expanded(
@@ -154,15 +183,19 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
                           : ListView.separated(
                               padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
                               itemCount: filtered.length,
-                              separatorBuilder: (_, __) => const SizedBox(height: 10),
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 10),
                               itemBuilder: (context, i) {
                                 final d = filtered[i];
                                 final m = d.data();
 
-                                final folder = (m['cloudinary_folder'] ?? '').toString();
+                                final folder = (m['cloudinary_folder'] ?? '')
+                                    .toString();
                                 final publicIdBase =
-                                    (m['cloudinary_public_id'] ?? '').toString();
-                                final url = (m['cloudinary_url'] ?? '').toString();
+                                    (m['cloudinary_public_id'] ?? '')
+                                        .toString();
+                                final url = (m['cloudinary_url'] ?? '')
+                                    .toString();
 
                                 return _UploadCard(
                                   docId: d.id,
@@ -170,13 +203,15 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
                                   fileName: (m['file_name'] ?? '').toString(),
                                   url: url,
                                   createdAt: m['created_at'],
-                                  sizeBytes: ((m['file_size'] as num?) ?? 0).toInt(),
+                                  sizeBytes: ((m['file_size'] as num?) ?? 0)
+                                      .toInt(),
                                   remarks: (m['remarks'] ?? '').toString(),
                                   folder: folder,
                                   publicIdBase: publicIdBase,
                                   fileExt: (m['file_ext'] ?? '').toString(),
                                   onView: () => _openUrl(url),
-                                  onDownload: () => _openUrl(url, download: true),
+                                  onDownload: () =>
+                                      _openUrl(url, download: true),
                                   onDelete: () => _confirmDeleteAndDestroy(
                                     docId: d.id,
                                     folder: folder,
@@ -211,12 +246,15 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
 
     if (folder.trim().isEmpty || publicIdBase.trim().isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Delete failed: missing Cloudinary folder/public_id')),
+        const SnackBar(
+          content: Text('Delete failed: missing Cloudinary folder/public_id'),
+        ),
       );
       return;
     }
 
-    final ok = await showDialog<bool>(
+    final ok =
+        await showDialog<bool>(
           context: context,
           builder: (ctx) => AlertDialog(
             title: const Text('Delete document?'),
@@ -224,7 +262,10 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
               'This will permanently delete the file from Cloudinary and remove the record from Firestore.',
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+              TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel'),
+              ),
               FilledButton(
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('Delete'),
@@ -241,7 +282,8 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
       final fullPublicId = _composePublicId(folder, publicIdBase);
 
       // Detect resource_type from URL first; fallback to extension mapping.
-      String detected = _resourceTypeFromUrl(fileUrl) ?? _resourceTypeFromExt(fileExt);
+      String detected =
+          _resourceTypeFromUrl(fileUrl) ?? _resourceTypeFromExt(fileExt);
 
       await _cloudinaryDestroyWithFallback(
         fullPublicId: fullPublicId,
@@ -252,15 +294,15 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
       await _db.collection('user_uploads').doc(docId).delete();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Deleted successfully')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(const SnackBar(content: Text('Deleted successfully')));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Delete failed: $e')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Delete failed: $e')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -280,7 +322,16 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
   // Fallback mapping by extension
   String _resourceTypeFromExt(String ext) {
     final e = ext.toLowerCase();
-    if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'svg'].contains(e)) {
+    if ([
+      'jpg',
+      'jpeg',
+      'png',
+      'gif',
+      'webp',
+      'bmp',
+      'tiff',
+      'svg',
+    ].contains(e)) {
       return 'image';
     }
     if (['mp4', 'mov', 'avi', 'mkv', 'webm'].contains(e)) return 'video';
@@ -315,7 +366,9 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
       }
       // else continue to next candidate
     }
-    throw Exception('Cloudinary destroy did not find the asset under any resource_type.');
+    throw Exception(
+      'Cloudinary destroy did not find the asset under any resource_type.',
+    );
   }
 
   Future<String> _cloudinaryDestroyOnce({
@@ -324,20 +377,23 @@ class _MyUploadsPageState extends State<MyUploadsPage> {
     required Map<String, dynamic> signed,
   }) async {
     final uri = Uri.parse(
-        'https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/destroy');
+      'https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/destroy',
+    );
 
     final req = http.MultipartRequest('POST', uri)
-      ..fields['api_key']    = signed['api_key'].toString()
-      ..fields['timestamp']  = signed['timestamp'].toString()
-      ..fields['signature']  = signed['signature'].toString()
-      ..fields['public_id']  = _clean(fullPublicId)
+      ..fields['api_key'] = signed['api_key'].toString()
+      ..fields['timestamp'] = signed['timestamp'].toString()
+      ..fields['signature'] = signed['signature'].toString()
+      ..fields['public_id'] = _clean(fullPublicId)
       ..fields['invalidate'] = 'true';
 
     final streamed = await req.send();
     final body = await streamed.stream.bytesToString();
 
     if (streamed.statusCode != 200) {
-      throw Exception('Cloudinary destroy failed: ${streamed.statusCode} $body');
+      throw Exception(
+        'Cloudinary destroy failed: ${streamed.statusCode} $body',
+      );
     }
 
     final json = jsonDecode(body) as Map<String, dynamic>;
@@ -402,7 +458,10 @@ class _SearchField extends StatelessWidget {
         hintText: 'Search documents...',
         prefixIcon: const Icon(Icons.search),
         isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
         filled: true,
         fillColor: context.c.surface,
         border: OutlineInputBorder(
@@ -459,7 +518,9 @@ class _UploadCard extends StatelessWidget {
     return Card(
       elevation: 0,
       color: context.c.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadii.m),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Column(
@@ -482,17 +543,46 @@ class _UploadCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(name, style: context.t.titleSmall?.copyWith(fontWeight: FontWeight.w700, fontSize: 14, color: context.c.onSurface)),
+                      Text(
+                        name,
+                        style: context.t.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 14,
+                          color: context.c.onSurface,
+                        ),
+                      ),
                       const SizedBox(height: 2),
-                      Text(fileName, style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: 12)),
+                      Text(
+                        fileName,
+                        style: context.t.bodySmall?.copyWith(
+                          color: AppColors.onSurfaceMuted,
+                          fontSize: 12,
+                        ),
+                      ),
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          Icon(Icons.calendar_today, size: 14, color: AppColors.onSurfaceMuted),
+                          Icon(
+                            Icons.calendar_today,
+                            size: 14,
+                            color: AppColors.onSurfaceMuted,
+                          ),
                           const SizedBox(width: 6),
-                          Text(date, style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: 12)),
+                          Text(
+                            date,
+                            style: context.t.bodySmall?.copyWith(
+                              color: AppColors.onSurfaceMuted,
+                              fontSize: 12,
+                            ),
+                          ),
                           const SizedBox(width: 14),
-                          Text(size, style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted, fontSize: 12)),
+                          Text(
+                            size,
+                            style: context.t.bodySmall?.copyWith(
+                              color: AppColors.onSurfaceMuted,
+                              fontSize: 12,
+                            ),
+                          ),
                         ],
                       ),
                     ],
@@ -508,14 +598,28 @@ class _UploadCard extends StatelessWidget {
                   color: AppColors.neuBg,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 10,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Remarks: ',
-                        style: context.t.bodySmall?.copyWith(fontWeight: FontWeight.w600, color: context.c.onSurface)),
+                    Text(
+                      'Remarks: ',
+                      style: context.t.bodySmall?.copyWith(
+                        fontWeight: FontWeight.w600,
+                        color: context.c.onSurface,
+                      ),
+                    ),
                     Expanded(
-                      child: Text(remarks, style: context.t.bodySmall?.copyWith(color: context.c.onSurface, height: 1.2)),
+                      child: Text(
+                        remarks,
+                        style: context.t.bodySmall?.copyWith(
+                          color: context.c.onSurface,
+                          height: 1.2,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -527,19 +631,38 @@ class _UploadCard extends StatelessWidget {
                 TextButton.icon(
                   onPressed: onView,
                   icon: const Icon(Icons.visibility_outlined, size: 18),
-                  label: Text('View', style: context.t.bodySmall?.copyWith(color: context.c.primary)),
+                  label: Text(
+                    'View',
+                    style: context.t.bodySmall?.copyWith(
+                      color: context.c.primary,
+                    ),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 TextButton.icon(
                   onPressed: onDownload,
                   icon: const Icon(Icons.download_rounded, size: 18),
-                  label: Text('Download', style: context.t.bodySmall?.copyWith(color: context.c.primary)),
+                  label: Text(
+                    'Download',
+                    style: context.t.bodySmall?.copyWith(
+                      color: context.c.primary,
+                    ),
+                  ),
                 ),
                 const Spacer(),
                 TextButton.icon(
                   onPressed: onDelete,
-                  icon: Icon(Icons.delete_outline, size: 18, color: AppColors.danger),
-                  label: Text('Delete', style: context.t.bodySmall?.copyWith(color: AppColors.danger)),
+                  icon: Icon(
+                    Icons.delete_outline,
+                    size: 18,
+                    color: AppColors.danger,
+                  ),
+                  label: Text(
+                    'Delete',
+                    style: context.t.bodySmall?.copyWith(
+                      color: AppColors.danger,
+                    ),
+                  ),
                 ),
               ],
             ),
@@ -575,7 +698,20 @@ class _UploadCard extends StatelessWidget {
     if (ts is Timestamp) dt = ts.toDate();
     if (ts is DateTime) dt = ts;
     dt ??= DateTime.now();
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     return '${months[dt.month - 1]} ${dt.day}, ${dt.year}';
   }
 
@@ -607,7 +743,12 @@ class _EmptyHint extends StatelessWidget {
           children: [
             Icon(Icons.folder_open, size: 48, color: AppColors.onSurfaceFaint),
             const SizedBox(height: 8),
-            Text('No uploads yet', style: context.t.bodySmall?.copyWith(color: AppColors.onSurfaceMuted)),
+            Text(
+              'No uploads yet',
+              style: context.t.bodySmall?.copyWith(
+                color: AppColors.onSurfaceMuted,
+              ),
+            ),
           ],
         ),
       ),

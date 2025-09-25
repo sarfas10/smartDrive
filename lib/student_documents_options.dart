@@ -43,7 +43,7 @@ class _StudentDocumentsOptionsPageState
   bool _uploadingSend = false;
 
   // Cloudinary signing endpoint & config (same as your upload page)
-  static const String _cloudName = 'dxeunc4vd';
+  static const String _cloudName = 'dnxj5r6rc';
   static const String _baseFolder = 'smartDrive';
   static const String _hostingerBase =
       'https://tajdrivingschool.in/smartDrive/cloudinary';
@@ -95,12 +95,16 @@ class _StudentDocumentsOptionsPageState
     if (v == null) return null;
     try {
       DateTime? dt;
-      if (v is Timestamp) dt = v.toDate();
-      else if (v is DateTime) dt = v;
+      if (v is Timestamp)
+        dt = v.toDate();
+      else if (v is DateTime)
+        dt = v;
       else if (v is int) {
         final s = v.toString();
-        if (s.length <= 10) dt = DateTime.fromMillisecondsSinceEpoch(v * 1000);
-        else dt = DateTime.fromMillisecondsSinceEpoch(v);
+        if (s.length <= 10)
+          dt = DateTime.fromMillisecondsSinceEpoch(v * 1000);
+        else
+          dt = DateTime.fromMillisecondsSinceEpoch(v);
       } else if (v is String) {
         try {
           dt = DateTime.parse(v);
@@ -118,22 +122,30 @@ class _StudentDocumentsOptionsPageState
   }
 
   /// Collect fields common to form payloads but for the target `widget.uid`
-  Future<Map<String, dynamic>> _collectCommonPayloadForUid(String targetUid) async {
+  Future<Map<String, dynamic>> _collectCommonPayloadForUid(
+    String targetUid,
+  ) async {
     final profDoc = await FirebaseFirestore.instance
         .collection('user_profiles')
         .doc(targetUid)
         .get();
-    final profile = profDoc.exists ? (profDoc.data() ?? <String, dynamic>{}) : {};
+    final profile = profDoc.exists
+        ? (profDoc.data() ?? <String, dynamic>{})
+        : {};
 
-    final userDoc =
-        await FirebaseFirestore.instance.collection('users').doc(targetUid).get();
-    final userRecord = userDoc.exists ? (userDoc.data() ?? <String, dynamic>{}) : {};
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(targetUid)
+        .get();
+    final userRecord = userDoc.exists
+        ? (userDoc.data() ?? <String, dynamic>{})
+        : {};
 
-    final name = (userRecord['name'] as String?) ??
-        (profile['name'] as String?) ??
-        '';
+    final name =
+        (userRecord['name'] as String?) ?? (profile['name'] as String?) ?? '';
 
-    final enrolmentNumber = (userRecord['enrolment_number'] as String?) ??
+    final enrolmentNumber =
+        (userRecord['enrolment_number'] as String?) ??
         (profile['enrolment_number'] as String?) ??
         '';
 
@@ -144,8 +156,10 @@ class _StudentDocumentsOptionsPageState
     }
 
     final createdAtValue = userRecord['createdAt'];
-    final fallbackDateOfEnrolment = profile['date_of_enrolment'] ?? userRecord['date_of_enrolment'];
-    final dateOfEnrolment = _toDateString(createdAtValue ?? fallbackDateOfEnrolment) ?? '';
+    final fallbackDateOfEnrolment =
+        profile['date_of_enrolment'] ?? userRecord['date_of_enrolment'];
+    final dateOfEnrolment =
+        _toDateString(createdAtValue ?? fallbackDateOfEnrolment) ?? '';
 
     return {
       'uid': targetUid,
@@ -158,30 +172,40 @@ class _StudentDocumentsOptionsPageState
   }
 
   /// Collect fields needed for Form 5 for the target uid.
-  Future<Map<String, dynamic>> _collectForm5PayloadForUid(String targetUid) async {
+  Future<Map<String, dynamic>> _collectForm5PayloadForUid(
+    String targetUid,
+  ) async {
     final profDoc = await FirebaseFirestore.instance
         .collection('user_profiles')
         .doc(targetUid)
         .get();
-    final profile = profDoc.exists ? (profDoc.data() ?? <String, dynamic>{}) : {};
+    final profile = profDoc.exists
+        ? (profDoc.data() ?? <String, dynamic>{})
+        : {};
 
-    final userDoc =
-        await FirebaseFirestore.instance.collection('users').doc(targetUid).get();
-    final userRecord = userDoc.exists ? (userDoc.data() ?? <String, dynamic>{}) : {};
+    final userDoc = await FirebaseFirestore.instance
+        .collection('users')
+        .doc(targetUid)
+        .get();
+    final userRecord = userDoc.exists
+        ? (userDoc.data() ?? <String, dynamic>{})
+        : {};
 
-    final name = (userRecord['name'] as String?) ??
-        (profile['name'] as String?) ??
-        '';
+    final name =
+        (userRecord['name'] as String?) ?? (profile['name'] as String?) ?? '';
 
-    final relationOf = (profile['relation_of'] as String?) ??
+    final relationOf =
+        (profile['relation_of'] as String?) ??
         (userRecord['relation_of'] as String?) ??
         '';
 
-    final permanentAddress = (profile['permanent_address'] as String?) ??
+    final permanentAddress =
+        (profile['permanent_address'] as String?) ??
         (userRecord['permanent_address'] as String?) ??
         '';
 
-    final enrolmentNumber = (userRecord['enrolment_number'] as String?) ??
+    final enrolmentNumber =
+        (userRecord['enrolment_number'] as String?) ??
         (profile['enrolment_number'] as String?) ??
         '';
 
@@ -192,8 +216,10 @@ class _StudentDocumentsOptionsPageState
     }
 
     final createdAtValue = userRecord['createdAt'];
-    final fallbackDateOfEnrolment = profile['date_of_enrolment'] ?? userRecord['date_of_enrolment'];
-    final dateOfEnrolment = _toDateString(createdAtValue ?? fallbackDateOfEnrolment) ?? '';
+    final fallbackDateOfEnrolment =
+        profile['date_of_enrolment'] ?? userRecord['date_of_enrolment'];
+    final dateOfEnrolment =
+        _toDateString(createdAtValue ?? fallbackDateOfEnrolment) ?? '';
 
     final completionDate = DateFormat('dd/MM/yyyy').format(DateTime.now());
 
@@ -211,30 +237,36 @@ class _StudentDocumentsOptionsPageState
   }
 
   Future<void> _generateForm(
-      String endpoint,
-      String firestoreField,
-      VoidCallback onStart,
-      VoidCallback onFinish,
-      Function(String) onSaved, {
-      Map<String, dynamic>? extraFields,
-    }) async {
+    String endpoint,
+    String firestoreField,
+    VoidCallback onStart,
+    VoidCallback onFinish,
+    Function(String) onSaved, {
+    Map<String, dynamic>? extraFields,
+  }) async {
     onStart();
     try {
       final payload = await _collectCommonPayloadForUid(widget.uid);
       if (extraFields != null) payload.addAll(extraFields);
 
-      final uri = Uri.parse('https://tajdrivingschool.in/smartDrive/forms/$endpoint');
+      final uri = Uri.parse(
+        'https://tajdrivingschool.in/smartDrive/forms/$endpoint',
+      );
       final response = await http
-          .post(uri,
-              headers: {
-                'Content-Type': 'application/json',
-                'x-api-key': 'supersecretlkjhgfdsa12341234',
-              },
-              body: jsonEncode(payload))
+          .post(
+            uri,
+            headers: {
+              'Content-Type': 'application/json',
+              'x-api-key': 'supersecretlkjhgfdsa12341234',
+            },
+            body: jsonEncode(payload),
+          )
           .timeout(const Duration(seconds: 40));
 
       if (response.statusCode != 200) {
-        throw Exception('Server error ${response.statusCode}: ${response.body}');
+        throw Exception(
+          'Server error ${response.statusCode}: ${response.body}',
+        );
       }
 
       final jsonResp = jsonDecode(response.body);
@@ -248,21 +280,32 @@ class _StudentDocumentsOptionsPageState
 
       if (secureUrl == null) throw Exception('No secure_url returned');
 
-      await FirebaseFirestore.instance.collection('user_profiles').doc(widget.uid).set({
-        firestoreField: secureUrl,
-        '${firestoreField.split('_')[0]}_public_id': publicId,
-        '${firestoreField.split('_')[0]}_generated_at': FieldValue.serverTimestamp(),
-        if (filenameDocx != null) '${firestoreField.split('_')[0]}_docx_filename': filenameDocx,
-      }, SetOptions(merge: true));
+      await FirebaseFirestore.instance
+          .collection('user_profiles')
+          .doc(widget.uid)
+          .set({
+            firestoreField: secureUrl,
+            '${firestoreField.split('_')[0]}_public_id': publicId,
+            '${firestoreField.split('_')[0]}_generated_at':
+                FieldValue.serverTimestamp(),
+            if (filenameDocx != null)
+              '${firestoreField.split('_')[0]}_docx_filename': filenameDocx,
+          }, SetOptions(merge: true));
 
       onSaved(secureUrl);
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Form generated successfully')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Form generated successfully')),
+      );
     } on TimeoutException {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request timed out — please try again')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Request timed out — please try again')),
+      );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Error: $e')));
     } finally {
       onFinish();
     }
@@ -315,7 +358,9 @@ class _StudentDocumentsOptionsPageState
   }
 
   /// Fetch attendance rows for a given uid
-  Future<List<Map<String, String>>> _fetchAttendanceEntriesForUid(String targetUid) async {
+  Future<List<Map<String, String>>> _fetchAttendanceEntriesForUid(
+    String targetUid,
+  ) async {
     final qSnapshot = await FirebaseFirestore.instance
         .collection('attendance')
         .where('userId', isEqualTo: targetUid)
@@ -328,14 +373,24 @@ class _StudentDocumentsOptionsPageState
       final bVal = b.data()['slot_day'];
 
       DateTime? ad, bd;
-      if (aVal is Timestamp) ad = aVal.toDate();
+      if (aVal is Timestamp)
+        ad = aVal.toDate();
       else if (aVal is String) {
-        try { ad = DateTime.parse(aVal); } catch (_) { ad = null; }
+        try {
+          ad = DateTime.parse(aVal);
+        } catch (_) {
+          ad = null;
+        }
       }
 
-      if (bVal is Timestamp) bd = bVal.toDate();
+      if (bVal is Timestamp)
+        bd = bVal.toDate();
       else if (bVal is String) {
-        try { bd = DateTime.parse(bVal); } catch (_) { bd = null; }
+        try {
+          bd = DateTime.parse(bVal);
+        } catch (_) {
+          bd = null;
+        }
       }
 
       if (ad == null && bd == null) return 0;
@@ -351,16 +406,13 @@ class _StudentDocumentsOptionsPageState
       final slotDayRaw = data['slot_day'] ?? data['slotDay'] ?? data['date'];
       final slotDay = _toDateString(slotDayRaw) ?? '';
 
-      final slotTimeRaw = (data['slot_time'] ?? data['slotTime'] ?? '').toString();
+      final slotTimeRaw = (data['slot_time'] ?? data['slotTime'] ?? '')
+          .toString();
       final times = _parseStartEndFromSlotTime(slotTimeRaw);
       final start = times['start'] ?? '';
       final end = times['end'] ?? '';
 
-      rows.add({
-        'date': slotDay,
-        'start_time': start,
-        'end_time': end,
-      });
+      rows.add({'date': slotDay, 'start_time': start, 'end_time': end});
     }
 
     return rows;
@@ -372,10 +424,12 @@ class _StudentDocumentsOptionsPageState
     String s = slotTime.trim();
     if (s.contains('-')) {
       final parts = s.split('-');
-      if (parts.length >= 2) return {'start': parts[0].trim(), 'end': parts[1].trim()};
+      if (parts.length >= 2)
+        return {'start': parts[0].trim(), 'end': parts[1].trim()};
     } else if (s.toUpperCase().contains('TO')) {
       final parts = s.toUpperCase().split('TO');
-      if (parts.length >= 2) return {'start': parts[0].trim(), 'end': parts[1].trim()};
+      if (parts.length >= 2)
+        return {'start': parts[0].trim(), 'end': parts[1].trim()};
     }
 
     final parts = s.split(RegExp(r'\s+'));
@@ -389,7 +443,9 @@ class _StudentDocumentsOptionsPageState
     if (url == null) return;
     final uri = Uri.tryParse(url);
     if (uri == null) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Invalid URL')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invalid URL')));
       return;
     }
     await launchUrl(uri, mode: LaunchMode.externalApplication);
@@ -399,7 +455,9 @@ class _StudentDocumentsOptionsPageState
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: ready ? AppColors.success.withOpacity(0.12) : AppColors.warning.withOpacity(0.06),
+        color: ready
+            ? AppColors.success.withOpacity(0.12)
+            : AppColors.warning.withOpacity(0.06),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
@@ -454,7 +512,8 @@ class _StudentDocumentsOptionsPageState
   MediaType _mediaTypeForExt(String ext) {
     ext = ext.toLowerCase();
     if (ext == 'pdf') return MediaType('application', 'pdf');
-    if (ext == 'doc' || ext == 'docx') return MediaType('application', 'msword');
+    if (ext == 'doc' || ext == 'docx')
+      return MediaType('application', 'msword');
     if (ext == 'jpg' || ext == 'jpeg') return MediaType('image', 'jpeg');
     if (ext == 'png') return MediaType('image', 'png');
     return MediaType('application', 'octet-stream');
@@ -468,11 +527,15 @@ class _StudentDocumentsOptionsPageState
     String overwrite = 'true',
     required String ext,
   }) async {
-    final signed =
-        await _getSignature(publicId: publicId, folder: folder, overwrite: overwrite);
+    final signed = await _getSignature(
+      publicId: publicId,
+      folder: folder,
+      overwrite: overwrite,
+    );
 
-    final uri =
-        Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/auto/upload');
+    final uri = Uri.parse(
+      'https://api.cloudinary.com/v1_1/$_cloudName/auto/upload',
+    );
 
     final req = http.MultipartRequest('POST', uri)
       ..fields['api_key'] = signed['api_key'].toString()
@@ -483,8 +546,14 @@ class _StudentDocumentsOptionsPageState
       ..fields['overwrite'] = overwrite;
 
     final mediaType = _mediaTypeForExt(ext);
-    req.files.add(http.MultipartFile.fromBytes('file', bytes,
-        filename: filename, contentType: mediaType));
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: filename,
+        contentType: mediaType,
+      ),
+    );
 
     final streamed = await req.send();
     final body = await streamed.stream.bytesToString();
@@ -544,7 +613,9 @@ class _StudentDocumentsOptionsPageState
       // Prepare Cloudinary path (we upload for the student widget.uid)
       final now = DateTime.now();
       final datePart = '${now.year}-${now.month.toString().padLeft(2, '0')}';
-      final folder = _clean('$_baseFolder/users/${widget.uid}/uploads/$datePart');
+      final folder = _clean(
+        '$_baseFolder/users/${widget.uid}/uploads/$datePart',
+      );
 
       final fileName = _pickedSendFile!.name;
       final publicIdSafe = _clean('${widget.uid}_${fileName.split('.').first}');
@@ -573,7 +644,9 @@ class _StudentDocumentsOptionsPageState
         'recipient_uid': widget.uid,
         'sender_uid': currentUser.uid,
         'document_name': _docHeaderCtrl.text.trim(),
-        'remarks': _docMessageCtrl.text.trim().isEmpty ? null : _docMessageCtrl.text.trim(),
+        'remarks': _docMessageCtrl.text.trim().isEmpty
+            ? null
+            : _docMessageCtrl.text.trim(),
         'file_name': fileName,
         'file_ext': ext,
         'file_size': _pickedSendFile!.size,
@@ -621,20 +694,39 @@ class _StudentDocumentsOptionsPageState
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             // Title
-            Text('Send Documents', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700, color: cs.onSurface)),
+            Text(
+              'Send Documents',
+              style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface,
+              ),
+            ),
             const SizedBox(height: 12),
 
             // Document Header
-            Text('Document Header *', style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+            Text(
+              'Document Header *',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 6),
             TextField(
               controller: _docHeaderCtrl,
               decoration: InputDecoration(
                 hintText: 'Enter document header or title...',
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: cs.onSurface.withOpacity(0.08))),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: cs.onSurface.withOpacity(0.08)),
+                ),
                 filled: true,
                 fillColor: Theme.of(context).scaffoldBackgroundColor,
               ),
@@ -656,16 +748,29 @@ class _StudentDocumentsOptionsPageState
             const SizedBox(height: 12),
 
             // Additional Message
-            Text('Additional Message (Optional)', style: Theme.of(context).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600)),
+            Text(
+              'Additional Message (Optional)',
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 6),
             TextField(
               controller: _docMessageCtrl,
               decoration: InputDecoration(
                 hintText: 'Add a message to accompany the documents...',
                 isDense: true,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: cs.onSurface.withOpacity(0.08))),
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 12,
+                ),
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(8),
+                  borderSide: BorderSide(color: cs.onSurface.withOpacity(0.08)),
+                ),
                 filled: true,
                 fillColor: Theme.of(context).scaffoldBackgroundColor,
               ),
@@ -683,15 +788,26 @@ class _StudentDocumentsOptionsPageState
                     onPressed: _uploadingSend ? null : _submitSendDocument,
                     style: ElevatedButton.styleFrom(
                       padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
                     ),
                     child: _uploadingSend
                         ? Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: const [
-                              SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white))),
+                              SizedBox(
+                                width: 14,
+                                height: 14,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor: AlwaysStoppedAnimation<Color>(
+                                    Colors.white,
+                                  ),
+                                ),
+                              ),
                               SizedBox(width: 10),
-                              Text('Uploading...')
+                              Text('Uploading...'),
                             ],
                           )
                         : const Text('Send Documents'),
@@ -707,11 +823,18 @@ class _StudentDocumentsOptionsPageState
                             _docMessageCtrl.clear();
                             _pickedSendFile = null;
                           });
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cleared')));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Cleared')),
+                          );
                         },
                   style: OutlinedButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    padding: const EdgeInsets.symmetric(
+                      vertical: 14,
+                      horizontal: 16,
+                    ),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                   child: const Text('Clear'),
                 ),
@@ -741,172 +864,245 @@ class _StudentDocumentsOptionsPageState
   }) {
     final c = context.c;
 
-    return LayoutBuilder(builder: (context, constraints) {
-      final width = constraints.maxWidth;
-      final isNarrow = width < 560;
-      final isVeryNarrow = width < 420;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        final isNarrow = width < 560;
+        final isVeryNarrow = width < 420;
 
-      final titleColumn = Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: c.onSurface.withOpacity(0.06),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            alignment: Alignment.center,
-            child: Icon(icon, size: 22, color: c.onSurface.withOpacity(0.9)),
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(child: Text(title, style: AppText.tileTitle.copyWith(color: c.onSurface))),
-                    if (!isNarrow) const SizedBox(width: 8),
-                    if (!isNarrow) _statusChip(ready: ready),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.08),
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: Row(
-                        children: [
-                          Text(tagLabel, style: AppText.hintSmall.copyWith(color: AppColors.primary)),
-                          const SizedBox(width: 8),
-                          Text(tagDate, style: AppText.hintSmall.copyWith(color: c.onSurface.withOpacity(0.7))),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(subtitle, style: AppText.tileSubtitle.copyWith(color: c.onSurface), maxLines: 1, overflow: TextOverflow.ellipsis),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      );
-
-      Widget actionsArea;
-      if (isVeryNarrow) {
-        actionsArea = PopupMenuButton<String>(
-          icon: const Icon(Icons.more_vert),
-          onSelected: (v) async {
-            switch (v) {
-              case 'generate':
-                if (!loading) onGenerate();
-                break;
-              case 'view':
-                if (url != null)  onOpen();
-                break;
-              case 'download':
-                if (url != null)  onOpen();
-                break;
-            }
-          },
-          itemBuilder: (_) => [
-            PopupMenuItem(value: 'generate', child: Row(children: [const Icon(Icons.playlist_add_rounded), const SizedBox(width: 8), Text(loading ? 'Generating...' : 'Generate')])),
-            PopupMenuItem(value: 'view', child: Row(children: [const Icon(Icons.remove_red_eye_rounded), const SizedBox(width: 8), const Text('View')])),
-            PopupMenuItem(value: 'download', child: Row(children: [const Icon(Icons.download_rounded), const SizedBox(width: 8), const Text('Download')])),
-          ],
-        );
-      } else {
-        actionsArea = Wrap(
-          spacing: 8,
-          runSpacing: 6,
-          crossAxisAlignment: WrapCrossAlignment.center,
+        final titleColumn = Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
-            ElevatedButton.icon(
-              onPressed: loading ? null : onGenerate,
-              icon: loading
-                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2))
-                  : const Icon(Icons.playlist_add_rounded, size: 16),
-              label: Text(loading ? 'Generating' : 'Generate', style: const TextStyle(fontSize: 13)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: c.primary,
-                foregroundColor: AppColors.onSurfaceInverse,
-                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                minimumSize: const Size(0, 36),
+            Container(
+              width: 44,
+              height: 44,
+              decoration: BoxDecoration(
+                color: c.onSurface.withOpacity(0.06),
+                borderRadius: BorderRadius.circular(10),
               ),
+              alignment: Alignment.center,
+              child: Icon(icon, size: 22, color: c.onSurface.withOpacity(0.9)),
             ),
-            IconButton(
-              onPressed: url == null ? null : onOpen,
-              icon: const Icon(Icons.remove_red_eye_rounded),
-              color: url != null ? c.onSurface : c.onSurface.withOpacity(0.4),
-              tooltip: 'Open',
-            ),
-            IconButton(
-              onPressed: url == null ? null : onOpen,
-              icon: const Icon(Icons.download_rounded),
-              color: url != null ? c.onSurface : c.onSurface.withOpacity(0.4),
-              tooltip: 'Download DOCX',
-            ),
-          ],
-        );
-      }
-
-      final cardChild = Padding(
-        padding: EdgeInsets.symmetric(
-          vertical: isNarrow ? 12 : 16,
-          horizontal: isNarrow ? 12 : 14,
-        ),
-        child: isNarrow
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  titleColumn,
-                  const SizedBox(height: 12),
                   Row(
                     children: [
-                      Expanded(child: Align(alignment: Alignment.centerLeft, child: _statusChip(ready: ready))),
-                      const SizedBox(width: 12),
-                      actionsArea,
+                      Expanded(
+                        child: Text(
+                          title,
+                          style: AppText.tileTitle.copyWith(color: c.onSurface),
+                        ),
+                      ),
+                      if (!isNarrow) const SizedBox(width: 8),
+                      if (!isNarrow) _statusChip(ready: ready),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withOpacity(0.08),
+                          borderRadius: BorderRadius.circular(18),
+                        ),
+                        child: Row(
+                          children: [
+                            Text(
+                              tagLabel,
+                              style: AppText.hintSmall.copyWith(
+                                color: AppColors.primary,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              tagDate,
+                              style: AppText.hintSmall.copyWith(
+                                color: c.onSurface.withOpacity(0.7),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          subtitle,
+                          style: AppText.tileSubtitle.copyWith(
+                            color: c.onSurface,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
                     ],
                   ),
                 ],
-              )
-            : Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
-                children: [
-                  Expanded(child: titleColumn),
-                  const SizedBox(width: 12),
-                  ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 320),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.end,
+              ),
+            ),
+          ],
+        );
+
+        Widget actionsArea;
+        if (isVeryNarrow) {
+          actionsArea = PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert),
+            onSelected: (v) async {
+              switch (v) {
+                case 'generate':
+                  if (!loading) onGenerate();
+                  break;
+                case 'view':
+                  if (url != null) onOpen();
+                  break;
+                case 'download':
+                  if (url != null) onOpen();
+                  break;
+              }
+            },
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'generate',
+                child: Row(
+                  children: [
+                    const Icon(Icons.playlist_add_rounded),
+                    const SizedBox(width: 8),
+                    Text(loading ? 'Generating...' : 'Generate'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'view',
+                child: Row(
+                  children: [
+                    const Icon(Icons.remove_red_eye_rounded),
+                    const SizedBox(width: 8),
+                    const Text('View'),
+                  ],
+                ),
+              ),
+              PopupMenuItem(
+                value: 'download',
+                child: Row(
+                  children: [
+                    const Icon(Icons.download_rounded),
+                    const SizedBox(width: 8),
+                    const Text('Download'),
+                  ],
+                ),
+              ),
+            ],
+          );
+        } else {
+          actionsArea = Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              ElevatedButton.icon(
+                onPressed: loading ? null : onGenerate,
+                icon: loading
+                    ? const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.playlist_add_rounded, size: 16),
+                label: Text(
+                  loading ? 'Generating' : 'Generate',
+                  style: const TextStyle(fontSize: 13),
+                ),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: c.primary,
+                  foregroundColor: AppColors.onSurfaceInverse,
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 8,
+                    horizontal: 12,
+                  ),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  minimumSize: const Size(0, 36),
+                ),
+              ),
+              IconButton(
+                onPressed: url == null ? null : onOpen,
+                icon: const Icon(Icons.remove_red_eye_rounded),
+                color: url != null ? c.onSurface : c.onSurface.withOpacity(0.4),
+                tooltip: 'Open',
+              ),
+              IconButton(
+                onPressed: url == null ? null : onOpen,
+                icon: const Icon(Icons.download_rounded),
+                color: url != null ? c.onSurface : c.onSurface.withOpacity(0.4),
+                tooltip: 'Download DOCX',
+              ),
+            ],
+          );
+        }
+
+        final cardChild = Padding(
+          padding: EdgeInsets.symmetric(
+            vertical: isNarrow ? 12 : 16,
+            horizontal: isNarrow ? 12 : 14,
+          ),
+          child: isNarrow
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    titleColumn,
+                    const SizedBox(height: 12),
+                    Row(
                       children: [
-                        _statusChip(ready: ready),
-                        const SizedBox(height: 8),
+                        Expanded(
+                          child: Align(
+                            alignment: Alignment.centerLeft,
+                            child: _statusChip(ready: ready),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
                         actionsArea,
                       ],
                     ),
-                  )
-                ],
-              ),
-      );
+                  ],
+                )
+              : Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    Expanded(child: titleColumn),
+                    const SizedBox(width: 12),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 320),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          _statusChip(ready: ready),
+                          const SizedBox(height: 8),
+                          actionsArea,
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+        );
 
-      return Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
-        elevation: 1,
-        margin: const EdgeInsets.symmetric(vertical: 6),
-        color: c.surface,
-        child: cardChild,
-      );
-    });
+        return Card(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(AppRadii.l),
+          ),
+          elevation: 1,
+          margin: const EdgeInsets.symmetric(vertical: 6),
+          color: c.surface,
+          child: cardChild,
+        );
+      },
+    );
   }
 
   @override
@@ -916,8 +1112,16 @@ class _StudentDocumentsOptionsPageState
     final width = mq.size.width;
 
     // Responsive horizontal padding and max content width
-    final horizontalPadding = width >= 1200 ? 48.0 : width >= 900 ? 28.0 : 16.0;
-    final maxContentWidth = width >= 1200 ? 1100.0 : width >= 1000 ? 980.0 : 720.0;
+    final horizontalPadding = width >= 1200
+        ? 48.0
+        : width >= 900
+        ? 28.0
+        : 16.0;
+    final maxContentWidth = width >= 1200
+        ? 1100.0
+        : width >= 1000
+        ? 980.0
+        : 720.0;
 
     final todayStr = DateFormat('dd MMM yyyy').format(DateTime.now());
 
@@ -934,7 +1138,12 @@ class _StudentDocumentsOptionsPageState
           child: ConstrainedBox(
             constraints: BoxConstraints(maxWidth: maxContentWidth),
             child: SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(horizontalPadding, 20, horizontalPadding, 20 + 72),
+              padding: EdgeInsets.fromLTRB(
+                horizontalPadding,
+                20,
+                horizontalPadding,
+                20 + 72,
+              ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
@@ -945,11 +1154,18 @@ class _StudentDocumentsOptionsPageState
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Document Options', style: AppText.sectionTitle.copyWith(color: c.onSurface)),
+                            Text(
+                              'Document Options',
+                              style: AppText.sectionTitle.copyWith(
+                                color: c.onSurface,
+                              ),
+                            ),
                             const SizedBox(height: 6),
                             Text(
                               'Generate official forms for this student and download personalised DOCX files.',
-                              style: AppText.tileSubtitle.copyWith(color: c.onSurface),
+                              style: AppText.tileSubtitle.copyWith(
+                                color: c.onSurface,
+                              ),
                             ),
                           ],
                         ),
@@ -957,7 +1173,9 @@ class _StudentDocumentsOptionsPageState
                       IconButton(
                         onPressed: () {
                           _loadFromFirestore();
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Refreshing...')));
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Refreshing...')),
+                          );
                         },
                         tooltip: 'Refresh status',
                         icon: const Icon(Icons.refresh_rounded),
@@ -974,7 +1192,8 @@ class _StudentDocumentsOptionsPageState
                     title: 'Form 14 — Application for licence',
                     tagLabel: 'Form 14',
                     tagDate: _form14Url != null ? 'Generated' : 'Not generated',
-                    subtitle: 'Personalised DOCX for licence application (includes enrolment number).',
+                    subtitle:
+                        'Personalised DOCX for licence application (includes enrolment number).',
                     ready: _form14Url != null,
                     loading: _loading14,
                     onGenerate: _generateForm14,
@@ -989,7 +1208,8 @@ class _StudentDocumentsOptionsPageState
                     title: 'Form 15 — Driving hours register',
                     tagLabel: 'Form 15',
                     tagDate: _form15Url != null ? 'Generated' : 'Not generated',
-                    subtitle: 'Register of training hours (pulls attendance entries for this student).',
+                    subtitle:
+                        'Register of training hours (pulls attendance entries for this student).',
                     ready: _form15Url != null,
                     loading: _loading15,
                     onGenerate: _generateForm15,
@@ -1004,7 +1224,8 @@ class _StudentDocumentsOptionsPageState
                     title: 'Form 5 — Completion certificate',
                     tagLabel: 'Form 5',
                     tagDate: _form5Url != null ? 'Generated' : todayStr,
-                    subtitle: 'Certificate-like form (name, relation, address, enrolment & completion date).',
+                    subtitle:
+                        'Certificate-like form (name, relation, address, enrolment & completion date).',
                     ready: _form5Url != null,
                     loading: _loading5,
                     onGenerate: _generateForm5,
@@ -1017,9 +1238,14 @@ class _StudentDocumentsOptionsPageState
                   // -------------------------
                   // SEND DOCUMENT SECTION (now functional)
                   // -------------------------
-                  LayoutBuilder(builder: (context, constraints) {
-                    return _buildSendDocumentCard(context, constraints.maxWidth);
-                  }),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      return _buildSendDocumentCard(
+                        context,
+                        constraints.maxWidth,
+                      );
+                    },
+                  ),
 
                   const SizedBox(height: 28),
                 ],
@@ -1057,29 +1283,61 @@ class DottedUploadBoxSend extends StatelessWidget {
     final hasFile = pickedFile != null;
     return Container(
       width: double.infinity,
-      padding: EdgeInsets.symmetric(vertical: isNarrow ? 18 : 24, horizontal: isNarrow ? 12 : 16),
+      padding: EdgeInsets.symmetric(
+        vertical: isNarrow ? 18 : 24,
+        horizontal: isNarrow ? 12 : 16,
+      ),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: cs.onSurface.withOpacity(0.12), width: 1.5, style: BorderStyle.solid),
+        border: Border.all(
+          color: cs.onSurface.withOpacity(0.12),
+          width: 1.5,
+          style: BorderStyle.solid,
+        ),
         color: Theme.of(context).cardColor,
       ),
       child: Column(
         children: [
-          Icon(Icons.cloud_upload_outlined, size: isNarrow ? 36 : 48, color: cs.onSurface.withOpacity(0.45)),
+          Icon(
+            Icons.cloud_upload_outlined,
+            size: isNarrow ? 36 : 48,
+            color: cs.onSurface.withOpacity(0.45),
+          ),
           const SizedBox(height: 8),
-          Text('Upload Document', style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600, color: cs.onSurface)),
+          Text(
+            'Upload Document',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w600,
+              color: cs.onSurface,
+            ),
+          ),
           const SizedBox(height: 6),
-          Text('Tap to choose a file', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: cs.onSurface.withOpacity(0.7)), textAlign: TextAlign.center),
+          Text(
+            'Tap to choose a file',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: cs.onSurface.withOpacity(0.7),
+            ),
+            textAlign: TextAlign.center,
+          ),
           const SizedBox(height: 12),
 
           ElevatedButton(
             onPressed: onChoose,
             style: ElevatedButton.styleFrom(
               padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+              ),
             ),
             child: uploading
-                ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white)))
+                ? const SizedBox(
+                    height: 16,
+                    width: 16,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2,
+                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                    ),
+                  )
                 : const Text('Choose File'),
           ),
 
@@ -1090,9 +1348,15 @@ class DottedUploadBoxSend extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(pickedFile!.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+                  Text(
+                    pickedFile!.name,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
                   const SizedBox(height: 4),
-                  Text('${(pickedFile!.size / (1024 * 1024)).toStringAsFixed(2)} MB', style: const TextStyle(color: Colors.black54)),
+                  Text(
+                    '${(pickedFile!.size / (1024 * 1024)).toStringAsFixed(2)} MB',
+                    style: const TextStyle(color: Colors.black54),
+                  ),
                 ],
               ),
             ),

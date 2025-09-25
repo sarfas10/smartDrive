@@ -6,7 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 
 // Branding row (keeps app brand look)
-import 'package:smart_drive/reusables/branding.dart';
+import 'package:smart_drive/reusables/branding.dart' hide AppColors;
 
 // Blocks (keep these imports as in your project)
 import 'users_block.dart';
@@ -17,6 +17,9 @@ import 'notifications_block.dart';
 import 'settings_block.dart';
 import 'slots_block.dart';
 import 'plans_block.dart';
+
+// App theme
+import 'theme/app_theme.dart';
 
 // Hardcoded Hostinger endpoint (matches your public_html path)
 const String _kRazorpayEndpoint =
@@ -37,9 +40,6 @@ class AdminDashboard extends StatefulWidget {
 class _AdminDashboardState extends State<AdminDashboard> {
   String selected = 'dashboard';
 
-  static const kBg = Color(0xFFF5F6F8);
-  static const kSurface = Colors.white;
-
   void _pick(String s) => setState(() => selected = s);
   void _snack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -54,7 +54,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
         final double sidebarWidth = isDesktop ? 280 : 260;
 
         return Scaffold(
-          backgroundColor: kBg,
+          backgroundColor: AppColors.background,
           drawer: isDesktop ? null : _buildDrawer(),
           appBar: isDesktop ? null : _buildAppBar(context),
           body: SafeArea(
@@ -74,14 +74,14 @@ class _AdminDashboardState extends State<AdminDashboard> {
 
   Widget _buildDrawer() {
     return Drawer(
-      backgroundColor: kSurface,
+      backgroundColor: AppColors.surface,
       elevation: 8,
       child: Sidebar(selected: selected, onPick: _pick, isInDrawer: true),
     );
   }
 
   PreferredSizeWidget _buildAppBar(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final primary = AppColors.primary;
     return AppBar(
       backgroundColor: primary,
       elevation: 2,
@@ -173,8 +173,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           ElevatedButton(
             onPressed: () => _saveTestPool(controllers),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.primary,
-              foregroundColor: Colors.white,
+              backgroundColor: AppColors.primary,
+              foregroundColor: AppColors.onSurfaceInverse,
             ),
             child: const Text('Save'),
           ),
@@ -189,7 +189,10 @@ class _AdminDashboardState extends State<AdminDashboard> {
     return TextField(
       controller: controller,
       keyboardType: isNumber ? TextInputType.number : TextInputType.text,
-      decoration: const InputDecoration(labelText: '', border: OutlineInputBorder()).copyWith(labelText: label),
+      decoration: InputDecoration(
+        labelText: label,
+        border: const OutlineInputBorder(),
+      ),
     );
   }
 
@@ -238,18 +241,19 @@ class Sidebar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Dark sidebar; use theme slate for background and inverse text for contrast
     return Container(
-      decoration: const BoxDecoration(color: Color(0xFF111418), border: Border(right: BorderSide(color: Color(0x14000000), width: 0.6))),
+      decoration: BoxDecoration(color: AppColors.slate, border: Border(right: BorderSide(color: AppColors.divider, width: 0.6))),
       child: SafeArea(
         bottom: false,
         child: Column(
           children: [
-            const Padding(
-              padding: EdgeInsets.all(20.0),
+            Padding(
+              padding: const EdgeInsets.all(20.0),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                AppBrandingRow(logoSize: 40, nameSize: 18, spacing: 10, textColor: Colors.white),
-                SizedBox(height: 16),
-                Divider(color: Colors.white24, height: 1),
+                const AppBrandingRow(logoSize: 40, nameSize: 18, spacing: 10, textColor: Colors.white),
+                const SizedBox(height: 16),
+                Divider(color: AppColors.onSurfaceInverse.withOpacity(0.18), height: 1),
               ]),
             ),
             Expanded(
@@ -283,7 +287,7 @@ class _MenuItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final activeColor = Theme.of(context).colorScheme.primary;
+    final activeColor = AppColors.primary;
     const inactiveColor = Colors.white;
     return InkWell(
       onTap: onTap,
@@ -292,11 +296,15 @@ class _MenuItem extends StatelessWidget {
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: isActive ? const Color(0x1A4C008A) : Colors.transparent,
+          color: isActive ? AppColors.brand.withOpacity(0.12) : Colors.transparent,
           borderRadius: BorderRadius.circular(8),
           border: Border(left: BorderSide(width: 3, color: isActive ? activeColor : Colors.transparent)),
         ),
-        child: Row(children: [Icon(icon, color: isActive ? activeColor : inactiveColor, size: 20), const SizedBox(width: 12), Text(title, style: TextStyle(fontWeight: FontWeight.w500, color: isActive ? activeColor : inactiveColor))]),
+        child: Row(children: [
+          Icon(icon, color: isActive ? activeColor : inactiveColor, size: 20),
+          const SizedBox(width: 12),
+          Text(title, style: TextStyle(fontWeight: FontWeight.w500, color: isActive ? activeColor : inactiveColor))
+        ]),
       ),
     );
   }
@@ -359,7 +367,7 @@ class _DashboardBlockState extends State<DashboardBlock> {
               children: [
                 const _DashboardHeader(),
                 // small label showing current range (keeps header tidy)
-                Text('Showing last $selectedDays days', style: TextStyle(fontSize: 13, color: Colors.grey[700])),
+                Text('Showing last $selectedDays days', style: TextStyle(fontSize: 13, color: AppColors.onSurfaceMuted)),
               ],
             ),
             const SizedBox(height: 8),
@@ -373,19 +381,20 @@ class _DashboardBlockState extends State<DashboardBlock> {
                     width: double.infinity,
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.yellow[100],
+                      color: AppColors.warnBg,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.yellow[800]!),
+                      border: Border.all(color: AppColors.warnFg),
                     ),
-                    child: Text('Razorpay: $val', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+                    child: Text('Razorpay: $val', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: AppColors.warnFg)),
                   ),
                 );
               },
             ),
             const SizedBox(height: 8),
             // build the stats viewport and inject a custom RevenueCard into it
+            // UPDATED: make stats and recent activities split the available space 1:1 (half each)
             Expanded(
-              flex: 3,
+              flex: 1,
               child: _StatsViewport(
                 stats: stats,
                 maxWidth: c.maxWidth,
@@ -400,6 +409,7 @@ class _DashboardBlockState extends State<DashboardBlock> {
               ),
             ),
             const SizedBox(height: 12),
+            // UPDATED: give RecentActivities equal vertical space (half the page)
             Expanded(flex: 1, child: _RecentActivities(isCompact: isCompact)),
           ]);
         });
@@ -495,8 +505,10 @@ class _StatsViewport extends StatelessWidget {
     ];
 
     final bool narrow = maxWidth < 600;
-    final double aspect = narrow ? 2.8 : 2.4;
-    final double maxExtent = narrow ? maxWidth : 300.0;
+    // UPDATED: Use 1:1 aspect for stat cards (square tiles)
+    final double aspect = 1.0;
+    // adjust maxExtent so squares look good across widths
+    final double maxExtent = narrow ? (maxWidth / 2).clamp(120.0, 220.0) : 240.0;
 
     return GridView.builder(
       padding: EdgeInsets.zero,
@@ -522,15 +534,17 @@ class RevenueCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final primary = AppColors.primary;
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: AppColors.surface,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0x11000000)),
-        boxShadow: const [BoxShadow(color: Color(0x07000000), blurRadius: 10, offset: Offset(0, 3))],
+        border: Border.all(color: AppColors.divider),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 3))
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -546,7 +560,7 @@ class RevenueCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(color: primary.withOpacity(0.08), borderRadius: BorderRadius.circular(6)),
-                    child: const Text('Revenue', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                    child: const Text('Revenue', style: TextStyle(fontSize: 12,color: AppColors.onSurface, fontWeight: FontWeight.w600)),
                   ),
                 ]),
               ),
@@ -566,7 +580,7 @@ class RevenueCard extends StatelessWidget {
               amountLabel,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: Color(0xFF111827)),
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.onSurface),
             ),
           ]),
         ],
@@ -600,7 +614,7 @@ class _FilterButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final primary = AppColors.primary;
 
     return OutlinedButton.icon(
       style: OutlinedButton.styleFrom(
@@ -674,18 +688,18 @@ class _FilterButton extends StatelessWidget {
 // Helper to get chip color based on status
 Color _statusColor(String status, BuildContext ctx) {
   final s = status.toLowerCase();
-  if (s.contains('confirm') || s.contains('completed') || s.contains('paid')) return Colors.green.shade50;
-  if (s.contains('fail') || s.contains('cancel') || s.contains('rejected')) return Colors.red.shade50;
-  if (s.contains('notification')) return Colors.blue.shade50;
-  return Colors.grey.shade100;
+  if (s.contains('confirm') || s.contains('completed') || s.contains('paid')) return AppColors.okBg;
+  if (s.contains('fail') || s.contains('cancel') || s.contains('rejected')) return AppColors.errBg;
+  if (s.contains('notification')) return AppColors.info.withOpacity(0.08);
+  return AppColors.neuBg;
 }
 
 Color _statusTextColor(String status) {
   final s = status.toLowerCase();
-  if (s.contains('confirm') || s.contains('completed') || s.contains('paid')) return Colors.green.shade800;
-  if (s.contains('fail') || s.contains('cancel') || s.contains('rejected')) return Colors.red.shade800;
-  if (s.contains('notification')) return Colors.blue.shade800;
-  return Colors.grey.shade700;
+  if (s.contains('confirm') || s.contains('completed') || s.contains('paid')) return AppColors.okFg;
+  if (s.contains('fail') || s.contains('cancel') || s.contains('rejected')) return AppColors.errFg;
+  if (s.contains('notification')) return AppColors.info;
+  return AppColors.onSurfaceMuted;
 }
 
 class _RecentActivities extends StatefulWidget {
@@ -725,7 +739,7 @@ class _RecentActivitiesState extends State<_RecentActivities> {
       // Header with title, search and filter
       Row(
         children: [
-          const Expanded(child: Text('Recent Activities', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600))),
+          Expanded(child: Text('Recent Activities', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.onSurface))),
           const SizedBox(width: 12),
           // small search field
           SizedBox(
@@ -734,8 +748,9 @@ class _RecentActivitiesState extends State<_RecentActivities> {
               onChanged: (v) => setState(() => _search = v.trim()),
               decoration: InputDecoration(
                 isDense: true,
-                hintText: 'Search student/slot/type/message',
-                prefixIcon: const Icon(Icons.search, size: 18),
+                hintText: 'Search student/type/message',
+                hintStyle: TextStyle(color: AppColors.onSurfaceFaint),
+                prefixIcon: Icon(Icons.search, size: 18, color: AppColors.onSurfaceMuted),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                 contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
               ),
@@ -757,15 +772,15 @@ class _RecentActivitiesState extends State<_RecentActivities> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: Colors.grey.shade300),
+                border: Border.all(color: AppColors.divider),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.filter_alt_outlined, size: 18, color: Colors.grey.shade700),
+                  Icon(Icons.filter_alt_outlined, size: 18, color: AppColors.onSurfaceMuted),
                   const SizedBox(width: 8),
                   Text(
                     _statusFilter == 'all' ? 'Status' : _statusFilter[0].toUpperCase() + _statusFilter.substring(1),
-                    style: TextStyle(color: Colors.grey.shade700),
+                    style: TextStyle(color: AppColors.onSurfaceMuted),
                   ),
                 ],
               ),
@@ -788,11 +803,10 @@ class _RecentActivitiesState extends State<_RecentActivities> {
             if (_search.isNotEmpty) {
               final q = _search.toLowerCase();
               activities = activities.where((b) {
-                final slot = (b['slot_id'] ?? '').toString().toLowerCase();
                 final student = ((b['student_name'] ?? b['userName'] ?? b['user_id'] ?? b['user_id_raw']) ?? '').toString().toLowerCase();
                 final activity = (b['activity_type'] ?? '').toString().toLowerCase();
                 final message = (b['message'] ?? b['title'] ?? b['note'] ?? '').toString().toLowerCase();
-                return slot.contains(q) || student.contains(q) || activity.contains(q) || message.contains(q);
+                return student.contains(q) || activity.contains(q) || message.contains(q);
               }).toList();
             }
 
@@ -803,21 +817,24 @@ class _RecentActivitiesState extends State<_RecentActivities> {
               }).toList();
             }
 
-            if (activities.isEmpty) return const Center(child: Text('No recent activities'));
+            if (activities.isEmpty) return Center(child: Text('No recent activities', style: TextStyle(color: AppColors.onSurfaceMuted)));
 
             // Compact/mobile: vertical ListTiles
             if (widget.isCompact) {
               return ListView.separated(
                 physics: const AlwaysScrollableScrollPhysics(),
                 itemCount: activities.length,
-                separatorBuilder: (_, __) => const Divider(height: 1),
+                separatorBuilder: (_, __) => Divider(height: 1, color: AppColors.divider),
                 itemBuilder: (_, i) {
                   final b = activities[i];
                   final createdAt = (b['createdAt'] is Timestamp) ? (b['createdAt'] as Timestamp).toDate() : (b['created_at'] is Timestamp) ? (b['created_at'] as Timestamp).toDate() : null;
-                  final status = (b['status'] ?? b['type'] ?? '-').toString();
-                  final slotId = (b['slot_id'] ?? '-').toString();
                   final userId = (b['userId'] ?? b['student_id'] ?? b['user_id'] ?? '-').toString();
+                  // compute activityType using the heuristic
                   final activityType = (b['activity_type'] ?? _inferActivityType(b)).toString();
+                  // If it's a registration, set status to Completed
+                  String status = (b['status'] ?? b['type'] ?? '-').toString();
+                  if (activityType.toLowerCase() == 'registration') status = 'Completed';
+
                   final userNameCached = b['userName'] as String?; // may already be present for notifications
 
                   return FutureBuilder<String>(
@@ -828,15 +845,15 @@ class _RecentActivitiesState extends State<_RecentActivities> {
                         contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                         leading: CircleAvatar(
                           radius: 20,
-                          backgroundColor: Colors.grey[50],
-                          child: _leadingContentForActivity(b, userName, slotId),
+                          backgroundColor: AppColors.neuBg,
+                          child: _leadingContentForActivity(b, userName, '' /* no slot shown */),
                         ),
                         title: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text(userName, style: const TextStyle(fontWeight: FontWeight.w700)),
+                            Text(userName, style: TextStyle(fontWeight: FontWeight.w700, color: AppColors.onSurface)),
                             const SizedBox(height: 4),
-                            Text(activityType, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                            Text(activityType, style: TextStyle(fontSize: 12, color: AppColors.onSurfaceMuted)),
                           ],
                         ),
                         subtitle: _subtitleForActivity(b, createdAt),
@@ -861,20 +878,19 @@ class _RecentActivitiesState extends State<_RecentActivities> {
             // Desktop/wide: header + aligned rows with alternating background
             return Column(
               children: [
-                // Header row
+                // Header row (slot column removed)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                  decoration: const BoxDecoration(
-                    border: Border(bottom: BorderSide(color: Color(0x11000000))),
+                  decoration: BoxDecoration(
+                    border: Border(bottom: BorderSide(color: AppColors.divider)),
                   ),
                   child: Row(
-                    children: const [
-                      SizedBox(width: 64, child: Text('Slot', style: TextStyle(fontWeight: FontWeight.w600))),
-                      SizedBox(width: 16),
-                      Expanded(child: Text('Student / Source', style: TextStyle(fontWeight: FontWeight.w600))),
-                      SizedBox(width: 220, child: Text('Date', style: TextStyle(fontWeight: FontWeight.w600))),
-                      SizedBox(width: 160, child: Text('Activity', style: TextStyle(fontWeight: FontWeight.w600))),
-                      SizedBox(width: 120, child: Text('Status', style: TextStyle(fontWeight: FontWeight.w600))),
+                    children: [
+                      // Removed slot column here
+                      Expanded(child: Text('Student / Source', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.onSurfaceMuted))),
+                      SizedBox(width: 220, child: Text('Date', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.onSurfaceMuted))),
+                      SizedBox(width: 160, child: Text('Activity', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.onSurfaceMuted))),
+                      SizedBox(width: 120, child: Text('Status', style: TextStyle(fontWeight: FontWeight.w600, color: AppColors.onSurfaceMuted))),
                     ],
                   ),
                 ),
@@ -883,16 +899,18 @@ class _RecentActivitiesState extends State<_RecentActivities> {
                   child: ListView.separated(
                     physics: const AlwaysScrollableScrollPhysics(),
                     itemCount: activities.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    separatorBuilder: (_, __) => Divider(height: 1, color: AppColors.divider),
                     itemBuilder: (ctx, i) {
                       final b = activities[i];
                       final createdAt = (b['createdAt'] is Timestamp) ? (b['createdAt'] as Timestamp).toDate() : (b['created_at'] is Timestamp) ? (b['created_at'] as Timestamp).toDate() : null;
-                      final status = (b['status'] ?? b['type'] ?? '-').toString();
-                      final slotId = (b['slot_id'] ?? '-').toString();
                       final userId = (b['userId'] ?? b['student_id'] ?? b['user_id'] ?? '-').toString();
                       final activityType = (b['activity_type'] ?? _inferActivityType(b)).toString();
 
-                      final bgColor = i.isEven ? Colors.white : Colors.grey.shade50;
+                      // For registration activities, make status 'Completed'
+                      String status = (b['status'] ?? b['type'] ?? '-').toString();
+                      if (activityType.toLowerCase() == 'registration') status = 'Completed';
+
+                      final bgColor = i.isEven ? AppColors.surface : AppColors.background;
                       final userNameCached = b['userName'] as String?;
 
                       return FutureBuilder<String>(
@@ -908,18 +926,15 @@ class _RecentActivitiesState extends State<_RecentActivities> {
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                               child: Row(
                                 children: [
-                                  SizedBox(
-                                    width: 64,
-                                    child: Row(children: [
-                                      CircleAvatar(radius: 18, backgroundColor: Colors.grey[100], child: _leadingContentForActivity(b, userName, slotId)),
-                                      const SizedBox(width: 8),
-                                      Flexible(child: Text(slotId, style: const TextStyle(fontWeight: FontWeight.w600))),
-                                    ]),
-                                  ),
-                                  const SizedBox(width: 16),
-                                  Expanded(child: Text(userName, style: const TextStyle(fontSize: 14))),
-                                  SizedBox(width: 220, child: Text(createdAt != null ? createdAt.toString().split('.').first : '-')),
-                                  SizedBox(width: 160, child: Text(activityType, style: TextStyle(color: Colors.grey.shade700))),
+                                  // leading avatar + student name (slot column removed)
+                                  Row(children: [
+                                    CircleAvatar(radius: 18, backgroundColor: AppColors.neuBg, child: _leadingContentForActivity(b, userName, '')),
+                                    const SizedBox(width: 8),
+                                    SizedBox(width: 16),
+                                  ]),
+                                  Expanded(child: Text(userName, style: TextStyle(fontSize: 14, color: AppColors.onSurface))),
+                                  SizedBox(width: 220, child: Text(createdAt != null ? createdAt.toString().split('.').first : '-', style: TextStyle(color: AppColors.onSurfaceMuted))),
+                                  SizedBox(width: 160, child: Text(activityType, style: TextStyle(color: AppColors.onSurfaceMuted))),
                                   SizedBox(
                                     width: 120,
                                     child: Align(
@@ -959,26 +974,27 @@ class _RecentActivitiesState extends State<_RecentActivities> {
         (b['type'] == 'new_instructor_registration');
 
     if (isNotification) {
-      return const Icon(Icons.notifications, size: 16, color: Colors.blueAccent);
+      return Icon(Icons.notifications, size: 16, color: AppColors.info);
     }
     // otherwise initials
     final initials = _shortLabel(userName, slotId);
-    return Text(initials, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w700));
+    return Text(initials, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.onSurface));
   }
 
   Widget _subtitleForActivity(Map<String, dynamic> b, DateTime? createdAt) {
     if ((b['type'] ?? '').toString().toLowerCase().contains('registration') || (b['isNotification'] == true) || (b['type']?.toString().toLowerCase() == 'notification')) {
       final title = b['title'] ?? b['message'] ?? b['note'] ?? '';
-      return Text(title.toString(), maxLines: 2, overflow: TextOverflow.ellipsis);
+      return Text(title.toString(), maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: AppColors.onSurfaceMuted));
     }
     // booking-like
-    return Text(createdAt != null ? createdAt.toString().split('.').first : '-');
+    return Text(createdAt != null ? createdAt.toString().split('.').first : '-', style: TextStyle(color: AppColors.onSurfaceMuted));
   }
 
   // Very small heuristic to label the type of activity. Adjust to match your schema.
+  // UPDATED: return 'Registration' for new registrations (student/instructor/registration)
   String _inferActivityType(Map<String, dynamic> b) {
     final t = ((b['type'] ?? '') as String).toLowerCase();
-    if (t.contains('student') || t.contains('instructor') || t.contains('registration')) return 'Notification';
+    if (t.contains('student') || t.contains('instructor') || t.contains('registration')) return 'Registration';
     if (b.containsKey('payment_id') || b.containsKey('amount')) return 'Payment';
     if (b.containsKey('slot_id') && (b.containsKey('user_id') || b.containsKey('student_id'))) return 'Booking';
     if (b.containsKey('action')) return b['action'].toString();
@@ -1006,16 +1022,16 @@ class _StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final primary = AppColors.primary;
     return Container(
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(10), border: Border.all(color: const Color(0x11000000)), boxShadow: const [BoxShadow(color: Color(0x07000000), blurRadius: 10, offset: Offset(0, 3))]),
+      decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(10), border: Border.all(color: AppColors.divider), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 3))]),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
         // Only single left icon — removed top-right mini icon as requested
         Icon(icon, color: primary, size: 20),
         const SizedBox(height: 6),
-        Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xFF1F2937))),
-        Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11, color: Color(0xFF6B7280))),
+        Text(value, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: AppColors.onSurface)),
+        Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(fontSize: 11, color: AppColors.onSurfaceMuted)),
       ]),
     );
   }
@@ -1026,7 +1042,7 @@ class _CardSurface extends StatelessWidget {
   const _CardSurface({required this.child});
   @override
   Widget build(BuildContext context) {
-    return Container(decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: const Color(0x11000000)), boxShadow: const [BoxShadow(color: Color(0x08000000), blurRadius: 12, offset: Offset(0, 4))]), child: child);
+    return Container(decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12), border: Border.all(color: AppColors.divider), boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 12, offset: Offset(0, 4))]), child: child);
   }
 }
 
@@ -1037,14 +1053,14 @@ String _formatNumber(num? number) {
 }
 
 Widget _kv(String k, String v) {
-  return Padding(padding: const EdgeInsets.symmetric(vertical: 3), child: Row(children: [SizedBox(width: 110, child: Text(k, style: const TextStyle(color: Color(0xFF6B7280)))), const SizedBox(width: 8), Expanded(child: Text(v, style: const TextStyle(fontWeight: FontWeight.w500)))]));
+  return Padding(padding: const EdgeInsets.symmetric(vertical: 3), child: Row(children: [SizedBox(width: 110, child: Text(k, style: TextStyle(color: AppColors.onSurfaceMuted))), const SizedBox(width: 8), Expanded(child: Text(v, style: TextStyle(fontWeight: FontWeight.w500, color: AppColors.onSurface)))]));
 }
 
 class _DashboardHeader extends StatelessWidget {
   const _DashboardHeader();
   @override
   Widget build(BuildContext context) {
-    return const Text("Dashboard Overview", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: Color(0xFF1F2937)));
+    return Text("Dashboard Overview", style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700, color: AppColors.onSurface));
   }
 }
 
@@ -1131,10 +1147,10 @@ String _humanCurrency(double amount) {
 
 // -------------------- NEW: merge bookings + admin_notifications into one stream --------------------
 
-/// Returns a broadcast stream that merges `bookings` (ordered by created_at desc)
-/// and `admin_notifications` (ordered by createdAt desc), normalizes fields and
-/// emits a combined sorted list on any update. Each emitted item is a Map with
-/// consistent keys (createdAt Timestamp, status/type, activity_type, userId, slot_id, title/message, etc).
+// Returns a broadcast stream that merges `bookings` (ordered by created_at desc)
+// and `admin_notifications` (ordered by createdAt desc), normalizes fields and
+// emits a combined sorted list on any update. Each emitted item is a Map with
+// consistent keys (createdAt Timestamp, status/type, activity_type, userId, slot_id, title/message, etc).
 Stream<List<Map<String, dynamic>>> _mergedActivitiesStream({int limit = 200}) {
   final controller = StreamController<List<Map<String, dynamic>>>.broadcast();
   // Keep latest snapshots in memory

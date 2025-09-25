@@ -271,8 +271,8 @@ class _PlansViewState extends State<PlansView> {
     try {
       await _applyPlanToUser(_pendingPlanId!);
 
-      // log purchase
-      await _firestore.collection('plan_purchases').add({
+      // log purchase and capture reference so we can reference it from payments collection
+      final planPurchaseRef = await _firestore.collection('plan_purchases').add({
         'user_id': _user?.uid,
         'plan_id': _pendingPlanId,
         'amount': _pendingAmountPaise / 100.0,
@@ -282,6 +282,23 @@ class _PlansViewState extends State<PlansView> {
         'razorpay_signature': r.signature,
         'created_at': FieldValue.serverTimestamp(),
       });
+
+      // Best-effort: write a payments record referencing this plan purchase
+      try {
+        await _savePaymentRecordForPlan(
+          userId: _user?.uid,
+          planId: _pendingPlanId!,
+          planPurchaseId: planPurchaseRef.id,
+          amountRupees: _pendingAmountPaise / 100.0,
+          amountPaise: _pendingAmountPaise,
+          currency: 'INR',
+          razorpayPaymentId: r.paymentId!,
+          razorpayOrderId: r.orderId!,
+          razorpaySignature: r.signature!,
+        );
+      } catch (e, st) {
+        debugPrint('Failed to save payments doc (non-fatal): $e\n$st');
+      }
     } catch (_) {}
 
     _showSuccess('Plan upgraded successfully');
@@ -748,5 +765,71 @@ class _PlansViewState extends State<PlansView> {
         ],
       ),
     );
+  }
+
+  // ------------------ Payments collection helper ------------------
+
+  /// Best-effort save of a payment record to `payments` collection for a plan purchase.
+  /// This will not block the main flow if it fails.
+  Future<void> _savePaymentRecordForPlan({
+    String? userId,
+    required String planId,
+    required String planPurchaseId,
+    required double amountRupees,
+    required int amountPaise,
+    required String currency,
+    required String razorpayPaymentId,
+    required String razorpayOrderId,
+    required String razorpaySignature,
+  }) async {
+    try {
+      final fs = FirebaseFirestore.instance;
+
+      // Try to get a friendly payer name from users collection -> fallback to FirebaseAuth
+      String payerName = '';
+      try {
+        if (userId != null && userId.isNotEmpty) {
+          final userDoc = await fs.collection('users').doc(userId).get();
+          if (userDoc.exists) {
+            final d = userDoc.data();
+            if (d != null) {
+              payerName = (d['name'] ?? d['displayName'] ?? d['fullName'] ?? '').toString();
+            }
+          }
+        }
+      } catch (_) {
+        // ignore - fallback below
+      }
+
+      if (payerName.trim().isEmpty) {
+        final authUser = FirebaseAuth.instance.currentUser;
+        payerName = (authUser?.displayName ?? '').toString();
+      }
+
+      final paymentDoc = {
+        if (userId != null && userId.isNotEmpty) 'user_id': userId,
+        'payer_name': payerName,
+        'plan_id': planId,
+        'plan_purchase_id': planPurchaseId,
+        'amount': amountRupees, // rupees (double)
+        'amount_paise': amountPaise, // integer paise
+        'currency': currency,
+        'type': 'plan purchase',
+        'method': 'razorpay',
+        'razorpay_payment_id': razorpayPaymentId,
+        'razorpay_order_id': razorpayOrderId,
+        'razorpay_signature': razorpaySignature,
+        'created_at': FieldValue.serverTimestamp(),
+        'raw': {
+          'saved_at_client_ts': DateTime.now().toIso8601String(),
+        },
+      };
+
+      await fs.collection('payments').add(paymentDoc);
+      debugPrint('Payment (plan purchase) saved for plan_purchase_id $planPurchaseId');
+    } catch (e, st) {
+      debugPrint('Failed to save payment record (plan purchase): $e\n$st');
+      // Do not rethrow — plan application succeeded, we simply log payment-save failure.
+    }
   }
 }

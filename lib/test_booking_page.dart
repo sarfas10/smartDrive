@@ -351,6 +351,8 @@ class _TestBookingPageState extends State<TestBookingPage> {
 
   /// Save booking doc. `status` defaults to 'pending' so admin can review/confirm.
   /// Also records the logged-in Firebase Auth user info (uid, displayName, email, phone).
+  /// If paymentInfo is provided, this function will attempt to also write a `payments` document
+  /// with type = "test booking" (best-effort).
   Future<void> _saveBookingToFirestore({
     Map<String, dynamic>? paymentInfo,
     required num paidAmount,
@@ -416,6 +418,24 @@ class _TestBookingPageState extends State<TestBookingPage> {
         _lastOrderId = null;
       });
 
+      // If payment info was provided (paid booking), try to save a payment record (best-effort).
+      if (paymentInfo != null) {
+        try {
+          await _savePaymentRecord(
+            userId: user?.uid,
+            bookingId: added.id,
+            amountRupees: paidAmount.toDouble(),
+            amountPaise: (paidAmount * 100).toInt(),
+            currency: 'INR',
+            razorpayPaymentId: paymentInfo['razorpay_payment_id']?.toString() ?? '',
+            razorpayOrderId: paymentInfo['razorpay_order_id']?.toString() ?? '',
+            razorpaySignature: paymentInfo['razorpay_signature']?.toString() ?? '',
+          );
+        } catch (e, st) {
+          debugPrint('Failed to save payment record (non-fatal): $e\n$st');
+        }
+      }
+
       // Fetch & show admin popup (if any) after booking saved
       try {
         final found = await _fetchActiveAdminPopup();
@@ -440,6 +460,70 @@ class _TestBookingPageState extends State<TestBookingPage> {
         _saving = false;
         _isProcessingPayment = false;
       });
+    }
+  }
+
+  // ------------------ Payments collection helper ------------------
+
+  /// Best-effort save of a payment record to `payments` collection.
+  /// userId may be null if the user was not signed in; that field will be omitted in that case.
+  Future<void> _savePaymentRecord({
+    String? userId,
+    required String bookingId,
+    required double amountRupees,
+    required int amountPaise,
+    required String currency,
+    required String razorpayPaymentId,
+    required String razorpayOrderId,
+    required String razorpaySignature,
+  }) async {
+    try {
+      final fs = FirebaseFirestore.instance;
+
+      // Try to get a friendly payer name from users collection -> fallback to FirebaseAuth
+      String payerName = '';
+      try {
+        if (userId != null && userId.isNotEmpty) {
+          final userDoc = await fs.collection('users').doc(userId).get();
+          if (userDoc.exists) {
+            final d = userDoc.data();
+            if (d != null) {
+              payerName = (d['name'] ?? d['displayName'] ?? d['fullName'] ?? '').toString();
+            }
+          }
+        }
+      } catch (_) {
+        // ignore - fallback below
+      }
+
+      if (payerName.trim().isEmpty) {
+        final authUser = FirebaseAuth.instance.currentUser;
+        payerName = (authUser?.displayName ?? '').toString();
+      }
+
+      final paymentDoc = {
+        if (userId != null && userId.isNotEmpty) 'user_id': userId,
+        'payer_name': payerName,
+        'booking_id': bookingId,
+        'amount': amountRupees, // rupees (double)
+        'amount_paise': amountPaise, // integer paise
+        'currency': currency,
+        'type': 'test booking',
+        'method': 'razorpay',
+        'razorpay_payment_id': razorpayPaymentId,
+        'razorpay_order_id': razorpayOrderId,
+        'razorpay_signature': razorpaySignature,
+        'created_at': FieldValue.serverTimestamp(),
+        'raw': {
+          'saved_at_client_ts': DateTime.now().toIso8601String(),
+        },
+      };
+
+      await fs.collection('payments').add(paymentDoc);
+      debugPrint('Payment saved for booking $bookingId');
+    } catch (e, st) {
+      debugPrint('Failed to save payment record: $e\n$st');
+      // Do not rethrow — booking succeeded, we simply log payment-save failure.
     }
   }
 

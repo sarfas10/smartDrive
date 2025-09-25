@@ -32,7 +32,7 @@ class UploadDocumentPage extends StatefulWidget {
 
 class _UploadDocumentPageState extends State<UploadDocumentPage> {
   // ===== Cloudinary config: keep consistent with your onboarding_form.dart =====
-  static const String _cloudName = 'dxeunc4vd';
+  static const String _cloudName = 'dnxj5r6rc';
   static const String _baseFolder = 'smartDrive';
   static const String _hostingerBase =
       'https://tajdrivingschool.in/smartDrive/cloudinary';
@@ -89,11 +89,15 @@ class _UploadDocumentPageState extends State<UploadDocumentPage> {
     required String folder,
     String overwrite = 'true',
   }) async {
-    final signed =
-        await _getSignature(publicId: publicId, folder: folder, overwrite: overwrite);
+    final signed = await _getSignature(
+      publicId: publicId,
+      folder: folder,
+      overwrite: overwrite,
+    );
 
-    final uri =
-        Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/auto/upload');
+    final uri = Uri.parse(
+      'https://api.cloudinary.com/v1_1/$_cloudName/auto/upload',
+    );
 
     final req = http.MultipartRequest('POST', uri)
       ..fields['api_key'] = signed['api_key'].toString()
@@ -105,8 +109,14 @@ class _UploadDocumentPageState extends State<UploadDocumentPage> {
 
     // generic content-type to support any file (pdf/doc/image)
     final mediaType = MediaType('application', 'octet-stream');
-    req.files.add(http.MultipartFile.fromBytes('file', bytes,
-        filename: filename, contentType: mediaType));
+    req.files.add(
+      http.MultipartFile.fromBytes(
+        'file',
+        bytes,
+        filename: filename,
+        contentType: mediaType,
+      ),
+    );
 
     final streamed = await req.send();
     final body = await streamed.stream.bytesToString();
@@ -157,8 +167,10 @@ class _UploadDocumentPageState extends State<UploadDocumentPage> {
     try {
       // Get role from `users/{uid}.role`
       String role = 'unknown';
-      final userDoc =
-          await FirebaseFirestore.instance.collection('users').doc(user.uid).get();
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get();
       if (userDoc.exists) {
         final r = userDoc.data()?['role'];
         if (r is String && r.trim().isNotEmpty) role = r.toLowerCase();
@@ -193,7 +205,9 @@ class _UploadDocumentPageState extends State<UploadDocumentPage> {
         'uid': user.uid,
         'role': role, // student | instructor | unknown
         'document_name': _nameCtrl.text.trim(),
-        'remarks': _remarksCtrl.text.trim().isEmpty ? null : _remarksCtrl.text.trim(),
+        'remarks': _remarksCtrl.text.trim().isEmpty
+            ? null
+            : _remarksCtrl.text.trim(),
         'file_name': fileName,
         'file_ext': (_picked!.extension ?? '').toLowerCase(),
         'file_size': _picked!.size,
@@ -254,7 +268,9 @@ class _UploadDocumentPageState extends State<UploadDocumentPage> {
           constraints: const BoxConstraints(maxWidth: 640),
           child: Card(
             elevation: 0,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(20),
+            ),
             margin: const EdgeInsets.all(16),
             child: Padding(
               padding: const EdgeInsets.all(18),
@@ -272,8 +288,11 @@ class _UploadDocumentPageState extends State<UploadDocumentPage> {
                     TextFormField(
                       controller: _nameCtrl,
                       enabled: !_uploading,
-                      decoration: _input('e.g., Aadhaar Card, Passport, Academic Certificate'),
-                      validator: (v) => (v == null || v.trim().isEmpty) ? 'Required' : null,
+                      decoration: _input(
+                        'e.g., Aadhaar Card, Passport, Academic Certificate',
+                      ),
+                      validator: (v) =>
+                          (v == null || v.trim().isEmpty) ? 'Required' : null,
                     ),
                     const SizedBox(height: 16),
                     const _Label('Remarks (Optional)'),
@@ -281,7 +300,9 @@ class _UploadDocumentPageState extends State<UploadDocumentPage> {
                       controller: _remarksCtrl,
                       enabled: !_uploading,
                       maxLines: 4,
-                      decoration: _input('Add any additional information about this document...'),
+                      decoration: _input(
+                        'Add any additional information about this document...',
+                      ),
                     ),
                     const SizedBox(height: 20),
                     SizedBox(
@@ -292,9 +313,13 @@ class _UploadDocumentPageState extends State<UploadDocumentPage> {
                           elevation: 0,
                           backgroundColor: const Color(0xFF2D5BFF),
                           foregroundColor: Colors.white,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
                         ),
-                        child: Text(_uploading ? 'Uploading...' : 'Upload Document'),
+                        child: Text(
+                          _uploading ? 'Uploading...' : 'Upload Document',
+                        ),
                       ),
                     ),
                     const SizedBox(height: 18),
@@ -310,11 +335,11 @@ class _UploadDocumentPageState extends State<UploadDocumentPage> {
   }
 
   InputDecoration _input(String hint) => InputDecoration(
-        hintText: hint,
-        isDense: true,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-      );
+    hintText: hint,
+    isDense: true,
+    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+    border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+  );
 
   void _snack(String msg) =>
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
@@ -326,15 +351,21 @@ class _Label extends StatelessWidget {
   final String text;
   const _Label(this.text);
   @override
-  Widget build(BuildContext context) =>
-      Text(text, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14));
+  Widget build(BuildContext context) => Text(
+    text,
+    style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+  );
 }
 
 class _FileBox extends StatelessWidget {
   final PlatformFile? picked;
   final VoidCallback? onPick;
   final String helpText;
-  const _FileBox({required this.picked, required this.onPick, required this.helpText});
+  const _FileBox({
+    required this.picked,
+    required this.onPick,
+    required this.helpText,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -352,22 +383,24 @@ class _FileBox extends StatelessWidget {
             decoration: BoxDecoration(
               color: const Color(0xFFF9FAFF),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(
-                color: Colors.blue.shade200,
-                width: 1.2,
-              ),
+              border: Border.all(color: Colors.blue.shade200, width: 1.2),
             ),
             child: Center(
               child: hasFile
                   ? Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.insert_drive_file_rounded,
-                            size: 36, color: Colors.blueGrey),
+                        const Icon(
+                          Icons.insert_drive_file_rounded,
+                          size: 36,
+                          color: Colors.blueGrey,
+                        ),
                         const SizedBox(height: 8),
-                        Text(picked!.name,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(fontWeight: FontWeight.w600)),
+                        Text(
+                          picked!.name,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(fontWeight: FontWeight.w600),
+                        ),
                         Text(
                           '${(picked!.size / (1024 * 1024)).toStringAsFixed(2)} MB',
                           style: const TextStyle(color: Colors.black54),
@@ -377,14 +410,24 @@ class _FileBox extends StatelessWidget {
                   : Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        const Icon(Icons.upload_rounded,
-                            size: 36, color: Colors.black54),
+                        const Icon(
+                          Icons.upload_rounded,
+                          size: 36,
+                          color: Colors.black54,
+                        ),
                         const SizedBox(height: 8),
-                        const Text('Choose a file to upload',
-                            style: TextStyle(fontWeight: FontWeight.w600)),
+                        const Text(
+                          'Choose a file to upload',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
                         const SizedBox(height: 4),
-                        Text(helpText,
-                            style: const TextStyle(color: Colors.black54, fontSize: 12)),
+                        Text(
+                          helpText,
+                          style: const TextStyle(
+                            color: Colors.black54,
+                            fontSize: 12,
+                          ),
+                        ),
                       ],
                     ),
             ),
@@ -410,7 +453,10 @@ class _Guidelines extends StatelessWidget {
       child: const Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Upload Guidelines:', style: TextStyle(fontWeight: FontWeight.w600)),
+          Text(
+            'Upload Guidelines:',
+            style: TextStyle(fontWeight: FontWeight.w600),
+          ),
           SizedBox(height: 6),
           Text('• Supported formats: PDF, DOC, DOCX, JPG, PNG'),
           Text('• Maximum file size: 10MB'),

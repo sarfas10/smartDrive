@@ -16,12 +16,7 @@ Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
   // Background isolate must initialize Firebase.
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
-  // Optional: you can log a background event here if needed:
-  // FirebaseAnalytics.instance.logEvent(
-  //   name: 'fcm_background_message',
-  //   parameters: message.data,
-  // );
-  // Note: keep background work minimal and do not use UI APIs.
+  
 }
 
 Future<void> main() async {

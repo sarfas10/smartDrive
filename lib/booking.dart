@@ -20,9 +20,10 @@ import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:http/http.dart' as http;
 import 'theme/app_theme.dart';
 
-// New imports for admin media popup
+// New imports for admin media popup & user data
 import 'package:video_player/video_player.dart';
 import 'package:url_launcher/url_launcher.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 const Color _kAccent = AppColors.brand;
 
@@ -474,10 +475,10 @@ class _BookingPageState extends State<BookingPage> {
   double get _additionalCost => _numToDouble(_slotData?['additional_cost']);
   double get _baseTotalCost => double.parse((_vehicleCost + _additionalCost + _surcharge).toStringAsFixed(2));
   double get _finalPayable {
-  if (_isFreeByBenefit) return 0.0; // free benefit
-  if (_isFreeByPlan) return 0.0;    // plan-based free
-  return _baseTotalCost;
-}
+    if (_isFreeByBenefit) return 0.0; // free benefit
+    if (_isFreeByPlan) return 0.0;    // plan-based free
+    return _baseTotalCost;
+  }
 
 
   // -------------------- SERVER HELPERS --------------------
@@ -579,13 +580,20 @@ class _BookingPageState extends State<BookingPage> {
       final amountPaise = (_finalPayable * 100).round();
       _snack('Preparing payment…');
       _lastOrderId = await _createOrderOnServer(amountPaise: amountPaise);
-      _openRazorpayCheckout(orderId: _lastOrderId!, amountPaise: amountPaise);
+      await _openRazorpayCheckout(orderId: _lastOrderId!, amountPaise: amountPaise);
     } catch (e) {
       _snack('Could not start payment: $e', color: AppColors.danger);
     }
   }
 
-  void _openRazorpayCheckout({required String orderId, required int amountPaise}) {
+  // Helper: normalize phone (remove non-digits and leading +)
+  String _normalizePhone(String raw) {
+    final digitsOnly = raw.replaceAll(RegExp(r'[^0-9]'), '');
+    return digitsOnly;
+  }
+
+  /// Opens Razorpay checkout with prefilled user info (async to fetch user details)
+  Future<void> _openRazorpayCheckout({required String orderId, required int amountPaise}) async {
     if (_razorpay == null) {
       _snack('Payment is unavailable right now. Please try again.', color: AppColors.danger);
       return;
@@ -595,6 +603,46 @@ class _BookingPageState extends State<BookingPage> {
       return;
     }
 
+    // Try to fetch currently signed in user details
+    String? prefillName;
+    String? prefillEmail;
+    String? prefillContact;
+
+    try {
+      final authUser = FirebaseAuth.instance.currentUser;
+      if (authUser != null) {
+        prefillName = (authUser.displayName ?? '').trim();
+        prefillEmail = (authUser.email ?? '').trim();
+        final authPhone = (authUser.phoneNumber ?? '').trim();
+        if (authPhone.isNotEmpty) {
+          prefillContact = _normalizePhone(authPhone);
+        }
+        // Fallback to Firestore users document for missing fields
+        if ((prefillContact == null || prefillContact.isEmpty) || (prefillName == null || prefillName.isEmpty) || (prefillEmail == null || prefillEmail.isEmpty)) {
+          try {
+            final doc = await FirebaseFirestore.instance.collection('users').doc(authUser.uid).get();
+            final d = doc.data();
+            if (d != null) {
+              if ((prefillContact == null || prefillContact.isEmpty)) {
+                final phoneField = (d['phone'] ?? d['mobile'] ?? d['contact'] ?? '').toString().trim();
+                if (phoneField.isNotEmpty) prefillContact = _normalizePhone(phoneField);
+              }
+              if ((prefillName == null || prefillName.isEmpty) && (d['name'] ?? '').toString().isNotEmpty) {
+                prefillName = (d['name'] ?? '').toString();
+              }
+              if ((prefillEmail == null || prefillEmail.isEmpty) && (d['email'] ?? '').toString().isNotEmpty) {
+                prefillEmail = (d['email'] ?? '').toString();
+              }
+            }
+          } catch (_) {
+            // ignore fallback failure
+          }
+        }
+      }
+    } catch (_) {
+      // ignore
+    }
+
     final options = {
       'key': _razorpayKeyId,
       'order_id': orderId, // IMPORTANT: server-created order
@@ -602,10 +650,24 @@ class _BookingPageState extends State<BookingPage> {
       'currency': 'INR',
 
       // optional branding
-      'name': '',
-      'description': '',
+      'name': 'SmartDrive',
+      'description': 'Driving session booking',
       'image': '',
-      'prefill': {'contact': '', 'email': '', 'name': ''},
+
+      // prefill helps user not type details again in checkout
+      'prefill': {
+        if (prefillContact != null && prefillContact.isNotEmpty) 'contact': prefillContact,
+        if (prefillEmail != null && prefillEmail.isNotEmpty) 'email': prefillEmail,
+        if (prefillName != null && prefillName.isNotEmpty) 'name': prefillName,
+      },
+
+      // notes are also useful client-side for quick debugging — server order already had notes
+      'notes': {
+        'slotId': widget.slotId,
+        'userId': widget.userId,
+        if (prefillContact != null && prefillContact.isNotEmpty) 'contact': prefillContact,
+      },
+
       'theme': {'color': '#FFFFFF'},
 
       // ✅ Native SDK toggles (Android/iOS)
@@ -681,8 +743,26 @@ class _BookingPageState extends State<BookingPage> {
       },
     );
 
-    // After the booking is successfully written, show popup
+    // After the booking is successfully written, save payment record and show popup
     if (bookingRef != null) {
+      // 1) Save payment document (best-effort; does not block UX on failure)
+      try {
+        await _savePaymentRecord(
+          userId: widget.userId,
+          slotId: widget.slotId,
+          bookingId: bookingRef.id,
+          amountRupees: _finalPayable,
+          amountPaise: amountPaise,
+          currency: 'INR',
+          razorpayPaymentId: r.paymentId!,
+          razorpayOrderId: r.orderId!,
+          razorpaySignature: r.signature!,
+        );
+      } catch (e, st) {
+        debugPrint('Payment save error (non-fatal): $e\n$st');
+      }
+
+      // 2) Show admin popup (if any)
       try {
         final found = await _fetchActiveAdminPopup();
         if (found && _adminPopup != null) {
@@ -720,119 +800,119 @@ class _BookingPageState extends State<BookingPage> {
   /// Creates the booking inside a transaction and returns the booking DocumentReference on success.
   /// Returns null on failure. (This function no longer shows the admin popup; caller will.)
   Future<DocumentReference?> _createBookingAndMaybeIncrement({
-  required String status,
-  required num paidAmount,
-  Map<String, dynamic>? paymentInfo,
-}) async {
-  setState(() => _isBooking = true);
-  try {
-    final fs = FirebaseFirestore.instance;
+    required String status,
+    required num paidAmount,
+    Map<String, dynamic>? paymentInfo,
+  }) async {
+    setState(() => _isBooking = true);
+    try {
+      final fs = FirebaseFirestore.instance;
 
-    final bookingRef = fs.collection('bookings').doc();
-    final userPlanRef = fs.collection('user_plans').doc(widget.userId);
-    final slotRef = fs.collection('slots').doc(widget.slotId);
-    final userRef = fs.collection('users').doc(widget.userId);
+      final bookingRef = fs.collection('bookings').doc();
+      final userPlanRef = fs.collection('user_plans').doc(widget.userId);
+      final slotRef = fs.collection('slots').doc(widget.slotId);
+      final userRef = fs.collection('users').doc(widget.userId);
 
-    // Base booking payload; some fields are added inside the transaction after we decide free path
-    final baseBookingData = {
-      'user_id': widget.userId,
-      'slot_id': widget.slotId,
-      'boarding_point_latitude': _selectedLocation!.latitude,
-      'boarding_point_longitude': _selectedLocation!.longitude,
-      'distance_km': _distanceKm,
-      'surcharge': _surcharge,
-      'vehicle_cost': _vehicleCost,
-      'additional_cost': _additionalCost,
-      'total_cost': _finalPayable,
-      'status': status,
-      'created_at': FieldValue.serverTimestamp(),
-      if (_slotData != null && _slotData!['slot_day'] != null) 'slot_day': _slotData!['slot_day'],
-      if (_slotData != null && _slotData!['slot_time'] != null) 'slot_time': _slotData!['slot_time'],
-      if (_slotData != null && _slotData!['vehicle_type'] != null) 'vehicle_type': _slotData!['vehicle_type'],
-      if (_slotData != null && _slotData!['instructor_name'] != null) 'instructor_name': _slotData!['instructor_name'],
-      'plan_id': _activePlanId,
-      'plan_slots': _planSlots,
-      'plan_slots_used': _slotsUsed,
-      if (paymentInfo != null) 'payment': paymentInfo,
-      if (_lastOrderId != null) 'razorpay_order_id': _lastOrderId,
-      'paid_amount': paidAmount,
-    };
+      // Base booking payload; some fields are added inside the transaction after we decide free path
+      final baseBookingData = {
+        'user_id': widget.userId,
+        'slot_id': widget.slotId,
+        'boarding_point_latitude': _selectedLocation!.latitude,
+        'boarding_point_longitude': _selectedLocation!.longitude,
+        'distance_km': _distanceKm,
+        'surcharge': _surcharge,
+        'vehicle_cost': _vehicleCost,
+        'additional_cost': _additionalCost,
+        'total_cost': _finalPayable,
+        'status': status,
+        'created_at': FieldValue.serverTimestamp(),
+        if (_slotData != null && _slotData!['slot_day'] != null) 'slot_day': _slotData!['slot_day'],
+        if (_slotData != null && _slotData!['slot_time'] != null) 'slot_time': _slotData!['slot_time'],
+        if (_slotData != null && _slotData!['vehicle_type'] != null) 'vehicle_type': _slotData!['vehicle_type'],
+        if (_slotData != null && _slotData!['instructor_name'] != null) 'instructor_name': _slotData!['instructor_name'],
+        'plan_id': _activePlanId,
+        'plan_slots': _planSlots,
+        'plan_slots_used': _slotsUsed,
+        if (paymentInfo != null) 'payment': paymentInfo,
+        if (_lastOrderId != null) 'razorpay_order_id': _lastOrderId,
+        'paid_amount': paidAmount,
+      };
 
-    await fs.runTransaction((tx) async {
-      // 1) Ensure slot is still free
-      final slotSnap = await tx.get(slotRef);
-      final currentStatus = (slotSnap.data()?['status'] ?? '').toString().toLowerCase();
-      if (currentStatus == 'booked') {
-        throw Exception('Slot already booked');
-      }
+      await fs.runTransaction((tx) async {
+        // 1) Ensure slot is still free
+        final slotSnap = await tx.get(slotRef);
+        final currentStatus = (slotSnap.data()?['status'] ?? '').toString().toLowerCase();
+        if (currentStatus == 'booked') {
+          throw Exception('Slot already booked');
+        }
 
-      // 2) Read user's current benefit count INSIDE the txn to avoid races
-      final userSnap = await tx.get(userRef);
-      int freeBenefit = 0;
-      if (userSnap.exists) {
-        final raw = userSnap.data()?['free_benefit'];
-        freeBenefit = (raw is num) ? raw.toInt() : 0;
-      }
+        // 2) Read user's current benefit count INSIDE the txn to avoid races
+        final userSnap = await tx.get(userRef);
+        int freeBenefit = 0;
+        if (userSnap.exists) {
+          final raw = userSnap.data()?['free_benefit'];
+          freeBenefit = (raw is num) ? raw.toInt() : 0;
+        }
 
-      // Decide free path atomically (benefit has priority, then plan)
-      final bool useBenefit = freeBenefit > 0;
-      final bool usePlan = !useBenefit && _activePlanId != null && _planSlots != 0 && _slotsUsed < _planSlots;
+        // Decide free path atomically (benefit has priority, then plan)
+        final bool useBenefit = freeBenefit > 0;
+        final bool usePlan = !useBenefit && _activePlanId != null && _planSlots != 0 && _slotsUsed < _planSlots;
 
-      final bookingPayload = Map<String, dynamic>.from(baseBookingData)
-        ..addAll({
-          'free_by_benefit': useBenefit,
-          'free_by_plan': usePlan,
-        });
+        final bookingPayload = Map<String, dynamic>.from(baseBookingData)
+          ..addAll({
+            'free_by_benefit': useBenefit,
+            'free_by_plan': usePlan,
+          });
 
-      // If it’s free by either route, make sure total_cost reflects FREE (= 0.0)
-      if (useBenefit || usePlan) {
-        bookingPayload['total_cost'] = 0.0;
-        bookingPayload['paid_amount'] = 0;
-      }
+        // If it’s free by either route, make sure total_cost reflects FREE (= 0.0)
+        if (useBenefit || usePlan) {
+          bookingPayload['total_cost'] = 0.0;
+          bookingPayload['paid_amount'] = 0;
+        }
 
-      // 3) Write booking
-      tx.set(bookingRef, bookingPayload);
+        // 3) Write booking
+        tx.set(bookingRef, bookingPayload);
 
-      // 4) Update counters
-      if (useBenefit) {
-        tx.update(userRef, {'free_benefit': FieldValue.increment(-1)});
-      } else if (usePlan) {
-        tx.set(userPlanRef, {'slots_used': _slotsUsed + 1}, SetOptions(merge: true));
-      }
+        // 4) Update counters
+        if (useBenefit) {
+          tx.update(userRef, {'free_benefit': FieldValue.increment(-1)});
+        } else if (usePlan) {
+          tx.set(userPlanRef, {'slots_used': _slotsUsed + 1}, SetOptions(merge: true));
+        }
 
-      // 5) Mark slot as booked
-      tx.set(
-        slotRef,
-        {
-          'status': 'booked',
-          'booked_by': widget.userId,
-          'booking_id': bookingRef.id,
-          'booked_at': FieldValue.serverTimestamp(),
-        },
-        SetOptions(merge: true),
+        // 5) Mark slot as booked
+        tx.set(
+          slotRef,
+          {
+            'status': 'booked',
+            'booked_by': widget.userId,
+            'booking_id': bookingRef.id,
+            'booked_at': FieldValue.serverTimestamp(),
+          },
+          SetOptions(merge: true),
+        );
+      });
+
+      _snack(
+        status == 'paid'
+            ? 'Payment successful. Booking created.'
+            : 'Booking created successfully (FREE)!',
+        color: AppColors.success,
       );
-    });
 
-    _snack(
-      status == 'paid'
-          ? 'Payment successful. Booking created.'
-          : 'Booking created successfully (FREE)!',
-      color: AppColors.success,
-    );
-
-    return bookingRef;
-  } catch (e) {
-    final msg = e.toString();
-    if (msg.contains('already booked')) {
-      _snack('Sorry, this slot was just booked by someone else.', color: AppColors.danger);
-    } else {
-      _snack('Error creating booking: $e', color: AppColors.danger);
+      return bookingRef;
+    } catch (e) {
+      final msg = e.toString();
+      if (msg.contains('already booked')) {
+        _snack('Sorry, this slot was just booked by someone else.', color: AppColors.danger);
+      } else {
+        _snack('Error creating booking: $e', color: AppColors.danger);
+      }
+      return null;
+    } finally {
+      if (mounted) setState(() => _isBooking = false);
     }
-    return null;
-  } finally {
-    if (mounted) setState(() => _isBooking = false);
   }
-}
 
 
   // -------------------- POPUP MEDIA HELPERS --------------------
@@ -1353,6 +1433,70 @@ class _BookingPageState extends State<BookingPage> {
     }
   }
 
+  // -------------------- PAYMENT RECORD HELPER --------------------
+
+  // Save a payment record in `payments` collection (best-effort).
+  Future<void> _savePaymentRecord({
+    required String userId,
+    required String slotId,
+    required String bookingId,
+    required double amountRupees,
+    required int amountPaise,
+    required String currency,
+    required String razorpayPaymentId,
+    required String razorpayOrderId,
+    required String razorpaySignature,
+  }) async {
+    try {
+      final fs = FirebaseFirestore.instance;
+
+      // Try to get a friendly payer name from users collection -> fallback to FirebaseAuth
+      String payerName = '';
+      try {
+        final userDoc = await fs.collection('users').doc(userId).get();
+        if (userDoc.exists) {
+          final d = userDoc.data();
+          if (d != null) {
+            payerName = (d['name'] ?? d['displayName'] ?? d['fullName'] ?? '').toString();
+          }
+        }
+      } catch (_) {
+        // ignore - fallback below
+      }
+
+      if (payerName.trim().isEmpty) {
+        final authUser = FirebaseAuth.instance.currentUser;
+        payerName = (authUser?.displayName ?? '').toString();
+      }
+
+      final paymentDoc = {
+        'user_id': userId,
+        'payer_name': payerName,
+        'slot_id': slotId,
+        'booking_id': bookingId,
+        'amount': amountRupees, // rupees (double)
+        'amount_paise': amountPaise, // integer paise
+        'currency': currency,
+        'type': 'slot booking',
+        'method': 'razorpay',
+        'razorpay_payment_id': razorpayPaymentId,
+        'razorpay_order_id': razorpayOrderId,
+        'razorpay_signature': razorpaySignature,
+        'created_at': FieldValue.serverTimestamp(),
+        // small debug block - optional
+        'raw': {
+          'saved_at_client_ts': DateTime.now().toIso8601String(),
+        },
+      };
+
+      await fs.collection('payments').add(paymentDoc);
+      debugPrint('Payment saved for booking $bookingId');
+    } catch (e, st) {
+      debugPrint('Failed to save payment record: $e\n$st');
+      // Do not rethrow — booking succeeded, we simply log payment-save failure.
+    }
+  }
+
   // -------------------- UI --------------------
 
   @override
@@ -1494,26 +1638,26 @@ class _BookingPageState extends State<BookingPage> {
             ),
           ),
 
-         _SummarySheet(
-  slotData: _slotData,
-  vehicleCost: _vehicleCost,
-  additionalCost: _additionalCost,
-  surcharge: _surcharge,
-  distanceKm: _distanceKm,
-  totalCost: _finalPayable,
-  freeRadiusKm: _freeRadiusKm,
-  isBooking: _isBooking,
-  onProceed: _proceedToPay,
-  hintVisible: _selectedLocation == null,
-  isRadiusVisible: _isRadiusVisible,
-  onToggleRadius: _toggleRadiusVisibility,
-  showHintBubble: _showHintBubble,
-  isFreeByPlan: _isFreeByPlan,
-  isFreeByBenefit: _isFreeByBenefit,       // NEW
-  planSlots: _planSlots,
-  slotsUsed: _slotsUsed,
-  freeBenefitCount: _freeBenefitCount,      // NEW
-),
+          _SummarySheet(
+            slotData: _slotData,
+            vehicleCost: _vehicleCost,
+            additionalCost: _additionalCost,
+            surcharge: _surcharge,
+            distanceKm: _distanceKm,
+            totalCost: _finalPayable,
+            freeRadiusKm: _freeRadiusKm,
+            isBooking: _isBooking,
+            onProceed: _proceedToPay,
+            hintVisible: _selectedLocation == null,
+            isRadiusVisible: _isRadiusVisible,
+            onToggleRadius: _toggleRadiusVisibility,
+            showHintBubble: _showHintBubble,
+            isFreeByPlan: _isFreeByPlan,
+            isFreeByBenefit: _isFreeByBenefit,       // NEW
+            planSlots: _planSlots,
+            slotsUsed: _slotsUsed,
+            freeBenefitCount: _freeBenefitCount,      // NEW
+          ),
 
         ],
       ),
@@ -1877,7 +2021,7 @@ class _SummarySheet extends StatelessWidget {
                     ] else ...[
                       const SizedBox(height: 8),
                       _noteRow(isFreeByBenefit ? 'Covered by your free benefit — no charges'
-                                               : 'Covered under your plan — no charges'),
+                        : 'Covered under your plan — no charges'),
                     ],
 
                     const SizedBox(height: 12),
@@ -1991,4 +2135,3 @@ class _SummarySheet extends StatelessWidget {
     );
   }
 }
-

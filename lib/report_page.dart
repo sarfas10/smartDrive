@@ -32,6 +32,7 @@ class _ReportPageState extends State<ReportPage> {
   static const int maxBookingRows = 300;
   static const int maxSubscribersRowsPerPlan = 500;
   static const int maxUsersListRows = 200;
+  static const int maxPaymentsRows = 1000; // NEW: cap payments rows to avoid huge PDFs
 
   @override
   void initState() {
@@ -125,7 +126,7 @@ class _ReportPageState extends State<ReportPage> {
                     ],
                     SizedBox(height: gap),
                     Text(
-                      'Report includes: users (lists), attendance (with user info), test bookings, subscribers by plan (student name + createdAt + active), and Razorpay summary.',
+                      'Report includes: users (lists), attendance (with user info), test bookings, subscribers by plan (student name + createdAt + active), and Razorpay summary and per-payment details.',
                       style: AppText.hintSmall
                           .copyWith(color: AppColors.onSurfaceMuted),
                     ),
@@ -346,9 +347,6 @@ class _ReportPageState extends State<ReportPage> {
       }
 
       // Subscribers per plan (detailed)
-      // We'll build:
-      //  - subscribersCountByPlan: Map<planId, int>
-      //  - subscribersDetailsByPlan: Map<planId, List<List<String>>> rows: [StudentName, CreatedAt, Active]
       final userPlansSnap =
           await FirebaseFirestore.instance.collection('user_plans').get();
 
@@ -386,7 +384,7 @@ class _ReportPageState extends State<ReportPage> {
         }
       }
 
-      // Razorpay
+      // Razorpay summary from server (optional)
       Map<String, dynamic>? razorJson;
       try {
         final res = await http.post(Uri.parse(serverEndpoint),
@@ -401,14 +399,132 @@ class _ReportPageState extends State<ReportPage> {
         }
       } catch (_) {}
 
-      final totalRevenue =
+      final serverTotalRevenue =
           razorJson != null ? (razorJson['total_revenue']?.toString() ?? '0.00') : 'N/A';
-      final revenueCurrency =
+      final serverRevenueCurrency =
           razorJson != null ? (razorJson['revenue_currency'] ?? 'INR') : 'INR';
-      final successCount =
+      final serverSuccessCount =
           razorJson != null ? (razorJson['success_count']?.toString() ?? '0') : 'N/A';
-      final failureCount =
+      final serverFailureCount =
           razorJson != null ? (razorJson['failure_count']?.toString() ?? '0') : 'N/A';
+
+      // --- NEW: fetch per-payment documents directly from Firestore 'payments' collection ---
+      final List<List<String>> paymentsRows = [];
+      double paymentsTotalAmount = 0.0;
+      int paymentsCount = 0;
+      try {
+        // Query payments documents whose created_at falls within the selected timeframe.
+        // Some documents may use 'created_at' or 'createdAt'. We'll query by 'created_at' first.
+        Query paymentsQuery = FirebaseFirestore.instance.collection('payments')
+            .where('created_at', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
+            .where('created_at', isLessThanOrEqualTo: Timestamp.fromDate(end))
+            .orderBy('created_at', descending: false)
+            .limit(maxPaymentsRows);
+
+        final paymentsSnap = await paymentsQuery.get();
+
+        for (final d in paymentsSnap.docs) {
+          final m = d.data() as Map<String, dynamic>;
+
+          final payerName = (m['payer_name'] ?? m['user_name'] ?? m['user_name'] ?? '').toString();
+          final type = (m['type'] ?? '').toString();
+          final method = (m['method'] ?? '').toString();
+          double amount = 0.0;
+          if (m['amount'] is num) amount = (m['amount'] as num).toDouble();
+          else if (m['amount_paise'] is num) amount = ((m['amount_paise'] as num).toDouble()) / 100.0;
+          else if (m['amount'] is String) {
+            amount = double.tryParse(m['amount']) ?? 0.0;
+          }
+
+          final currency = (m['currency'] ?? 'INR').toString();
+          final rPaymentId = (m['razorpay_payment_id'] ?? m['payment_id'] ?? '').toString();
+          final rOrderId = (m['razorpay_order_id'] ?? m['order_id'] ?? '').toString();
+
+          DateTime? createdAt;
+          if (m['created_at'] is Timestamp) createdAt = (m['created_at'] as Timestamp).toDate();
+          else if (m['createdAt'] is Timestamp) createdAt = (m['createdAt'] as Timestamp).toDate();
+          else if (m['created_at'] is String) {
+            try {
+              createdAt = DateTime.parse(m['created_at']);
+            } catch (_) {}
+          }
+
+          final createdAtStr = createdAt != null ? _formatDateTime(createdAt) : '-';
+
+          paymentsRows.add([
+            payerName.isNotEmpty ? payerName : '-',
+            type.isNotEmpty ? type : '-',
+            method.isNotEmpty ? method : '-',
+            amount.toStringAsFixed(2),
+            currency,
+            rPaymentId.isNotEmpty ? rPaymentId : '-',
+            rOrderId.isNotEmpty ? rOrderId : '-',
+            createdAtStr,
+          ]);
+
+          paymentsTotalAmount += amount;
+          paymentsCount++;
+          if (paymentsRows.length >= maxPaymentsRows) break;
+        }
+
+        // If payments query returned empty, attempt fallback query by createdAt (different field name)
+        if (paymentsCount == 0) {
+          try {
+            Query fallbackQuery = FirebaseFirestore.instance.collection('payments')
+                .where('createdAt', isGreaterThanOrEqualTo: Timestamp.fromDate(start))
+                .where('createdAt', isLessThanOrEqualTo: Timestamp.fromDate(end))
+                .orderBy('createdAt', descending: false)
+                .limit(maxPaymentsRows);
+
+            final fallbackSnap = await fallbackQuery.get();
+            for (final d in fallbackSnap.docs) {
+              final m = d.data() as Map<String, dynamic>;
+              final payerName = (m['payer_name'] ?? m['user_name'] ?? '').toString();
+              final type = (m['type'] ?? '').toString();
+              final method = (m['method'] ?? '').toString();
+              double amount = 0.0;
+              if (m['amount'] is num) amount = (m['amount'] as num).toDouble();
+              else if (m['amount_paise'] is num) amount = ((m['amount_paise'] as num).toDouble()) / 100.0;
+              else if (m['amount'] is String) {
+                amount = double.tryParse(m['amount']) ?? 0.0;
+              }
+              final currency = (m['currency'] ?? 'INR').toString();
+              final rPaymentId = (m['razorpay_payment_id'] ?? m['payment_id'] ?? '').toString();
+              final rOrderId = (m['razorpay_order_id'] ?? m['order_id'] ?? '').toString();
+
+              DateTime? createdAt;
+              if (m['createdAt'] is Timestamp) createdAt = (m['createdAt'] as Timestamp).toDate();
+              else if (m['created_at'] is Timestamp) createdAt = (m['created_at'] as Timestamp).toDate();
+              else if (m['createdAt'] is String) {
+                try {
+                  createdAt = DateTime.parse(m['createdAt']);
+                } catch (_) {}
+              }
+
+              final createdAtStr = createdAt != null ? _formatDateTime(createdAt) : '-';
+
+              paymentsRows.add([
+                payerName.isNotEmpty ? payerName : '-',
+                type.isNotEmpty ? type : '-',
+                method.isNotEmpty ? method : '-',
+                amount.toStringAsFixed(2),
+                currency,
+                rPaymentId.isNotEmpty ? rPaymentId : '-',
+                rOrderId.isNotEmpty ? rOrderId : '-',
+                createdAtStr,
+              ]);
+
+              paymentsTotalAmount += amount;
+              paymentsCount++;
+              if (paymentsRows.length >= maxPaymentsRows) break;
+            }
+          } catch (_) {
+            // ignore fallback errors
+          }
+        }
+      } catch (e, st) {
+        debugPrint('Payments fetch failed: $e\n$st');
+      }
 
       // Build PDF
       final pdf = pw.Document();
@@ -425,14 +541,14 @@ class _ReportPageState extends State<ReportPage> {
 
         content.add(pw.Text('User Metrics', style: sectionStyle));
         content.add(pw.SizedBox(height: 8));
-        content.add(_pwMetricRow('Total users (fetched)', totalUsers.toString(), pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold), labelStyle));
-        content.add(_pwMetricRow('New registrations (in range)', newRegistrations.toString(), pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold), labelStyle));
-        content.add(_pwMetricRow('Students (sample)', studentCount.toString(), pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold), labelStyle));
-        content.add(_pwMetricRow('Instructors (sample)', instructorCount.toString(), pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold), labelStyle));
+        content.add(_pwMetricRow('Total users', totalUsers.toString(), pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold), labelStyle));
+        content.add(_pwMetricRow('New registrations', newRegistrations.toString(), pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold), labelStyle));
+        content.add(_pwMetricRow('Students', studentCount.toString(), pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold), labelStyle));
+        content.add(_pwMetricRow('Instructors', instructorCount.toString(), pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold), labelStyle));
         content.add(pw.SizedBox(height: 12));
 
         // Total users (sample)
-        content.add(pw.Text('Total users (sample / first ${totalUsersRows.length})', style: sectionStyle));
+        content.add(pw.Text('Total users (${totalUsersRows.length})', style: sectionStyle));
         content.add(pw.SizedBox(height: 8));
         if (totalUsersRows.isNotEmpty) {
           content.add(pw.Table.fromTextArray(
@@ -447,7 +563,7 @@ class _ReportPageState extends State<ReportPage> {
         content.add(pw.SizedBox(height: 12));
 
         // New Registrations
-        content.add(pw.Text('New Registrations (first ${newUsersRows.length})', style: sectionStyle));
+        content.add(pw.Text('New Registrations ( ${newUsersRows.length})', style: sectionStyle));
         content.add(pw.SizedBox(height: 8));
         if (newUsersRows.isNotEmpty) {
           content.add(pw.Table.fromTextArray(
@@ -462,7 +578,7 @@ class _ReportPageState extends State<ReportPage> {
         content.add(pw.SizedBox(height: 12));
 
         // Students
-        content.add(pw.Text('Students (first ${studentsRows.length})', style: sectionStyle));
+        content.add(pw.Text('Students (${studentsRows.length})', style: sectionStyle));
         content.add(pw.SizedBox(height: 8));
         if (studentsRows.isNotEmpty) {
           content.add(pw.Table.fromTextArray(
@@ -477,7 +593,7 @@ class _ReportPageState extends State<ReportPage> {
         content.add(pw.SizedBox(height: 12));
 
         // Instructors
-        content.add(pw.Text('Instructors (first ${instructorsRows.length})', style: sectionStyle));
+        content.add(pw.Text('Instructors (${instructorsRows.length})', style: sectionStyle));
         content.add(pw.SizedBox(height: 8));
         if (instructorsRows.isNotEmpty) {
           content.add(pw.Table.fromTextArray(
@@ -500,7 +616,7 @@ class _ReportPageState extends State<ReportPage> {
         content.add(pw.SizedBox(height: 8));
 
         if (attendanceRows.isNotEmpty) {
-          content.add(pw.Text('Attendance details (first ${attendanceRows.length} rows)', style: labelStyle));
+          content.add(pw.Text('Attendance details (${attendanceRows.length} rows)', style: labelStyle));
           content.add(pw.SizedBox(height: 6));
           content.add(pw.Table.fromTextArray(
             headers: ['Date', 'Slot', 'Status', 'Name', 'Phone', 'Email'],
@@ -528,11 +644,32 @@ class _ReportPageState extends State<ReportPage> {
         }
         content.add(pw.SizedBox(height: 12));
 
-        // Razorpay
-        content.add(pw.Text('Razorpay Summary', style: sectionStyle));
+        // Razorpay: payments from Firestore
+        content.add(pw.Text('Orders ', style: sectionStyle));
         content.add(pw.SizedBox(height: 8));
-        content.add(pw.Text('Revenue: $revenueCurrency $totalRevenue'));
-        content.add(pw.Text('Success: $successCount, Failure: $failureCount'));
+        content.add(_pwMetricRow('Payments found', paymentsCount.toString(), pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold), labelStyle));
+        content.add(_pwMetricRow('Payments total (sum)', 'INR ${paymentsTotalAmount.toStringAsFixed(2)}', pw.TextStyle(fontSize: 12, fontWeight: pw.FontWeight.bold), labelStyle));
+        content.add(pw.SizedBox(height: 8));
+
+        if (paymentsRows.isNotEmpty) {
+          content.add(pw.Text('Payments ( ${paymentsRows.length} rows)', style: labelStyle));
+          content.add(pw.SizedBox(height: 6));
+          content.add(pw.Table.fromTextArray(
+            headers: ['Payer', 'Type', 'Method', 'Amount', 'Currency', 'Razorpay Payment ID', 'Razorpay Order ID', 'Created'],
+            data: paymentsRows,
+            headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold),
+            cellAlignment: pw.Alignment.centerLeft,
+          ));
+        } else {
+          content.add(pw.Text('No payments found for this range .', style: labelStyle));
+        }
+        content.add(pw.SizedBox(height: 12));
+
+        // Server-side Razorpay summary (optional)
+        content.add(pw.Text('Razorpay summary', style: sectionStyle));
+        content.add(pw.SizedBox(height: 8));
+        content.add(pw.Text('Server revenue summary: $serverRevenueCurrency $serverTotalRevenue'));
+        content.add(pw.Text('Server success: $serverSuccessCount, failure: $serverFailureCount'));
         content.add(pw.SizedBox(height: 12));
 
         // Subscribers by plan (detailed)
@@ -586,9 +723,11 @@ class _ReportPageState extends State<ReportPage> {
             ['Present', presentCount.toString()],
             ['Absent', absentCount.toString()],
             ['Driving test bookings', totalDrivingTestBookings.toString()],
-            ['Revenue', razorJson != null ? '$revenueCurrency $totalRevenue' : 'N/A'],
-            ['Razorpay success', razorJson != null ? successCount.toString() : 'N/A'],
-            ['Razorpay failure', razorJson != null ? failureCount.toString() : 'N/A'],
+            ['Payments (Firestore count)', paymentsCount.toString()],
+            ['Payments (Firestore total)', 'INR ${paymentsTotalAmount.toStringAsFixed(2)}'],
+            ['Razorpay server revenue', razorJson != null ? '$serverRevenueCurrency $serverTotalRevenue' : 'N/A'],
+            ['Razorpay server success', razorJson != null ? serverSuccessCount.toString() : 'N/A'],
+            ['Razorpay server failure', razorJson != null ? serverFailureCount.toString() : 'N/A'],
           ],
         ));
 

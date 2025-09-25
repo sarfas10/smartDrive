@@ -24,7 +24,8 @@ class MaterialsBlock extends StatefulWidget {
 
 class _MaterialsBlockState extends State<MaterialsBlock> {
   // ── Config ─────────────────────────────────────────────────────────────────
-  static const String _cloudName = 'dxeunc4vd'; // <-- your Cloudinary cloud name
+  static const String _cloudName =
+      'dnxj5r6rc'; // <-- your Cloudinary cloud name
   static const String _baseFolder = 'smartDrive/materials';
   static const String _host = 'tajdrivingschool.in';
   static const String _basePath = '/smartDrive/cloudinary';
@@ -77,7 +78,17 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
 
   String _resourceTypeFor(String name) {
     final ext = name.split('.').last.toLowerCase();
-    const img = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'svg'];
+    const img = [
+      'jpg',
+      'jpeg',
+      'png',
+      'gif',
+      'webp',
+      'bmp',
+      'tiff',
+      'heic',
+      'svg',
+    ];
     const vid = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'];
     if (img.contains(ext)) return 'image';
     if (vid.contains(ext)) return 'video';
@@ -93,18 +104,24 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     String overwrite = 'true',
   }) async {
     final res = await http
-        .post(_api('signature.php'), body: {
-          'public_id': _sanitizeParam(publicId),
-          'folder': _sanitizeParam(folder),
-          'overwrite': overwrite,
-          'resource_type': resourceType, // ensure your PHP includes this in the signature
-        })
+        .post(
+          _api('signature.php'),
+          body: {
+            'public_id': _sanitizeParam(publicId),
+            'folder': _sanitizeParam(folder),
+            'overwrite': overwrite,
+            'resource_type':
+                resourceType, // ensure your PHP includes this in the signature
+          },
+        )
         .timeout(const Duration(seconds: 20));
     if (res.statusCode != 200) {
       throw Exception('Signature server error: ${res.statusCode} ${res.body}');
     }
     final json = jsonDecode(res.body) as Map<String, dynamic>;
-    if (json['signature'] == null || json['api_key'] == null || json['timestamp'] == null) {
+    if (json['signature'] == null ||
+        json['api_key'] == null ||
+        json['timestamp'] == null) {
       throw Exception('Invalid signature response: $json');
     }
     return json;
@@ -116,13 +133,18 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     required String resourceType, // image | video | raw
   }) async {
     final res = await http
-        .post(_api('delete.php'), body: {
-          'public_id': publicId,
-          'resource_type': resourceType.isEmpty ? 'raw' : resourceType,
-        })
+        .post(
+          _api('delete.php'),
+          body: {
+            'public_id': publicId,
+            'resource_type': resourceType.isEmpty ? 'raw' : resourceType,
+          },
+        )
         .timeout(const Duration(seconds: 20));
     if (res.statusCode != 200) {
-      throw Exception('Cloudinary delete failed: ${res.statusCode} ${res.body}');
+      throw Exception(
+        'Cloudinary delete failed: ${res.statusCode} ${res.body}',
+      );
     }
     final json = jsonDecode(res.body) as Map<String, dynamic>;
     final result = (json['result'] ?? '').toString();
@@ -138,7 +160,9 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     required String folder,
     String overwrite = 'true',
   }) async {
-    final resourceType = _resourceTypeFor(file.name); // 'image' | 'video' | 'raw'
+    final resourceType = _resourceTypeFor(
+      file.name,
+    ); // 'image' | 'video' | 'raw'
 
     final signed = await _getSignature(
       publicId: publicId,
@@ -148,7 +172,9 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     );
 
     // Use matching endpoint (no /auto/)
-    final uri = Uri.parse('https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/upload');
+    final uri = Uri.parse(
+      'https://api.cloudinary.com/v1_1/$_cloudName/$resourceType/upload',
+    );
 
     final req = http.MultipartRequest('POST', uri)
       ..fields['api_key'] = signed['api_key'].toString()
@@ -164,21 +190,26 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     if (kIsWeb) {
       final Uint8List? bytes = file.bytes;
       if (bytes == null) throw Exception('No file bytes available (web)');
-      req.files.add(http.MultipartFile.fromBytes(
-        'file',
-        bytes,
-        filename: filename,
-        contentType: mediaType,
-      ));
+      req.files.add(
+        http.MultipartFile.fromBytes(
+          'file',
+          bytes,
+          filename: filename,
+          contentType: mediaType,
+        ),
+      );
     } else {
       final path = file.path ?? _pickedPath;
-      if (path == null || path.isEmpty) throw Exception('No file path (mobile)');
-      req.files.add(await http.MultipartFile.fromPath(
-        'file',
-        path,
-        filename: filename,
-        contentType: mediaType,
-      ));
+      if (path == null || path.isEmpty)
+        throw Exception('No file path (mobile)');
+      req.files.add(
+        await http.MultipartFile.fromPath(
+          'file',
+          path,
+          filename: filename,
+          contentType: mediaType,
+        ),
+      );
     }
 
     final streamed = await req.send();
@@ -197,7 +228,10 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
         .orderBy('created_at', descending: true);
 
     final isWide = MediaQuery.of(context).size.width >= 980;
-    final pagePad = EdgeInsets.symmetric(horizontal: isWide ? 24 : 12, vertical: 12);
+    final pagePad = EdgeInsets.symmetric(
+      horizontal: isWide ? 24 : 12,
+      vertical: 12,
+    );
 
     return ListView(
       padding: EdgeInsets.only(bottom: isWide ? 28 : 18),
@@ -205,7 +239,9 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
         Padding(
           padding: pagePad,
           child: _HeaderCard(
-            title: _editingRef == null ? 'Upload Study Materials' : 'Edit Study Material',
+            title: _editingRef == null
+                ? 'Upload Study Materials'
+                : 'Edit Study Material',
             isEditing: _editingRef != null,
           ),
         ),
@@ -251,7 +287,13 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                           ? null
                           : () {
                               final uri = Uri.tryParse(_uploadedUrl!);
-                              if (uri != null) launchUrl(uri, mode: kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication);
+                              if (uri != null)
+                                launchUrl(
+                                  uri,
+                                  mode: kIsWeb
+                                      ? LaunchMode.platformDefault
+                                      : LaunchMode.externalApplication,
+                                );
                             },
                     ),
                   ],
@@ -305,7 +347,10 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                     children: [
                       Text(
                         _asText(m['title']),
-                        style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w800, color: context.c.onSurface),
+                        style: AppText.tileTitle.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: context.c.onSurface,
+                        ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -314,7 +359,10 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                           padding: const EdgeInsets.only(top: 2.0),
                           child: Text(
                             _asText(m['description']),
-                            style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceMuted, fontSize: 12),
+                            style: AppText.tileSubtitle.copyWith(
+                              color: AppColors.onSurfaceMuted,
+                              fontSize: 12,
+                            ),
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             softWrap: true,
@@ -329,7 +377,11 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
 
                   Text(
                     (m['created_at'] is Timestamp)
-                        ? (m['created_at'] as Timestamp).toDate().toString().split(' ').first
+                        ? (m['created_at'] as Timestamp)
+                              .toDate()
+                              .toString()
+                              .split(' ')
+                              .first
                         : '-',
                     style: AppText.hintSmall,
                   ),
@@ -339,7 +391,12 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                     children: [
                       Icon(Icons.download, size: 16, color: AppColors.success),
                       const SizedBox(width: 4),
-                      Text('${m['downloads'] ?? 0}', style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600)),
+                      Text(
+                        '${m['downloads'] ?? 0}',
+                        style: AppText.tileTitle.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ],
                   ),
 
@@ -352,7 +409,8 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                         Tooltip(
                           message: 'Open',
                           child: IconButton(
-                            onPressed: () => _openUrl(_asText(m['file_url']), docId: d.id),
+                            onPressed: () =>
+                                _openUrl(_asText(m['file_url']), docId: d.id),
                             icon: const Icon(Icons.open_in_new),
                             visualDensity: VisualDensity.compact,
                             color: context.c.onSurface,
@@ -425,11 +483,13 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
         const SizedBox(height: 6),
         DropdownButtonFormField<String>(
           value: _category,
-          decoration: const InputDecoration(
-            border: OutlineInputBorder(),
-          ),
-          items: _categories.map((c) => DropdownMenuItem<String>(value: c, child: Text(c))).toList(),
-          onChanged: _isUploading ? null : (v) => setState(() => _category = v ?? _category),
+          decoration: const InputDecoration(border: OutlineInputBorder()),
+          items: _categories
+              .map((c) => DropdownMenuItem<String>(value: c, child: Text(c)))
+              .toList(),
+          onChanged: _isUploading
+              ? null
+              : (v) => setState(() => _category = v ?? _category),
         ),
         const SizedBox(height: 12),
         const _FieldLabel('Version'),
@@ -438,7 +498,8 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
         const SizedBox(height: 8),
         _HintRow(
           icon: Icons.info_outline,
-          text: 'Version is shown to students; use semantic versions like 1.0, 1.1, 2.0.',
+          text:
+              'Version is shown to students; use semantic versions like 1.0, 1.1, 2.0.',
         ),
       ],
     );
@@ -456,7 +517,9 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
         color: AppColors.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: selected ? AppColors.success.withOpacity(0.6) : AppColors.divider,
+          color: selected
+              ? AppColors.success.withOpacity(0.6)
+              : AppColors.divider,
           width: 1.2,
         ),
         boxShadow: [
@@ -481,15 +544,24 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
               const SizedBox(width: 10),
               if (selected)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
                   decoration: BoxDecoration(
                     color: AppColors.brand.withOpacity(0.08),
                     borderRadius: BorderRadius.circular(999),
-                    border: Border.all(color: AppColors.brand.withOpacity(0.18)),
+                    border: Border.all(
+                      color: AppColors.brand.withOpacity(0.18),
+                    ),
                   ),
                   child: Text(
                     kind.name.toUpperCase(),
-                    style: AppText.tileSubtitle.copyWith(color: AppColors.brand, fontWeight: FontWeight.w700, fontSize: 12),
+                    style: AppText.tileSubtitle.copyWith(
+                      color: AppColors.brand,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
             ],
@@ -498,7 +570,10 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
           Text(
             selected ? name : 'Drop a file here or use the button below',
             textAlign: TextAlign.center,
-            style: AppText.tileTitle.copyWith(color: selected ? context.c.onSurface : AppColors.onSurfaceMuted, fontWeight: FontWeight.w600),
+            style: AppText.tileTitle.copyWith(
+              color: selected ? context.c.onSurface : AppColors.onSurfaceMuted,
+              fontWeight: FontWeight.w600,
+            ),
             overflow: TextOverflow.ellipsis,
           ),
           const SizedBox(height: 12),
@@ -511,26 +586,31 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
                 onPressed: _isUploading ? null : _pickFile,
                 icon: const Icon(Icons.folder_open),
                 label: Text(selected ? 'Change file' : 'Select file'),
-                style: OutlinedButton.styleFrom(foregroundColor: context.c.primary),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: context.c.primary,
+                ),
               ),
               if (selected)
                 TextButton.icon(
                   onPressed: _isUploading
                       ? null
                       : () => setState(() {
-                            _picked = null;
-                            _pickedPath = null;
-                          }),
+                          _picked = null;
+                          _pickedPath = null;
+                        }),
                   icon: const Icon(Icons.clear),
                   label: const Text('Clear'),
-                  style: TextButton.styleFrom(foregroundColor: AppColors.onSurfaceMuted),
+                  style: TextButton.styleFrom(
+                    foregroundColor: AppColors.onSurfaceMuted,
+                  ),
                 ),
             ],
           ),
           const SizedBox(height: 8),
           const _HintRow(
             icon: Icons.verified_user_outlined,
-            text: 'Any format is accepted (image, video, PDF, audio, archives, docs) with correct resource type.',
+            text:
+                'Any format is accepted (image, video, PDF, audio, archives, docs) with correct resource type.',
           ),
         ],
       ),
@@ -548,8 +628,13 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
         ),
         const SizedBox(height: 8),
         Text(
-          _progress > 0 ? 'Uploading: ${_progress.toStringAsFixed(1)}%' : 'Uploading…',
-          style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w600, color: context.c.onSurface),
+          _progress > 0
+              ? 'Uploading: ${_progress.toStringAsFixed(1)}%'
+              : 'Uploading…',
+          style: AppText.tileTitle.copyWith(
+            fontWeight: FontWeight.w600,
+            color: context.c.onSurface,
+          ),
         ),
       ],
     );
@@ -561,7 +646,11 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
         padding: const EdgeInsets.all(32.0),
         child: Column(
           children: [
-            Icon(Icons.library_books, size: 64, color: AppColors.onSurfaceFaint),
+            Icon(
+              Icons.library_books,
+              size: 64,
+              color: AppColors.onSurfaceFaint,
+            ),
             const SizedBox(height: 12),
             Text(
               'No study materials uploaded yet',
@@ -570,7 +659,9 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
             const SizedBox(height: 6),
             Text(
               'Upload your first file to get started!',
-              style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceFaint),
+              style: AppText.hintSmall.copyWith(
+                color: AppColors.onSurfaceFaint,
+              ),
             ),
           ],
         ),
@@ -629,7 +720,8 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
       final month = DateTime.now().month.toString().padLeft(2, '0');
       final folder =
           '$_baseFolder/${_category.toLowerCase().replaceAll(' ', '-')}/${DateTime.now().year}-$month';
-      final publicId = '${_slug(title)}_${DateTime.now().millisecondsSinceEpoch}';
+      final publicId =
+          '${_slug(title)}_${DateTime.now().millisecondsSinceEpoch}';
 
       String? fileUrlToSave;
       String? publicIdToSave;
@@ -643,8 +735,10 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
           folder: folder,
         );
 
-        final returnedRt = (res['resource_type'] ?? '').toString(); // 'raw'|'image'|'video'
-        final rawUrl = (res['secure_url'] as String?) ?? (res['url'] as String?);
+        final returnedRt = (res['resource_type'] ?? '')
+            .toString(); // 'raw'|'image'|'video'
+        final rawUrl =
+            (res['secure_url'] as String?) ?? (res['url'] as String?);
 
         // Normalize URL to the correct /{rt}/upload/ segment
         String? finalUrl = rawUrl;
@@ -652,7 +746,7 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
           finalUrl = rawUrl
               .replaceFirst('/image/upload/', '/$returnedRt/upload/')
               .replaceFirst('/video/upload/', '/$returnedRt/upload/')
-              .replaceFirst('/raw/upload/',   '/$returnedRt/upload/');
+              .replaceFirst('/raw/upload/', '/$returnedRt/upload/');
         }
 
         _uploadedUrl = finalUrl;
@@ -671,7 +765,8 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
       };
 
       if (_editingRef == null) {
-        if (_picked == null) throw Exception('No file selected for new material');
+        if (_picked == null)
+          throw Exception('No file selected for new material');
 
         final createData = <String, dynamic>{
           ...baseData,
@@ -685,7 +780,9 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
           'downloads': 0,
           'created_at': FieldValue.serverTimestamp(),
         };
-        await FirebaseFirestore.instance.collection('materials').add(createData);
+        await FirebaseFirestore.instance
+            .collection('materials')
+            .add(createData);
       } else {
         final updateData = <String, dynamic>{...baseData};
 
@@ -735,14 +832,18 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     // Try swapping to the stored resource_type if needed
     Uri candidate = uri0;
     try {
-      final snap = await FirebaseFirestore.instance.collection('materials').doc(docId).get();
+      final snap = await FirebaseFirestore.instance
+          .collection('materials')
+          .doc(docId)
+          .get();
       final m = snap.data() ?? {};
-      final rt = (m['cloudinary_resource_type'] ?? '').toString(); // 'raw' | 'image' | 'video'
+      final rt = (m['cloudinary_resource_type'] ?? '')
+          .toString(); // 'raw' | 'image' | 'video'
       if (rt.isNotEmpty) {
         final fixed = url
             .replaceFirst('/image/upload/', '/$rt/upload/')
             .replaceFirst('/video/upload/', '/$rt/upload/')
-            .replaceFirst('/raw/upload/',   '/$rt/upload/');
+            .replaceFirst('/raw/upload/', '/$rt/upload/');
         final fixedUri = Uri.tryParse(fixed);
         if (fixedUri != null) candidate = fixedUri;
       }
@@ -750,14 +851,21 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
 
     // Optional: quick HEAD probe (some CDNs block HEAD; we still attempt open).
     try {
-      final head = await http.head(candidate).timeout(const Duration(seconds: 7));
+      final head = await http
+          .head(candidate)
+          .timeout(const Duration(seconds: 7));
       if (head.statusCode == 404) {
-        _snack('File unavailable (404). It may be private or deleted.', isError: true);
+        _snack(
+          'File unavailable (404). It may be private or deleted.',
+          isError: true,
+        );
         return;
       }
     } catch (_) {}
 
-    final mode = kIsWeb ? LaunchMode.platformDefault : LaunchMode.externalApplication;
+    final mode = kIsWeb
+        ? LaunchMode.platformDefault
+        : LaunchMode.externalApplication;
     final ok = await launchUrl(candidate, mode: mode);
     if (!ok) _snack('Could not open file', isError: true);
   }
@@ -766,7 +874,10 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     final data = (doc.data() ?? {}) as Map<String, dynamic>;
     final title = _asText(data['title'], fallback: 'Unknown');
     final publicId = _asText(data['cloudinary_public_id']);
-    final resourceType = _asText(data['cloudinary_resource_type'], fallback: 'raw');
+    final resourceType = _asText(
+      data['cloudinary_resource_type'],
+      fallback: 'raw',
+    );
 
     final ok = await confirmDialog(
       context: context,
@@ -778,7 +889,10 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     setState(() => _isUploading = true);
     try {
       if (publicId.isNotEmpty) {
-        await _deleteFromCloudinary(publicId: publicId, resourceType: resourceType);
+        await _deleteFromCloudinary(
+          publicId: publicId,
+          resourceType: resourceType,
+        );
       }
       await doc.reference.delete();
 
@@ -800,7 +914,9 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     setState(() {
       _category = _asText(data['category'], fallback: 'Theory');
       _editingRef = doc.reference as DocumentReference<Map<String, dynamic>>?;
-      _editingDownloads = (data['downloads'] is num) ? (data['downloads'] as num).toInt() : 0;
+      _editingDownloads = (data['downloads'] is num)
+          ? (data['downloads'] as num).toInt()
+          : 0;
       _picked = null;
       _pickedPath = null;
       _uploadedUrl = _asText(data['file_url']);
@@ -819,11 +935,23 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Row(children: [
-          Icon(isError ? Icons.error_outline : Icons.check_circle_outline, color: AppColors.onSurfaceInverse),
-          const SizedBox(width: 8),
-          Expanded(child: Text(message, style: AppText.tileSubtitle.copyWith(color: AppColors.onSurfaceInverse))),
-        ]),
+        content: Row(
+          children: [
+            Icon(
+              isError ? Icons.error_outline : Icons.check_circle_outline,
+              color: AppColors.onSurfaceInverse,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: AppText.tileSubtitle.copyWith(
+                  color: AppColors.onSurfaceInverse,
+                ),
+              ),
+            ),
+          ],
+        ),
         backgroundColor: isError ? AppColors.danger : AppColors.success,
         duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
@@ -849,7 +977,8 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
   String _formatFileSize(int bytes) {
     if (bytes < 1024) return '$bytes B';
     if (bytes < 1024 * 1024) return '${(bytes / 1024).toStringAsFixed(1)} KB';
-    if (bytes < 1024 * 1024 * 1024) return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    if (bytes < 1024 * 1024 * 1024)
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
     return '${(bytes / (1024 * 1024 * 1024)).toStringAsFixed(1)} GB';
   }
 
@@ -875,7 +1004,17 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
 
   _Kind _detectKind(String name) {
     final ext = name.split('.').last.toLowerCase();
-    const images = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff', 'heic', 'svg'];
+    const images = [
+      'jpg',
+      'jpeg',
+      'png',
+      'gif',
+      'webp',
+      'bmp',
+      'tiff',
+      'heic',
+      'svg',
+    ];
     const videos = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv'];
     const audios = ['mp3', 'wav', 'aac', 'm4a', 'flac', 'ogg'];
     const archives = ['zip', 'rar', '7z', 'tar', 'gz'];
@@ -889,7 +1028,8 @@ class _MaterialsBlockState extends State<MaterialsBlock> {
     return _Kind.other;
   }
 
-  String _asText(dynamic v, {String fallback = ''}) => (v == null) ? fallback : v.toString();
+  String _asText(dynamic v, {String fallback = ''}) =>
+      (v == null) ? fallback : v.toString();
   bool _notEmpty(dynamic v) => _asText(v).trim().isNotEmpty;
 }
 
@@ -913,22 +1053,38 @@ class _HeaderCard extends StatelessWidget {
         gradient: gradient,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: AppColors.surface.withOpacity(0.6)),
-        boxShadow: [BoxShadow(color: Colors.black26.withOpacity(0.06), blurRadius: 12, offset: const Offset(0, 6))],
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black26.withOpacity(0.06),
+            blurRadius: 12,
+            offset: const Offset(0, 6),
+          ),
+        ],
       ),
       child: Row(
         children: [
-          Icon(isEditing ? Icons.edit_note : Icons.cloud_upload_outlined, color: AppColors.purple),
+          Icon(
+            isEditing ? Icons.edit_note : Icons.cloud_upload_outlined,
+            color: AppColors.purple,
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               title,
-              style: AppText.sectionTitle.copyWith(fontWeight: FontWeight.w800, color: AppColors.onSurface),
+              style: AppText.sectionTitle.copyWith(
+                fontWeight: FontWeight.w800,
+                color: AppColors.onSurface,
+              ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           Tooltip(
-            message: 'Uploads go to Cloudinary with correct resource_type. Large files supported.',
-            child: Icon(Icons.info_outline, color: AppColors.purple.withOpacity(0.9)),
+            message:
+                'Uploads go to Cloudinary with correct resource_type. Large files supported.',
+            child: Icon(
+              Icons.info_outline,
+              color: AppColors.purple.withOpacity(0.9),
+            ),
           ),
         ],
       ),
@@ -983,14 +1139,24 @@ class _ActionsBar extends StatelessWidget {
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white,
+                      ),
                     )
                   : const Icon(Icons.cloud_upload),
-              label: Text(isUploading ? 'Uploading…' : (isEditing ? 'Update Material' : 'Save Study Material')),
+              label: Text(
+                isUploading
+                    ? 'Uploading…'
+                    : (isEditing ? 'Update Material' : 'Save Study Material'),
+              ),
               style: FilledButton.styleFrom(
                 backgroundColor: context.c.primary,
                 foregroundColor: AppColors.onSurfaceInverse,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
               ),
             ),
           ],
@@ -1007,7 +1173,10 @@ class _FieldLabel extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       text,
-      style: AppText.tileTitle.copyWith(color: context.c.onSurface, fontWeight: FontWeight.w700),
+      style: AppText.tileTitle.copyWith(
+        color: context.c.onSurface,
+        fontWeight: FontWeight.w700,
+      ),
     );
   }
 }
@@ -1022,7 +1191,12 @@ class _HintRow extends StatelessWidget {
       children: [
         Icon(icon, size: 16, color: AppColors.onSurfaceMuted),
         const SizedBox(width: 6),
-        Expanded(child: Text(text, style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted))),
+        Expanded(
+          child: Text(
+            text,
+            style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceMuted),
+          ),
+        ),
       ],
     );
   }
@@ -1036,8 +1210,17 @@ class _CategoryChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(color: _colorForCategory(category), borderRadius: BorderRadius.circular(12)),
-      child: Text(category, style: AppText.hintSmall.copyWith(color: AppColors.onSurfaceInverse, fontWeight: FontWeight.bold)),
+      decoration: BoxDecoration(
+        color: _colorForCategory(category),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Text(
+        category,
+        style: AppText.hintSmall.copyWith(
+          color: AppColors.onSurfaceInverse,
+          fontWeight: FontWeight.bold,
+        ),
+      ),
     );
   }
 
@@ -1085,7 +1268,13 @@ class _DetectedTypeBadge extends StatelessWidget {
         children: [
           Icon(icon, size: 16, color: color),
           const SizedBox(width: 6),
-          Text(kind.toUpperCase(), style: AppText.hintSmall.copyWith(color: color, fontWeight: FontWeight.bold)),
+          Text(
+            kind.toUpperCase(),
+            style: AppText.hintSmall.copyWith(
+              color: color,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );
@@ -1138,8 +1327,17 @@ class _Badge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: AppColors.neuBg, borderRadius: BorderRadius.circular(8)),
-      child: Text(text, style: AppText.hintSmall.copyWith(fontWeight: FontWeight.w500, color: AppColors.onSurface)),
+      decoration: BoxDecoration(
+        color: AppColors.neuBg,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Text(
+        text,
+        style: AppText.hintSmall.copyWith(
+          fontWeight: FontWeight.w500,
+          color: AppColors.onSurface,
+        ),
+      ),
     );
   }
 }
