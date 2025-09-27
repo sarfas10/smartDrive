@@ -1,4 +1,5 @@
 // lib/student_dashboard.dart
+import 'dart:async';
 import 'dart:math';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
@@ -7,19 +8,15 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:smart_drive/downloadables.dart';
 import 'package:smart_drive/upload_document_page.dart';
-import 'package:url_launcher/url_launcher.dart';
-
+import 'package:smart_drive/onboarding_forms.dart';
 import 'package:smart_drive/UserAttendancePanel.dart';
 import 'package:smart_drive/mock_tests_list_page.dart';
 import 'package:smart_drive/user_materials_page.dart';
 import 'package:smart_drive/user_settings.dart';
 import 'package:smart_drive/user_slot_booking.dart';
-// removed upload_document_page import — onboarding form used instead
-import 'package:smart_drive/onboarding_forms.dart';
 import 'package:smart_drive/test_booking_page.dart';
-
-// NEW: PlansView import so "Explore Plans" navigates to the plans screen
 import 'package:smart_drive/plans_view.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 // THEME
 import 'package:smart_drive/theme/app_theme.dart';
@@ -53,7 +50,8 @@ class _GrainPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _GrainPainter oldDelegate) => oldDelegate.opacity != opacity;
+  bool shouldRepaint(covariant _GrainPainter oldDelegate) =>
+      oldDelegate.opacity != opacity;
 }
 
 class StudentDashboard extends StatefulWidget {
@@ -62,7 +60,10 @@ class StudentDashboard extends StatefulWidget {
   _StudentDashboardState createState() => _StudentDashboardState();
 }
 
-class _StudentDashboardState extends State<StudentDashboard> {
+/// NOTE: mixin WidgetsBindingObserver to detect app lifecycle resume,
+/// and RouteAware to detect navigator route events (pop/push).
+class _StudentDashboardState extends State<StudentDashboard>
+    with WidgetsBindingObserver, RouteAware {
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
@@ -76,10 +77,148 @@ class _StudentDashboardState extends State<StudentDashboard> {
   // anchor for bell menu
   final GlobalKey _bellAnchorKey = GlobalKey();
 
+  // whether the user has either a learner or license recorded (from user_profiles)
+  bool _hasDrivingDocument = false;
+
+  // RouteObserver found in Navigator observers (if any)
+  RouteObserver<ModalRoute<dynamic>>? _routeObserver;
+  ModalRoute<dynamic>? _modalRoute;
+
+  // Realtime subscription to user_profiles doc
+  StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _profileSub;
+
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _fetchUserData(); // initial read
+    _ensureProfileListener(); // create realtime listener
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+
+    // Try to find a RouteObserver in the current Navigator observers and subscribe
+    // so we can detect when this route becomes visible again (didPopNext).
+    // This will work if your MaterialApp/WidgetsApp has a RouteObserver in its observers.
+    try {
+      _modalRoute = ModalRoute.of(context);
+      final navigator = Navigator.of(context);
+      final obs = navigator.widget.observers;
+      for (final o in obs) {
+        if (o is RouteObserver<ModalRoute<dynamic>>) {
+          _routeObserver = o;
+          break;
+        }
+      }
+      if (_routeObserver != null && _modalRoute != null) {
+        // subscribe safely (avoid double-subscribe)
+        _routeObserver!.unsubscribe(this);
+        _routeObserver!.subscribe(this, _modalRoute as PageRoute<dynamic>);
+      }
+    } catch (e) {
+      // ignore - best-effort subscription
+      debugPrint('RouteObserver subscription failed: $e');
+    }
+
+    // Also refresh user data whenever dependencies change (best-effort)
     _fetchUserData();
+    _ensureProfileListener();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    try {
+      if (_routeObserver != null) {
+        _routeObserver!.unsubscribe(this);
+      }
+    } catch (_) {}
+    _profileSub?.cancel();
+    super.dispose();
+  }
+
+  // Called when app lifecycle changes (e.g., resumed from background)
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      // re-fetch user data and re-check listener when app is foregrounded
+      _fetchUserData();
+      _ensureProfileListener();
+    }
+  }
+
+  // RouteAware callbacks (if subscribed)
+  @override
+  void didPush() {
+    // Route was pushed onto navigator: a fresh view - refresh
+    _fetchUserData();
+    _ensureProfileListener();
+  }
+
+  @override
+  void didPopNext() {
+    // Returned to this route (another route was popped) - refresh
+    _fetchUserData();
+    _ensureProfileListener();
+  }
+
+  @override
+  void didPushNext() {
+    // Another route pushed above this one - nothing needed
+  }
+
+  @override
+  void didPop() {
+    // This route was popped - nothing needed
+  }
+
+  /// Ensure there's an active realtime listener on user_profiles/{uid}.
+  /// This immediately updates `_hasDrivingDocument` when the Firestore doc changes.
+  void _ensureProfileListener() {
+    final uid = _auth.currentUser?.uid;
+    if (uid == null) {
+      // cancel existing subscription if user logged out
+      _profileSub?.cancel();
+      _profileSub = null;
+      return;
+    }
+
+    // Cancel any existing and re-subscribe (safe)
+    _profileSub?.cancel();
+    _profileSub = _firestore
+        .collection('user_profiles')
+        .doc(uid)
+        .snapshots()
+        .listen((snap) {
+      try {
+        final Map<String, dynamic>? prof = snap.data();
+        final isLearner = (prof?['is_learner_holder'] as bool?) ?? false;
+        final isLicense = (prof?['is_license_holder'] as bool?) ?? false;
+        final hasDoc = isLearner || isLicense;
+
+        // Optionally pick up photo_url changes into userData (so UI updates faster)
+        final photo = (prof?['photo_url'] as String?)?.trim();
+
+        if (mounted) {
+          setState(() {
+            _hasDrivingDocument = hasDoc;
+            // Keep a lightweight copy of some profile fields if present
+            if (photo != null && photo.isNotEmpty) {
+              userData = {...userData, 'photo_url': photo};
+            }
+            isLoading = false;
+          });
+        }
+        debugPrint(
+            'PROFILE LISTENER: uid=$uid isLearner=$isLearner isLicense=$isLicense hasDoc=$hasDoc');
+      } catch (e, st) {
+        debugPrint('PROFILE LISTENER error: $e\n$st');
+      }
+    }, onError: (err) {
+      debugPrint('PROFILE LISTENER failed: $err');
+    });
   }
 
   Future<void> _fetchUserData() async {
@@ -91,17 +230,46 @@ class _StudentDashboardState extends State<StudentDashboard> {
           setState(() {
             userData = (doc.data() as Map<String, dynamic>?) ?? {};
             userStatus = (userData['status'] ?? 'pending').toString();
-            isLoading = false;
           });
         } else {
           setState(() => isLoading = false);
         }
+
+        // --- ALWAYS: read user_profiles to detect learner/license flags as a fallback ---
+        try {
+          final profSnap =
+              await _firestore.collection('user_profiles').doc(user.uid).get();
+          bool hasDoc = false;
+          if (profSnap.exists) {
+            final prof = (profSnap.data() as Map<String, dynamic>?) ?? {};
+            final isLearner = (prof['is_learner_holder'] as bool?) ?? false;
+            final isLicense = (prof['is_license_holder'] as bool?) ?? false;
+            hasDoc = isLearner || isLicense;
+          }
+          if (mounted) {
+            setState(() {
+              _hasDrivingDocument = hasDoc;
+              isLoading = false;
+            });
+          }
+        } catch (e) {
+          debugPrint('Error fetching user_profiles (one-time): $e');
+          if (mounted) {
+            setState(() {
+              _hasDrivingDocument = false;
+              isLoading = false;
+            });
+          }
+        }
+
+        // Make sure the realtime listener is active
+        _ensureProfileListener();
       } else {
-        setState(() => isLoading = false);
+        if (mounted) setState(() => isLoading = false);
       }
     } catch (e) {
       debugPrint('Error fetching user data: $e');
-      setState(() => isLoading = false);
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
@@ -136,6 +304,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
     final uid = _auth.currentUser?.uid;
     final role = (userData['role'] ?? 'student').toString();
+    final bool isBlocked = userStatus.toLowerCase() == 'blocked';
 
     return Scaffold(
       backgroundColor: AppColors.background,
@@ -159,7 +328,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
                   ),
                 IconButton(
                   key: _bellAnchorKey,
-                  icon: const Icon(Icons.notifications_none_rounded, color: Colors.transparent),
+                  icon: const Icon(Icons.notifications_none_rounded,
+                      color: Colors.transparent),
                   onPressed: () {},
                 ),
                 IconButton(
@@ -183,6 +353,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                         role: role,
                         photoUrl: null,
                         planIdString: null,
+                        isBlocked: isBlocked,
                       );
                     }
                     return StreamBuilder<String?>(
@@ -199,6 +370,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                               role: role,
                               photoUrl: photoUrl,
                               planIdString: planId,
+                              isBlocked: isBlocked,
                             );
                           },
                         );
@@ -209,13 +381,16 @@ class _StudentDashboardState extends State<StudentDashboard> {
               ),
             ),
 
-            // ── Onboarding banner (shown for pending users)
+            // ── Onboarding / Blocked banner (shown for pending users or blocked)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                 child: Column(
                   children: [
-                    if (!_hideOnboardingBanner && userStatus.toLowerCase() == 'pending')
+                    if (!_hideOnboardingBanner && isBlocked) _blockedBanner(),
+                    if (!_hideOnboardingBanner &&
+                        !isBlocked &&
+                        userStatus.toLowerCase() == 'pending')
                       _onboardingBanner(),
                     const SizedBox(height: 8),
                   ],
@@ -225,7 +400,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
             const SliverToBoxAdapter(child: SizedBox(height: 8)),
 
-            // ── Quick Actions (always enabled)
+            // ── Quick Actions (primary tiles will be restricted when blocked)
             SliverToBoxAdapter(
               child: Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -234,7 +409,6 @@ class _StudentDashboardState extends State<StudentDashboard> {
                   children: [
                     const _SectionTitle('Quick Actions'),
                     const SizedBox(height: 12),
-
                     Row(
                       children: [
                         Expanded(
@@ -243,6 +417,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
                             color: AppColors.warning,
                             title: 'Book Slot',
                             onTap: _navigateToSlotBooking,
+                            // require either learner or license AND not blocked
+                            enabled: !isBlocked && _hasDrivingDocument,
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -252,12 +428,12 @@ class _StudentDashboardState extends State<StudentDashboard> {
                             color: AppColors.accentTeal,
                             title: 'Attendance Tracker',
                             onTap: _navigateToAttendance,
+                            enabled: !isBlocked,
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
-
                     Row(
                       children: [
                         Expanded(
@@ -266,6 +442,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                             color: AppColors.info,
                             title: 'Study Materials',
                             onTap: _navigateToStudyMaterials,
+                            enabled: !isBlocked,
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -275,10 +452,26 @@ class _StudentDashboardState extends State<StudentDashboard> {
                             color: AppColors.purple,
                             title: 'Test Booking',
                             onTap: _navigateToTestBooking,
+                            // require either learner or license AND not blocked
+                            enabled: !isBlocked && _hasDrivingDocument,
                           ),
                         ),
                       ],
                     ),
+                    if (!isBlocked && !_hasDrivingDocument)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Text(
+                          'To book slots or tests you must add a learner or license in onboarding.',
+                          style: AppText.tileSubtitle,
+                        ),
+                      ),
+                    if (isBlocked) const SizedBox(height: 12),
+                    if (isBlocked)
+                      Text(
+                        'Your account is blocked — primary features are restricted.',
+                        style: AppText.tileSubtitle,
+                      ),
                   ],
                 ),
               ),
@@ -314,7 +507,8 @@ class _StudentDashboardState extends State<StudentDashboard> {
                       icon: Icons.quiz,
                       iconColor: AppColors.purple,
                       title: 'Questionaries',
-                      subtitle: 'Attempt practice questionnaires and previous tests',
+                      subtitle:
+                          'Attempt practice questionnaires and previous tests',
                       onTap: _navigateToQuestionaries,
                     ),
                   ],
@@ -348,45 +542,97 @@ class _StudentDashboardState extends State<StudentDashboard> {
 
   // ── Navigation hooks
   void _navigateToSlotBooking() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserSlotBooking()));
+    final isBlocked = userStatus.toLowerCase() == 'blocked';
+    if (isBlocked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your account is blocked. Contact support.')),
+      );
+      return;
+    }
+    if (!_hasDrivingDocument) {
+      // Encourage user to complete onboarding
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+              'Please complete onboarding (add learner or license) to book a slot.'),
+          action: SnackBarAction(
+            label: 'Complete',
+            onPressed: _navigateToCompleteOnboarding,
+          ),
+        ),
+      );
+      return;
+    }
+    Navigator.push(
+        context, MaterialPageRoute(builder: (_) => const UserSlotBooking()));
   }
 
   void _navigateToStudyMaterials() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserMaterialsPage()));
+    Navigator.push(context,
+        MaterialPageRoute(builder: (_) => const UserMaterialsPage()));
   }
 
   void _navigateToMockTests() {
     // kept for backward compatibility
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const MockTestsListPage()));
+    Navigator.push(
+        context, MaterialPageRoute(builder: (_) => const MockTestsListPage()));
   }
 
   void _navigateToQuestionaries() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const MockTestsListPage()));
+    Navigator.push(
+        context, MaterialPageRoute(builder: (_) => const MockTestsListPage()));
   }
 
   void _navigateToTestBooking() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const TestBookingPage()));
+    final isBlocked = userStatus.toLowerCase() == 'blocked';
+    if (isBlocked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Your account is blocked. Contact support.')),
+      );
+      return;
+    }
+    if (!_hasDrivingDocument) {
+      // same restriction as slot booking: learner or license required
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: const Text(
+              'Please complete onboarding (add learner or license) to book a test.'),
+          action: SnackBarAction(
+            label: 'Complete',
+            onPressed: _navigateToCompleteOnboarding,
+          ),
+        ),
+      );
+      return;
+    }
+    Navigator.push(
+        context, MaterialPageRoute(builder: (_) => const TestBookingPage()));
   }
 
   void _navigateToUploadDocuments() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const UploadDocumentPage()));
+    Navigator.push(
+        context, MaterialPageRoute(builder: (_) => const UploadDocumentPage()));
   }
 
   void _navigateToAttendance() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const UserAttendancePage()));
+    Navigator.push(
+        context, MaterialPageRoute(builder: (_) => const UserAttendancePage()));
   }
 
   void _navigateToDownloadables() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const DownloadablesPage()));
+    Navigator.push(context,
+        MaterialPageRoute(builder: (_) => const DownloadablesPage()));
   }
 
   void _navigateToSettings() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => UserSettingsScreen()));
+    Navigator.push(
+        context, MaterialPageRoute(builder: (_) => UserSettingsScreen()));
   }
 
   // CTA used by onboarding banner
   void _navigateToCompleteOnboarding() {
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const OnboardingForm()));
+    Navigator.push(
+        context, MaterialPageRoute(builder: (_) => const OnboardingForm()));
   }
 
   // ── Onboarding banner widget (local dismiss only)
@@ -419,7 +665,7 @@ class _StudentDashboardState extends State<StudentDashboard> {
                     Text('Complete onboarding', style: AppText.tileTitle),
                     const SizedBox(height: 4),
                     Text(
-                      'Your account is pending — finish uploading documents to get full access.',
+                      'Finish setting-up your account to get full access.',
                       style: AppText.tileSubtitle,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
@@ -431,7 +677,70 @@ class _StudentDashboardState extends State<StudentDashboard> {
               // action
               TextButton(
                 onPressed: _navigateToCompleteOnboarding,
-                child: const Text('Complete onboarding', style: TextStyle(fontWeight: FontWeight.w600)),
+                child: const Text('Complete onboarding',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
+              ),
+
+              // dismiss
+              IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                onPressed: () => setState(() => _hideOnboardingBanner = true),
+                tooltip: 'Dismiss',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // Blocked banner (local dismiss only)
+  Widget _blockedBanner() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.m),
+      child: Container(
+        color: AppColors.surface,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: Row(
+            children: [
+              // icon / left
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.danger.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(AppRadii.s),
+                ),
+                child: const Icon(Icons.block, color: AppColors.danger),
+              ),
+
+              const SizedBox(width: 12),
+
+              // text
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Account blocked', style: AppText.tileTitle),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Your account has been blocked. Some features are restricted. Contact support for help.',
+                      style: AppText.tileSubtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ),
+
+              // action (contact support)
+              TextButton(
+                onPressed: () {
+                  // Navigate to settings where support/contact details exist
+                  _navigateToSettings();
+                },
+                child: const Text('Contact support',
+                    style: TextStyle(fontWeight: FontWeight.w600)),
               ),
 
               // dismiss
@@ -473,12 +782,16 @@ class _NameCard extends StatelessWidget {
   // plan (plain string)
   final String? planIdString;
 
+  // blocked indicator
+  final bool isBlocked;
+
   const _NameCard({
     required this.name,
     required this.email,
     required this.role,
     this.photoUrl,
     required this.planIdString,
+    this.isBlocked = false,
   });
 
   @override
@@ -502,41 +815,49 @@ class _NameCard extends StatelessWidget {
                 children: [
                   _Avatar(photoUrl: photoUrl),
                   const SizedBox(width: 16),
+
+                  // Make the text / plan area tappable and navigate to PlansView.
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text('Welcome back,', style: TextStyle(color: AppColors.onSurfaceInverseMuted, fontSize: 13)),
-                        const SizedBox(height: 8),
-                        Text(
-                          name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: AppColors.onSurfaceInverse,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () {
+                        // Navigate to PlansView (always). If you prefer to open
+                        // PlanDetailsPage when planIdString is present, swap this.
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(builder: (_) => const PlansView()),
+                        );
+                      },
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text('Welcome back,',
+                              style: TextStyle(
+                                  color: AppColors.onSurfaceInverseMuted,
+                                  fontSize: 13)),
+                          const SizedBox(height: 8),
+                          Text(
+                            name,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: AppColors.onSurfaceInverse,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          '$email | ${role.toLowerCase()}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: AppColors.onSurfaceInverseMuted, fontSize: 12, letterSpacing: 0.3),
-                        ),
-                        const SizedBox(height: 8),
-                        // Always navigate when tapped — pass empty string if null
-                        GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) => const PlansView(),
-                              ),
-                            );
-                          },
-                          child: Row(
+                          const SizedBox(height: 2),
+                          Text(
+                            '$email | ${role.toLowerCase()}',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                                color: AppColors.onSurfaceInverseMuted,
+                                fontSize: 12,
+                                letterSpacing: 0.3),
+                          ),
+                          const SizedBox(height: 6),
+                          Row(
                             children: [
                               const Icon(Icons.workspace_premium,
                                   size: 16, color: AppColors.onSurfaceInverseMuted),
@@ -570,10 +891,36 @@ class _NameCard extends StatelessWidget {
                                   ],
                                 ),
                               ),
+                              if (isBlocked) const SizedBox(width: 8),
+                              if (isBlocked)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: AppColors.danger.withOpacity(0.14),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(
+                                        color: AppColors.danger.withOpacity(0.18)),
+                                  ),
+                                  child: Row(
+                                    children: const [
+                                      Icon(Icons.block,
+                                          size: 14, color: AppColors.danger),
+                                      SizedBox(width: 6),
+                                      Text(
+                                        'Blocked',
+                                        style: TextStyle(
+                                            color: AppColors.danger,
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.w700),
+                                      ),
+                                    ],
+                                  ),
+                                ),
                             ],
                           ),
-                        ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ],
@@ -586,6 +933,7 @@ class _NameCard extends StatelessWidget {
   }
 }
 
+
 class _Avatar extends StatelessWidget {
   final String? photoUrl;
   const _Avatar({this.photoUrl});
@@ -596,7 +944,8 @@ class _Avatar extends StatelessWidget {
       return CircleAvatar(
         radius: 36,
         backgroundColor: bg,
-        child: const Icon(Icons.person, color: AppColors.onSurfaceInverse, size: 38),
+        child:
+            const Icon(Icons.person, color: AppColors.onSurfaceInverse, size: 38),
       );
     }
     return CircleAvatar(
@@ -620,12 +969,14 @@ class _PrimaryTile extends StatelessWidget {
   final Color color;
   final String title;
   final VoidCallback onTap;
+  final bool enabled;
 
   const _PrimaryTile({
     required this.icon,
     required this.color,
     required this.title,
     required this.onTap,
+    this.enabled = true,
   });
 
   static const double _kTileHeight = 150;
@@ -635,35 +986,62 @@ class _PrimaryTile extends StatelessWidget {
     return Card(
       elevation: 0,
       color: AppColors.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.l)),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadii.l),
-        onTap: onTap,
+        onTap: enabled ? onTap : null,
         child: SizedBox(
           height: _kTileHeight,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.start,
-              children: [
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 18),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.10),
+                        borderRadius: BorderRadius.circular(AppRadii.m),
+                      ),
+                      child: Icon(icon, color: color, size: 28),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      title,
+                      textAlign: TextAlign.center,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: AppText.tileTitle,
+                    ),
+                  ],
+                ),
+              ),
+              // Disabled overlay
+              if (!enabled)
                 Container(
-                  padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: color.withOpacity(0.10),
-                    borderRadius: BorderRadius.circular(AppRadii.m),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .surface
+                        .withOpacity(0.65),
+                    borderRadius: BorderRadius.circular(AppRadii.l),
                   ),
-                  child: Icon(icon, color: color, size: 28),
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: const [
+                        Icon(Icons.lock, size: 28, color: AppColors.onSurfaceMuted),
+                        SizedBox(height: 6),
+                      ],
+                    ),
+                  ),
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  title,
-                  textAlign: TextAlign.center,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: AppText.tileTitle,
-                ),
-              ],
-            ),
+            ],
           ),
         ),
       ),
@@ -691,7 +1069,8 @@ class _ActionTile extends StatelessWidget {
     return Card(
       elevation: 0,
       color: AppColors.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
       child: InkWell(
         borderRadius: BorderRadius.circular(AppRadii.m),
         onTap: onTap,
@@ -718,7 +1097,8 @@ class _ActionTile extends StatelessWidget {
                   ],
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded, color: AppColors.onSurfaceFaint),
+              const Icon(Icons.chevron_right_rounded,
+                  color: AppColors.onSurfaceFaint),
             ],
           ),
         ),
@@ -738,7 +1118,8 @@ class _ContactTile extends StatelessWidget {
     return Card(
       elevation: 0,
       color: AppColors.surface,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+      shape:
+          RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
       child: Padding(
         padding: const EdgeInsets.all(14),
         child: Row(
@@ -775,8 +1156,8 @@ class _ContactTile extends StatelessWidget {
 /// ===============================
 class NotificationBell extends StatelessWidget {
   final String uid;
-  final String role;       // 'student' | 'instructor'
-  final String userStatus; // 'active' | 'pending'
+  final String role; // 'student' | 'instructor'
+  final String userStatus; // 'active' | 'pending' | 'blocked'
   final GlobalKey anchorKey;
 
   const NotificationBell({
@@ -790,7 +1171,8 @@ class NotificationBell extends StatelessWidget {
   bool _isTargeted(Map<String, dynamic> m) {
     try {
       final List segs = (m['segments'] as List?) ?? const ['all'];
-      final Set<String> S = segs.map((e) => e.toString().toLowerCase()).toSet();
+      final Set<String> S =
+          segs.map((e) => e.toString().toLowerCase()).toSet();
 
       final List targets = (m['target_uids'] as List?) ?? const [];
       final bool direct = targets.map((e) => e.toString()).contains(uid);
@@ -812,7 +1194,8 @@ class NotificationBell extends StatelessWidget {
           (S.contains('students') && role == 'student') ||
           (S.contains('instructors') && role == 'instructor') ||
           (S.contains('active') && userStatus == 'active') ||
-          (S.contains('pending') && userStatus == 'pending');
+          (S.contains('pending') && userStatus == 'pending') ||
+          (S.contains('blocked') && userStatus == 'blocked');
 
       return withinTime && (direct || segmentHit);
     } catch (e, st) {
@@ -858,7 +1241,8 @@ class NotificationBell extends StatelessWidget {
         } else if (readsSnap.hasData) {
           try {
             for (final d in readsSnap.data!.docs) {
-              final map = (d.data() as Map<String, dynamic>?) ?? <String, dynamic>{};
+              final map = (d.data() as Map<String, dynamic>?) ??
+                  <String, dynamic>{};
               final v = map['readAt'] ?? map['read_at'];
               if (v is Timestamp) readAtMap[d.id] = v.toDate();
               else if (v is DateTime) readAtMap[d.id] = v;
@@ -880,14 +1264,16 @@ class NotificationBell extends StatelessWidget {
               stream: userNotifsQuery,
               builder: (context, userNotifSnap) {
                 if (userNotifSnap.hasError) {
-                  debugPrint('NBELL: userNotifsQuery error: ${userNotifSnap.error}');
+                  debugPrint(
+                      'NBELL: userNotifsQuery error: ${userNotifSnap.error}');
                 }
 
                 // Merge documents safely
                 final List<QueryDocumentSnapshot> combined = [];
                 try {
                   if (notifSnap.hasData) combined.addAll(notifSnap.data!.docs);
-                  if (userNotifSnap.hasData) combined.addAll(userNotifSnap.data!.docs);
+                  if (userNotifSnap.hasData)
+                    combined.addAll(userNotifSnap.data!.docs);
                 } catch (e, st) {
                   debugPrint('NBELL: merging snapshots error: $e\n$st');
                 }
@@ -920,7 +1306,8 @@ class NotificationBell extends StatelessWidget {
                 final targeted = <QueryDocumentSnapshot>[];
                 for (final d in merged) {
                   final path = d.reference.path;
-                  final m = (d.data() as Map<String, dynamic>?) ?? <String, dynamic>{};
+                  final m = (d.data() as Map<String, dynamic>?) ??
+                      <String, dynamic>{};
                   final fromUserNotification = path.contains('user_notification/');
                   if (fromUserNotification) {
                     targeted.add(d);
@@ -938,10 +1325,12 @@ class NotificationBell extends StatelessWidget {
                   return now.difference(readAt) <= sevenDays;
                 }).toList();
 
-                final unreadCount = visible.where((d) => !readAtMap.containsKey(d.id)).length;
+                final unreadCount =
+                    visible.where((d) => !readAtMap.containsKey(d.id)).length;
 
                 // debug output to help troubleshooting
-                debugPrint('NBELL: uid=$uid merged=${merged.length} targeted=${targeted.length} visible=${visible.length} unread=$unreadCount');
+                debugPrint(
+                    'NBELL: uid=$uid merged=${merged.length} targeted=${targeted.length} visible=${visible.length} unread=$unreadCount');
 
                 return Stack(
                   clipBehavior: Clip.none,
@@ -960,14 +1349,16 @@ class NotificationBell extends StatelessWidget {
                         right: 6,
                         top: 6,
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
                             color: AppColors.danger,
                             borderRadius: BorderRadius.circular(999),
                           ),
                           child: Text(
                             unreadCount > 99 ? '99+' : '$unreadCount',
-                            style: const TextStyle(color: AppColors.onSurfaceInverse, fontSize: 10),
+                            style: const TextStyle(
+                                color: AppColors.onSurfaceInverse, fontSize: 10),
                           ),
                         ),
                       ),
@@ -987,8 +1378,11 @@ class NotificationBell extends StatelessWidget {
     List<QueryDocumentSnapshot> targeted,
     Set<String> readIds,
   ) async {
-    final RenderBox? box = anchorKey.currentContext?.findRenderObject() as RenderBox?;
-    final RenderBox? overlay = Overlay.of(context, rootOverlay: true).context.findRenderObject() as RenderBox?;
+    final RenderBox? box =
+        anchorKey.currentContext?.findRenderObject() as RenderBox?;
+    final RenderBox? overlay =
+        Overlay.of(context, rootOverlay: true).context.findRenderObject()
+            as RenderBox?;
     if (box == null || overlay == null) {
       await showModalBottomSheet(
         context: context,
@@ -1008,8 +1402,11 @@ class NotificationBell extends StatelessWidget {
       return;
     }
 
-    final Offset topRight = box.localToGlobal(Offset(box.size.width, 0), ancestor: overlay);
-    final Offset bottomRight = box.localToGlobal(Offset(box.size.width, box.size.height), ancestor: overlay);
+    final Offset topRight =
+        box.localToGlobal(Offset(box.size.width, 0), ancestor: overlay);
+    final Offset bottomRight = box.localToGlobal(
+        Offset(box.size.width, box.size.height),
+        ancestor: overlay);
 
     final RelativeRect position = RelativeRect.fromRect(
       Rect.fromPoints(topRight, bottomRight),
@@ -1067,15 +1464,21 @@ class NotificationBell extends StatelessWidget {
       final fs = FirebaseFirestore.instance;
       final batch = fs.batch();
 
+      final uidLocal = FirebaseAuth.instance.currentUser?.uid;
+      if (uidLocal == null) return;
+
       // 1) user read receipt (keeps existing design)
-      final readRef = fs.collection('users').doc(uid).collection('notif_reads').doc(notifId);
-      batch.set(readRef, {'readAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+      final readRef =
+          fs.collection('users').doc(uidLocal).collection('notif_reads').doc(notifId);
+      batch.set(readRef, {'readAt': FieldValue.serverTimestamp()},
+          SetOptions(merge: true));
 
       // 2) Update user_notification doc (if exists)
       final notifRef = fs.collection('user_notification').doc(notifId);
 
       // compute expires_at 5 days from now (client-side wall-clock in UTC)
-      final expiresAtDate = DateTime.now().toUtc().add(const Duration(days: 5));
+      final expiresAtDate =
+          DateTime.now().toUtc().add(const Duration(days: 5));
       final expiresAtTimestamp = Timestamp.fromDate(expiresAtDate);
 
       batch.set(notifRef, {
@@ -1088,7 +1491,8 @@ class NotificationBell extends StatelessWidget {
     } catch (e) {
       debugPrint('NBELL: _markRead error: $e');
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to mark read: $e')));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Failed to mark read: $e')));
       }
     }
   }
@@ -1172,7 +1576,8 @@ class _NotificationsList extends StatelessWidget {
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurface.withOpacity(.75),
+                          color:
+                              Theme.of(context).colorScheme.onSurface.withOpacity(.75),
                           fontSize: 12,
                         ),
                       ),
@@ -1235,7 +1640,8 @@ class _PlanDetailsPageState extends State<PlanDetailsPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.planId.isEmpty ? 'Plan' : 'Plan: ${widget.planId}'),
+        title:
+            Text(widget.planId.isEmpty ? 'Plan' : 'Plan: ${widget.planId}'),
         backgroundColor: AppColors.surface,
         foregroundColor: AppColors.onSurface,
         elevation: 0,
@@ -1258,16 +1664,25 @@ class _PlanDetailsPageState extends State<PlanDetailsPage> {
                 }
                 final data = doc.data() ?? <String, dynamic>{};
                 final title = (data['title'] ?? widget.planId).toString();
-                final price = data['price']?.toString() ?? '—';
-                final duration = data['duration_months']?.toString() ?? data['duration']?.toString() ?? '—';
-                final perks = (data['perks'] as List?)?.map((e) => e.toString()).toList() ?? [];
+                final price = data['price']?.toString() ?? '-';
+                final duration = data['duration_months']?.toString() ??
+                    data['duration']?.toString() ??
+                    '-';
+                final perks = (data['perks'] as List?)
+                        ?.map((e) => e.toString())
+                        .toList() ??
+                    [];
 
                 return Padding(
                   padding: const EdgeInsets.all(16.0),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(title, style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: AppColors.onSurface)),
+                      Text(title,
+                          style: const TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.onSurface)),
                       const SizedBox(height: 8),
                       Row(
                         children: [
@@ -1279,10 +1694,13 @@ class _PlanDetailsPageState extends State<PlanDetailsPage> {
                         ],
                       ),
                       const SizedBox(height: 12),
-                      const Text('Perks', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+                      const Text('Perks',
+                          style: TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w600)),
                       const SizedBox(height: 8),
                       if (perks.isEmpty)
-                        const Text('No perks listed for this plan.', style: AppText.tileSubtitle)
+                        const Text('No perks listed for this plan.',
+                            style: AppText.tileSubtitle)
                       else
                         ...perks.map((p) => Padding(
                               padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1300,11 +1718,14 @@ class _PlanDetailsPageState extends State<PlanDetailsPage> {
                           backgroundColor: AppColors.primary,
                           foregroundColor: AppColors.onSurfaceInverse,
                           minimumSize: const Size.fromHeight(48),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(AppRadii.m)),
                         ),
                         onPressed: () {
                           // Example CTA: navigate to purchase/upgrade flow or show more info.
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Purchase/Upgrade flow not implemented.')));
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                              content:
+                                  Text('Purchase/Upgrade flow not implemented.'))); 
                         },
                         child: const Text('Purchase / Manage Plan'),
                       ),
@@ -1359,7 +1780,8 @@ class _PlanDetailsPageState extends State<PlanDetailsPage> {
                     backgroundColor: AppColors.primary,
                     foregroundColor: AppColors.onSurfaceInverse,
                     minimumSize: const Size.fromHeight(48),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.m)),
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(AppRadii.m)),
                   ),
                   child: const Text('Explore Plans'),
                 ),

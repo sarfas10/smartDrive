@@ -367,7 +367,7 @@ class _DashboardBlockState extends State<DashboardBlock> {
               children: [
                 const _DashboardHeader(),
                 // small label showing current range (keeps header tidy)
-                Text('Showing last $selectedDays days', style: TextStyle(fontSize: 13, color: AppColors.onSurfaceMuted)),
+                
               ],
             ),
             const SizedBox(height: 8),
