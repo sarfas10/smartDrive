@@ -520,7 +520,7 @@ class _StatsViewport extends StatelessWidget {
   }
 }
 
-/// Revenue card with a cleaner filter button (outlined button + bottom sheet selector)
+/// Revenue card styled like other stat cards (no badge).
 class RevenueCard extends StatelessWidget {
   final String amountLabel;
   final int selectedDays;
@@ -543,46 +543,50 @@ class RevenueCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: AppColors.divider),
         boxShadow: [
-          BoxShadow(color: Colors.black.withOpacity(0.03), blurRadius: 10, offset: const Offset(0, 3))
+          BoxShadow(
+            color: Colors.black.withOpacity(0.03),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          )
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          // Top row: left = icon + badge, right = clean filter button
+          // Top row: icon on left, filter on right
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Expanded(
-                child: Row(children: [
-                  Icon(Icons.attach_money, color: primary, size: 20),
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(color: primary.withOpacity(0.08), borderRadius: BorderRadius.circular(6)),
-                    child: const Text('Revenue', style: TextStyle(fontSize: 12,color: AppColors.onSurface, fontWeight: FontWeight.w600)),
-                  ),
-                ]),
-              ),
-
-              // custom filter button
+              Icon(Icons.attach_money, color: primary, size: 20),
               _FilterButton(
                 selectedDays: selectedDays,
                 onSelected: onDaysChanged,
               ),
             ],
           ),
-
-          // big amount
-          Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const SizedBox(height: 8),
-            Text(
-              amountLabel,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.onSurface),
+          const SizedBox(height: 6),
+          // Value
+          Text(
+            amountLabel,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.w700,
+              color: AppColors.onSurface,
             ),
-          ]),
+          ),
+          // Label
+          const Text(
+            "Revenue",
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              color: AppColors.onSurfaceMuted,
+            ),
+          ),
         ],
       ),
     );
@@ -735,29 +739,41 @@ class _RecentActivitiesState extends State<_RecentActivities> {
 
   @override
   Widget build(BuildContext context) {
+    // Hide the search field on compact/mobile screens to prevent header wrap/vertical layout.
+    final bool hideSearch = widget.isCompact;
+
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       // Header with title, search and filter
       Row(
         children: [
-          Expanded(child: Text('Recent Activities', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.onSurface))),
-          const SizedBox(width: 12),
-          // small search field
-          SizedBox(
-            width: widget.isCompact ? 150 : 220,
-            child: TextField(
-              onChanged: (v) => setState(() => _search = v.trim()),
-              decoration: InputDecoration(
-                isDense: true,
-                hintText: 'Search student/type/message',
-                hintStyle: TextStyle(color: AppColors.onSurfaceFaint),
-                prefixIcon: Icon(Icons.search, size: 18, color: AppColors.onSurfaceMuted),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
-              ),
+          // Keep the title on a single line and allow ellipsis if space is constrained.
+          Expanded(
+            child: Text(
+              'Recent Activities',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: AppColors.onSurface),
             ),
           ),
-          const SizedBox(width: 8),
-          // status filter menu
+          const SizedBox(width: 12),
+          // small search field (hidden on compact)
+          if (!hideSearch)
+            SizedBox(
+              width: widget.isCompact ? 150 : 220,
+              child: TextField(
+                onChanged: (v) => setState(() => _search = v.trim()),
+                decoration: InputDecoration(
+                  isDense: true,
+                  hintText: 'Search student/type/message',
+                  hintStyle: TextStyle(color: AppColors.onSurfaceFaint),
+                  prefixIcon: Icon(Icons.search, size: 18, color: AppColors.onSurfaceMuted),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                ),
+              ),
+            ),
+          if (!hideSearch) const SizedBox(width: 8),
+          // status filter menu (kept visible even on compact)
           PopupMenuButton<String>(
             tooltip: 'Filter status',
             onSelected: (v) => setState(() => _statusFilter = v),
