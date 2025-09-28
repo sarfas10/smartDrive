@@ -13,7 +13,7 @@ import 'student_dashboard.dart';
 import 'instructor_dashboard.dart';
 import 'admin_dashboard.dart';
 import 'register.dart';
-
+import 'staff_dashboard.dart';
 import 'package:smart_drive/reusables/branding.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -200,31 +200,40 @@ class _LoginScreenState extends State<LoginScreen> with TickerProviderStateMixin
   }
 
   Future<void> _goToRole(String role) async {
-    late final Widget next;
-    switch (role) {
-      case 'student':
-        next = StudentDashboard();
-        break;
-      case 'instructor':
-      case 'intsrtuctor':
-        next = InstructorDashboardPage();
-        break;
-      case 'admin':
-        next = const AdminDashboard();
-        break;
-      default:
-        _showToast('Unknown role "$role". Contact support.', isError: true);
-        return;
-    }
+  late final Widget next;
+  final r = role.trim().toLowerCase();
 
-    if (!mounted) return;
-    await Navigator.of(context).pushReplacement(PageRouteBuilder(
-      pageBuilder: (_, __, ___) => next,
-      transitionsBuilder: (_, animation, __, child) =>
-          FadeTransition(opacity: animation, child: child),
-      transitionDuration: const Duration(milliseconds: 220),
-    ));
+  switch (r) {
+    case 'student':
+      next = StudentDashboard();
+      break;
+    case 'instructor':
+    case 'intsrtuctor': // keep your existing typo alias
+      next = InstructorDashboardPage();
+      break;
+    case 'admin':
+      next = const AdminDashboard();
+      break;
+    case 'office_staff':
+    case 'staff':
+    case 'office-staff':
+      // Your staff dashboard created earlier
+      next = const StaffDashboardPage();
+      break;
+    default:
+      _showToast('Unknown role "$role". Contact support.', isError: true);
+      return;
   }
+
+  if (!mounted) return;
+  await Navigator.of(context).pushReplacement(PageRouteBuilder(
+    pageBuilder: (_, __, ___) => next,
+    transitionsBuilder: (_, animation, __, child) =>
+        FadeTransition(opacity: animation, child: child),
+    transitionDuration: const Duration(milliseconds: 220),
+  ));
+}
+
 
   String _mapAuthError(FirebaseAuthException e) {
     switch (e.code) {

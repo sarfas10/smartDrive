@@ -635,64 +635,109 @@ class _StudentDashboardState extends State<StudentDashboard>
         context, MaterialPageRoute(builder: (_) => const OnboardingForm()));
   }
 
-  // ── Onboarding banner widget (local dismiss only)
-  Widget _onboardingBanner() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(AppRadii.m),
-      child: Container(
-        color: AppColors.surface,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          child: Row(
-            children: [
-              // icon / left
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                  color: AppColors.warning.withOpacity(0.10),
-                  borderRadius: BorderRadius.circular(AppRadii.s),
-                ),
-                child: Icon(Icons.info_outline, color: AppColors.warning),
-              ),
+  // Responsive Onboarding banner — replaces the existing _onboardingBanner()
+Widget _onboardingBanner() {
+  return ClipRRect(
+    borderRadius: BorderRadius.circular(AppRadii.m),
+    child: Container(
+      color: AppColors.surface,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        child: LayoutBuilder(builder: (context, constraints) {
+          // tune breakpoint as needed
+          final isNarrow = constraints.maxWidth < 420;
 
-              const SizedBox(width: 12),
+          final iconBox = Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.warning.withOpacity(0.10),
+              borderRadius: BorderRadius.circular(AppRadii.s),
+            ),
+            child: Icon(Icons.info_outline, color: AppColors.warning),
+          );
 
-              // text
-              Expanded(
-                child: Column(
+          final title = Text('Complete onboarding', style: AppText.tileTitle);
+          final subtitle = Text(
+            'Finish setting-up your account',
+            style: AppText.tileSubtitle,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          );
+
+          final completeBtn = TextButton(
+            onPressed: _navigateToCompleteOnboarding,
+            child: const Text('Complete onboarding',
+                style: TextStyle(fontWeight: FontWeight.w600)),
+          );
+
+          //final dismissBtn = IconButton(
+            //icon: const Icon(Icons.close, size: 20),
+            //onPressed: () => setState(() => _hideOnboardingBanner = true),
+            //tooltip: 'Dismiss',
+          // );
+
+          if (isNarrow) {
+            // stacked layout for small widths: icon + texts, then actions in a row
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Complete onboarding', style: AppText.tileTitle),
-                    const SizedBox(height: 4),
-                    Text(
-                      'Finish setting-up your account to get full access.',
-                      style: AppText.tileSubtitle,
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+                    iconBox,
+                    const SizedBox(width: 12),
+                    // Title + subtitle in a flexible column
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          title,
+                          const SizedBox(height: 4),
+                          subtitle,
+                        ],
+                      ),
                     ),
+                    // keep dismiss visible on the row
+                    //dismissBtn,
                   ],
                 ),
-              ),
-
-              // action
-              TextButton(
-                onPressed: _navigateToCompleteOnboarding,
-                child: const Text('Complete onboarding',
-                    style: TextStyle(fontWeight: FontWeight.w600)),
-              ),
-
-              // dismiss
-              IconButton(
-                icon: const Icon(Icons.close, size: 20),
-                onPressed: () => setState(() => _hideOnboardingBanner = true),
-                tooltip: 'Dismiss',
-              ),
-            ],
-          ),
-        ),
+                const SizedBox(height: 8),
+                // action row — buttons share available space
+                Row(
+                  children: [
+                    Expanded(child: completeBtn),
+                  ],
+                ),
+              ],
+            );
+          } else {
+            // roomy layout: single row with icon, text expanded, action and dismiss
+            return Row(
+              children: [
+                iconBox,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      title,
+                      const SizedBox(height: 4),
+                      subtitle,
+                    ],
+                  ),
+                ),
+                // action button & dismiss on the right
+                completeBtn,
+                //dismissBtn,
+              ],
+            );
+          }
+        }),
       ),
-    );
-  }
+    ),
+  );
+}
+
 
   // Blocked banner (local dismiss only)
   Widget _blockedBanner() {

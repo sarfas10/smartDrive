@@ -3,6 +3,7 @@ import 'dart:async';
 import 'dart:ui' show FontFeature;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 // Theme
 import 'package:smart_drive/theme/app_theme.dart';
@@ -35,6 +36,145 @@ class _UsersBlockState extends State<UsersBlock> {
     super.dispose();
   }
 
+  // --- New: show dialog to add office staff ---
+  Future<void> _showAddOfficeStaffDialog() async {
+    final _nameController = TextEditingController();
+    final _emailController = TextEditingController();
+    final _passwordController = TextEditingController();
+    final _formKey = GlobalKey<FormState>();
+    var loading = false;
+
+    await showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return StatefulBuilder(builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text('Add Office Staff'),
+            content: Form(
+              key: _formKey,
+              child: SizedBox(
+                width: 420,
+                child: SingleChildScrollView(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      TextFormField(
+                        controller: _nameController,
+                        textCapitalization: TextCapitalization.words,
+                        decoration: const InputDecoration(labelText: 'Full name'),
+                        validator: (v) =>
+                            (v == null || v.trim().length < 2) ? 'Enter a valid name' : null,
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        decoration: const InputDecoration(labelText: 'Email'),
+                        validator: (v) {
+                          if (v == null || v.trim().isEmpty) return 'Email required';
+                          final re = RegExp(r"^[^@]+@[^@]+\.[^@]+");
+                          if (!re.hasMatch(v.trim())) return 'Enter a valid email';
+                          return null;
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      TextFormField(
+                        controller: _passwordController,
+                        obscureText: true,
+                        decoration: const InputDecoration(labelText: 'Password'),
+                        validator: (v) {
+                          if (v == null || v.length < 6) return 'Password must be at least 6 chars';
+                          return null;
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: loading
+                    ? null
+                    : () {
+                        Navigator.of(ctx).pop();
+                      },
+                child: const Text('Cancel'),
+              ),
+              ElevatedButton(
+                onPressed: loading
+                    ? null
+                    : () async {
+                        if (!(_formKey.currentState?.validate() ?? false)) return;
+                        final name = _nameController.text.trim();
+                        final email = _emailController.text.trim();
+                        final password = _passwordController.text;
+
+                        setStateDialog(() => loading = true);
+
+                        try {
+                          // Create in Firebase Auth
+                          final userCred = await FirebaseAuth.instance
+                              .createUserWithEmailAndPassword(email: email, password: password);
+
+                          final uid = userCred.user?.uid ?? '';
+
+                          // Create document in users collection
+                          await FirebaseFirestore.instance.collection('users').doc(uid).set({
+                            'name': name,
+                            'email': email,
+                            'createdAt': FieldValue.serverTimestamp(),
+                            'role': 'office_staff',
+                            // optionally add status or other fields:
+                            'status': 'active',
+                            'uid': uid,
+                          }, SetOptions(merge: true));
+
+                          setStateDialog(() => loading = false);
+                          Navigator.of(ctx).pop();
+
+                          // success feedback
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Office staff added successfully')),
+                            );
+                          }
+                        } on FirebaseAuthException catch (e) {
+                          setStateDialog(() => loading = false);
+                          String message = e.message ?? 'Authentication error';
+                          // helpful common messages
+                          if (e.code == 'email-already-in-use') {
+                            message = 'This email is already in use.';
+                          } else if (e.code == 'invalid-email') {
+                            message = 'Invalid email.';
+                          } else if (e.code == 'weak-password') {
+                            message = 'Password is too weak.';
+                          }
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+                          }
+                        } catch (e) {
+                          setStateDialog(() => loading = false);
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(content: Text('Error: ${e.toString()}')),
+                            );
+                          }
+                        }
+                      },
+                child: loading
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text('Create'),
+              ),
+            ],
+          );
+        });
+      },
+    );
+  }
+  // --- end new dialog ---
+
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.sizeOf(context).width;
@@ -66,6 +206,8 @@ class _UsersBlockState extends State<UsersBlock> {
             },
             onRoleChanged: (v) => setState(() => _roleFilter = v ?? 'all'),
             onStatusChanged: (v) => setState(() => _statusFilter = v ?? 'all'),
+            // pass the new callback
+            onAddOfficeStaff: _showAddOfficeStaffDialog,
           ),
           const Divider(height: 1, color: AppColors.divider),
           Expanded(
@@ -456,6 +598,9 @@ class _FiltersBar extends StatelessWidget {
   final ValueChanged<String?> onRoleChanged;
   final ValueChanged<String?> onStatusChanged;
 
+  // New callback for Add Office Staff button
+  final VoidCallback? onAddOfficeStaff;
+
   const _FiltersBar({
     required this.roleValue,
     required this.statusValue,
@@ -466,6 +611,7 @@ class _FiltersBar extends StatelessWidget {
     required this.onReset,
     required this.onRoleChanged,
     required this.onStatusChanged,
+    this.onAddOfficeStaff,
   });
 
   @override
@@ -511,27 +657,24 @@ class _FiltersBar extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 8),
+              
+
+              // New: Add Office Staffs button (visible on all widths)
+              const SizedBox(width: 8),
               Tooltip(
-                message: compact ? 'Comfortable rows' : 'Compact rows',
-                child: IconButton(
-                  onPressed: onCompactToggle,
-                  icon: Icon(
-                    compact ? Icons.format_line_spacing : Icons.density_medium,
-                    color: AppColors.onSurface,
+                message: 'Add Office Staffs',
+                child: ElevatedButton.icon(
+                  onPressed: onAddOfficeStaff,
+                  icon: const Icon(Icons.person_add),
+                  label: const Text('Add Office Staffs'),
+                  style: ElevatedButton.styleFrom(
+                    elevation: 0,
+                    backgroundColor: AppColors.brand,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   ),
                 ),
               ),
-              if (!isNarrow) ...[
-                const SizedBox(width: 4),
-                Tooltip(
-                  message: 'Reset filters',
-                  child: TextButton.icon(
-                    onPressed: onReset,
-                    icon: const Icon(Icons.refresh, color: AppColors.onSurface),
-                    label: const Text('Reset', style: TextStyle(color: AppColors.onSurface)),
-                  ),
-                ),
-              ],
             ],
           ),
 
@@ -564,6 +707,7 @@ class _FiltersBar extends StatelessWidget {
                     DropdownMenuItem(value: 'all', child: Text('All')),
                     DropdownMenuItem(value: 'student', child: Text('Students')),
                     DropdownMenuItem(value: 'instructor', child: Text('Instructors')),
+                    DropdownMenuItem(value: 'office_staff', child: Text('Office Staffs')),
                   ],
                   onChanged: onRoleChanged,
                 ),

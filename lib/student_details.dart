@@ -276,9 +276,10 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
             final isActive = status.toLowerCase() == 'active';
 
             final dobStr = formatTimestampDate(p['dob']);
-            final address1 = (p['address_line1'] ?? '-').toString();
-            final address2 = (p['address_line2'] ?? '').toString();
-            final zipcode = (p['zipcode'] ?? '').toString();
+
+            // just take permanent_address directly (display exactly as stored)
+            final displayAddress = (p['permanent_address'] ?? '-').toString();
+
             final photo = (p['photo_url'] ?? '').toString();
 
             return StreamBuilder<Map<String, dynamic>>(
@@ -421,17 +422,12 @@ class _StudentDetailsBodyState extends State<_StudentDetailsBody> {
                               _iconRow(
                                   context, Icons.cake_outlined, 'Date of Birth', dobStr),
                               const SizedBox(height: 12),
+                              // show permanent_address exactly as stored
                               _iconRow(
                                 context,
                                 Icons.location_on_outlined,
                                 'Address',
-                                [
-                                  address1,
-                                  if (address2.isNotEmpty) address2,
-                                  if (zipcode.isNotEmpty) zipcode,
-                                ]
-                                    .where((s) => s.trim().isNotEmpty)
-                                    .join(', '),
+                                displayAddress,
                               ),
                               const SizedBox(height: 12),
                               Row(

@@ -1149,11 +1149,13 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
               ? const Center(child: CircularProgressIndicator())
               : LayoutBuilder(
                   builder: (context, constraints) {
-                    final isWide = constraints.maxWidth >= 980;
+                    // LOWERED breakpoint to 720 for tablets/landscape phones
+                    final isWide = constraints.maxWidth >= 720;
 
                     return Center(
                       child: ConstrainedBox(
-                        constraints: const BoxConstraints(maxWidth: 1100),
+                        // friendlier maxWidth for medium screens
+                        constraints: const BoxConstraints(maxWidth: 980),
                         child: SingleChildScrollView(
                           padding: pagePadding,
                           child: Column(
@@ -1174,7 +1176,8 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                                 Row(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Expanded(
+                                    Flexible(
+                                      flex: 2, // left gets more room
                                       child: _LeftColumn(
                                         profileFormKey: _profileFormKey,
                                         nameController: _nameController,
@@ -1217,7 +1220,8 @@ class _UserSettingsScreenState extends State<UserSettingsScreen> {
                                       ),
                                     ),
                                     const SizedBox(width: 20),
-                                    Expanded(
+                                    Flexible(
+                                      flex: 1,
                                       child: _RightColumn(
                                         currentPlan: currentPlan,
                                         onShowPlans: () {
@@ -1578,7 +1582,7 @@ class _LeftColumn extends StatelessWidget {
                 ),
                 const SizedBox(height: 14),
 
-                // Learner holder
+                // Learner holder (FIXED: calls onLearnerChanged correctly)
                 InputDecorator(
                   decoration: const InputDecoration(label: Text("Are you a learner's holder?"), border: OutlineInputBorder()),
                   child: DropdownButtonHideUnderline(
@@ -1588,9 +1592,7 @@ class _LeftColumn extends StatelessWidget {
                         DropdownMenuItem(value: false, child: Text('No')),
                         DropdownMenuItem(value: true, child: Text('Yes')),
                       ],
-                      onChanged: onLicenseChanged == null ? null : (v) {
-                        // We intentionally allow both dropdowns to be toggled.
-                        // Parent handlers will ensure disabling when appropriate.
+                      onChanged: (v) {
                         if (v != null) onLearnerChanged(v);
                       },
                     ),
@@ -1696,23 +1698,49 @@ class _LeftColumn extends StatelessWidget {
                 ],
 
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: ElevatedButton.icon(
-                        onPressed: onSaveProfile,
-                        icon: const Icon(Icons.save_rounded),
-                        label: const Text('Save Changes'),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    OutlinedButton.icon(
-                      onPressed: onChangePassword,
-                      icon: const Icon(Icons.lock_reset),
-                      label: const Text('Change Password'),
-                    ),
-                  ],
-                ),
+
+                // RESPONSIVE save/change buttons
+                LayoutBuilder(builder: (context, constraints) {
+                  final narrow = constraints.maxWidth < 420;
+                  if (narrow) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        ElevatedButton.icon(
+                          onPressed: onSaveProfile,
+                          icon: const Icon(Icons.save_rounded),
+                          label: const Text('Save Changes'),
+                          style: ElevatedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                        ),
+                        const SizedBox(height: 8),
+                        OutlinedButton.icon(
+                          onPressed: onChangePassword,
+                          icon: const Icon(Icons.lock_reset),
+                          label: const Text('Change Password'),
+                          style: OutlinedButton.styleFrom(minimumSize: const Size.fromHeight(48)),
+                        ),
+                      ],
+                    );
+                  } else {
+                    return Row(
+                      children: [
+                        Expanded(
+                          child: ElevatedButton.icon(
+                            onPressed: onSaveProfile,
+                            icon: const Icon(Icons.save_rounded),
+                            label: const Text('Save Changes'),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        OutlinedButton.icon(
+                          onPressed: onChangePassword,
+                          icon: const Icon(Icons.lock_reset),
+                          label: const Text('Change Password'),
+                        ),
+                      ],
+                    );
+                  }
+                }),
               ],
             ),
           ),
