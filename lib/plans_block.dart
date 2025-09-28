@@ -1072,24 +1072,31 @@ class _PlanCard extends StatelessWidget {
             style: AppText.tileTitle.copyWith(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.primary),
           ),
           const SizedBox(height: 8),
-          Wrap(
-            spacing: 14,
-            runSpacing: 8,
-            children: [
-              if (!plan.isPayPerUse) _Feature(icon: Icons.event_available, label: '${plan.slots} slots'),
-              if (plan.isPayPerUse) const _Feature(icon: Icons.flash_on, label: 'Pay per session'),
-              if (plan.extraKmSurcharge)
-                _Feature(icon: Icons.local_gas_station, label: '₹${plan.surcharge}/km extra'),
-              if (plan.freePickupRadius)
-                _Feature(icon: Icons.location_on, label: '${plan.freeRadius} km pickup'),
 
-              // NEW: driving test included features per class
-              if (plan.drivingTest8) _Feature(icon: Icons.verified_user, label: '8-type test included'),
-              if (plan.drivingTestH) _Feature(icon: Icons.verified_user, label: 'H-type test included'),
-            ],
+          // Make features take remaining vertical space so bottom actions stay in view
+          Expanded(
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Wrap(
+                spacing: 14,
+                runSpacing: 8,
+                children: [
+                  if (!plan.isPayPerUse) _Feature(icon: Icons.event_available, label: '${plan.slots} slots'),
+                  if (plan.isPayPerUse) const _Feature(icon: Icons.flash_on, label: 'Pay per session'),
+                  if (plan.extraKmSurcharge)
+                    _Feature(icon: Icons.local_gas_station, label: '₹${plan.surcharge}/km extra'),
+                  if (plan.freePickupRadius)
+                    _Feature(icon: Icons.location_on, label: '${plan.freeRadius} km pickup'),
+
+                  // NEW: driving test included features per class
+                  if (plan.drivingTest8) _Feature(icon: Icons.verified_user, label: '8-type test included'),
+                  if (plan.drivingTestH) _Feature(icon: Icons.verified_user, label: 'H-type test included'),
+                ],
+              ),
+            ),
           ),
-          const Spacer(),
-          // Inline action icons
+
+          // Inline action icons - anchored to bottom of the card
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
@@ -1110,6 +1117,7 @@ class _PlanCard extends StatelessWidget {
     );
   }
 }
+
 
 class _Badge extends StatelessWidget {
   final String text;
