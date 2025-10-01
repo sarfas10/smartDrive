@@ -406,207 +406,222 @@ class _RegisterScreenState extends State<RegisterScreen>
   }
 
   Widget _buildRegisterCard() {
-    const fieldGap = SizedBox(height: 12);
-    const sectionGap = SizedBox(height: 14);
+  const fieldGap = SizedBox(height: 12);
+  const sectionGap = SizedBox(height: 14);
 
-    return Form(
-      key: _formKey,
-      autovalidateMode: AutovalidateMode.disabled,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          // Subtitle
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 200),
-            child: Text(
-              key: ValueKey(isStudent),
-              isStudent
-                  ? 'Create your student account'
-                  : 'Apply as an instructor',
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: Colors.white.withOpacity(0.9),
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
+  // Limit the height of the card so the scroll view has a sensible viewport.
+  final maxCardHeight = MediaQuery.of(context).size.height * 0.78;
+  final bottomInset = MediaQuery.of(context).viewInsets.bottom + 14; // safe bottom padding for keyboard
+
+  return ConstrainedBox(
+    constraints: BoxConstraints(maxHeight: maxCardHeight),
+    child: SingleChildScrollView(
+      keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+      physics: const BouncingScrollPhysics(),
+      padding: EdgeInsets.only(bottom: bottomInset, left: 2, right: 2, top: 2),
+      child: Form(
+        key: _formKey,
+        autovalidateMode: AutovalidateMode.disabled,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            // Subtitle
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: Text(
+                key: ValueKey(isStudent),
+                isStudent
+                    ? 'Create your student account'
+                    : 'Apply as an instructor',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white.withOpacity(0.9),
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
               ),
             ),
-          ),
-          const SizedBox(height: 18),
+            const SizedBox(height: 18),
 
-          _buildUserTypeToggle(),
-          sectionGap,
+            _buildUserTypeToggle(),
+            sectionGap,
 
-          // Full name
-          _buildTextField(
-            controller: _nameController,
-            focusNode: _nameNode,
-            nextNode: _emailNode,
-            label: 'Full Name',
-            icon: Icons.person_outline_rounded,
-            textInputAction: TextInputAction.next,
-            validator: (v) {
-              final t = v?.trim() ?? '';
-              if (t.isEmpty) return 'Please enter Full Name';
-              if (t.length < 2) return 'Name looks too short';
-              return null;
-            },
-            autofillHints: const [AutofillHints.name],
-          ),
-          fieldGap,
-
-          // Email
-          _buildTextField(
-            controller: _emailController,
-            focusNode: _emailNode,
-            nextNode: _phoneNode,
-            label: 'Email Address',
-            icon: Icons.email_outlined,
-            keyboardType: TextInputType.emailAddress,
-            textInputAction: TextInputAction.next,
-            validator: (v) {
-              final email = v?.trim() ?? '';
-              if (email.isEmpty) return 'Please enter Email Address';
-              final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
-                  .hasMatch(email.toLowerCase());
-              return ok ? null : 'Please enter a valid email address';
-            },
-            autofillHints: const [AutofillHints.email],
-          ),
-          fieldGap,
-
-          // Phone
-          _buildTextField(
-            controller: _phoneController,
-            focusNode: _phoneNode,
-            nextNode: isStudent ? _passNode : _licenseNode,
-            label: 'Phone Number',
-            icon: Icons.phone_outlined,
-            keyboardType: TextInputType.phone,
-            textInputAction: TextInputAction.next,
-            inputFormatters: [
-              FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s]'))
-            ],
-            validator: (v) {
-              final t = v?.trim() ?? '';
-              if (t.isEmpty) return 'Please enter Phone Number';
-              if (t.replaceAll(RegExp(r'\D'), '').length < 7) {
-                return 'Enter a valid phone number';
-              }
-              return null;
-            },
-            autofillHints: const [AutofillHints.telephoneNumber],
-          ),
-          sectionGap,
-
-          // Instructor-only fields
-          if (!isStudent)
+            // Full name
             _buildTextField(
-              controller: _licenseController,
-              focusNode: _licenseNode,
-              nextNode: _expNode,
-              label: 'Instructor License Number',
-              icon: Icons.card_membership_outlined,
+              controller: _nameController,
+              focusNode: _nameNode,
+              nextNode: _emailNode,
+              label: 'Full Name',
+              icon: Icons.person_outline_rounded,
               textInputAction: TextInputAction.next,
               validator: (v) {
                 final t = v?.trim() ?? '';
-                if (t.isEmpty) {
-                  return 'License Number is required for Instructors';
+                if (t.isEmpty) return 'Please enter Full Name';
+                if (t.length < 2) return 'Name looks too short';
+                return null;
+              },
+              autofillHints: const [AutofillHints.name],
+            ),
+            fieldGap,
+
+            // Email
+            _buildTextField(
+              controller: _emailController,
+              focusNode: _emailNode,
+              nextNode: _phoneNode,
+              label: 'Email Address',
+              icon: Icons.email_outlined,
+              keyboardType: TextInputType.emailAddress,
+              textInputAction: TextInputAction.next,
+              validator: (v) {
+                final email = v?.trim() ?? '';
+                if (email.isEmpty) return 'Please enter Email Address';
+                final ok = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$')
+                    .hasMatch(email.toLowerCase());
+                return ok ? null : 'Please enter a valid email address';
+              },
+              autofillHints: const [AutofillHints.email],
+            ),
+            fieldGap,
+
+            // Phone
+            _buildTextField(
+              controller: _phoneController,
+              focusNode: _phoneNode,
+              nextNode: isStudent ? _passNode : _licenseNode,
+              label: 'Phone Number',
+              icon: Icons.phone_outlined,
+              keyboardType: TextInputType.phone,
+              textInputAction: TextInputAction.next,
+              inputFormatters: [
+                FilteringTextInputFormatter.allow(RegExp(r'[0-9+\-\s]'))
+              ],
+              validator: (v) {
+                final t = v?.trim() ?? '';
+                if (t.isEmpty) return 'Please enter Phone Number';
+                if (t.replaceAll(RegExp(r'\D'), '').length < 7) {
+                  return 'Enter a valid phone number';
                 }
                 return null;
               },
+              autofillHints: const [AutofillHints.telephoneNumber],
             ),
-          if (!isStudent) fieldGap,
+            sectionGap,
 
-          if (!isStudent)
-            _buildTextField(
-              controller: _experienceController,
-              focusNode: _expNode,
-              nextNode: _passNode,
-              label: 'Years of Experience',
-              icon: Icons.work_outline_rounded,
-              keyboardType: TextInputType.number,
+            // Instructor-only fields
+            if (!isStudent)
+              _buildTextField(
+                controller: _licenseController,
+                focusNode: _licenseNode,
+                nextNode: _expNode,
+                label: 'Instructor License Number',
+                icon: Icons.card_membership_outlined,
+                textInputAction: TextInputAction.next,
+                validator: (v) {
+                  final t = v?.trim() ?? '';
+                  if (t.isEmpty) {
+                    return 'License Number is required for Instructors';
+                  }
+                  return null;
+                },
+              ),
+            if (!isStudent) fieldGap,
+
+            if (!isStudent)
+              _buildTextField(
+                controller: _experienceController,
+                focusNode: _expNode,
+                nextNode: _passNode,
+                label: 'Years of Experience',
+                icon: Icons.work_outline_rounded,
+                keyboardType: TextInputType.number,
+                textInputAction: TextInputAction.next,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                validator: (v) {
+                  final n = int.tryParse(v?.trim() ?? '');
+                  if (n == null || n < 0) return 'Enter a valid number';
+                  return null;
+                },
+              ),
+            if (!isStudent) sectionGap,
+
+            // Password
+            _buildPasswordField(
+              controller: _passwordController,
+              focusNode: _passNode,
+              nextNode: _confirmNode,
+              label: 'Password',
+              obscureText: obscurePassword,
+              onToggle: () => setState(() => obscurePassword = !obscurePassword),
               textInputAction: TextInputAction.next,
-              inputFormatters: [FilteringTextInputFormatter.digitsOnly],
               validator: (v) {
-                final n = int.tryParse(v?.trim() ?? '');
-                if (n == null || n < 0) return 'Enter a valid number';
+                if (v == null || v.isEmpty) return 'Please enter Password';
+                if (v.length < 8) return 'Password must be at least 8 characters';
                 return null;
               },
+              autofillHints: const [AutofillHints.newPassword],
             ),
-          if (!isStudent) sectionGap,
+            fieldGap,
 
-          // Password
-          _buildPasswordField(
-            controller: _passwordController,
-            focusNode: _passNode,
-            nextNode: _confirmNode,
-            label: 'Password',
-            obscureText: obscurePassword,
-            onToggle: () => setState(() => obscurePassword = !obscurePassword),
-            textInputAction: TextInputAction.next,
-            validator: (v) {
-              if (v == null || v.isEmpty) return 'Please enter Password';
-              if (v.length < 8) return 'Password must be at least 8 characters';
-              return null;
-            },
-            autofillHints: const [AutofillHints.newPassword],
-          ),
-          fieldGap,
+            // Confirm Password
+            _buildPasswordField(
+              controller: _confirmPasswordController,
+              focusNode: _confirmNode,
+              label: 'Confirm Password',
+              obscureText: obscureConfirmPassword,
+              onToggle: () =>
+                  setState(() => obscureConfirmPassword = !obscureConfirmPassword),
+              textInputAction: TextInputAction.done,
+              validator: (v) {
+                if (v == null || v.isEmpty) {
+                  return 'Please confirm your password';
+                }
+                if (v != _passwordController.text) {
+                  return 'Passwords do not match';
+                }
+                return null;
+              },
+              onFieldSubmitted: (_) => _handleRegister(),
+              autofillHints: const [AutofillHints.newPassword],
+            ),
+            sectionGap,
 
-          // Confirm Password
-          _buildPasswordField(
-            controller: _confirmPasswordController,
-            focusNode: _confirmNode,
-            label: 'Confirm Password',
-            obscureText: obscureConfirmPassword,
-            onToggle: () =>
-                setState(() => obscureConfirmPassword = !obscureConfirmPassword),
-            textInputAction: TextInputAction.done,
-            validator: (v) {
-              if (v == null || v.isEmpty) {
-                return 'Please confirm your password';
-              }
-              if (v != _passwordController.text) {
-                return 'Passwords do not match';
-              }
-              return null;
-            },
-            onFieldSubmitted: (_) => _handleRegister(),
-            autofillHints: const [AutofillHints.newPassword],
-          ),
-          sectionGap,
+            _buildTermsAndConditions(),
+            const SizedBox(height: 14),
+            _buildRegisterButton(),
 
-          _buildTermsAndConditions(),
-          const SizedBox(height: 14),
-          _buildRegisterButton(),
-
-          // Inline "Already have an account?"
-          TextButton(
-            onPressed: _navigateBack,
-            child: RichText(
-              text: TextSpan(
-                style: TextStyle(
-                  color: Colors.white.withOpacity(0.9),
-                  fontSize: 12.5,
-                ),
-                children: const [
-                  TextSpan(text: "Already have an account? "),
-                  TextSpan(
-                    text: 'Sign In',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontWeight: FontWeight.w700,
-                    ),
+            // Inline "Already have an account?"
+            TextButton(
+              onPressed: _navigateBack,
+              child: RichText(
+                text: TextSpan(
+                  style: TextStyle(
+                    color: Colors.white.withOpacity(0.9),
+                    fontSize: 12.5,
                   ),
-                ],
+                  children: const [
+                    TextSpan(text: "Already have an account? "),
+                    TextSpan(
+                      text: 'Sign In',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+            // Extra bottom spacing so the last button isn't glued to the bottom on small screens
+            SizedBox(height: 8),
+          ],
+        ),
       ),
-    );
-  }
+    ),
+  );
+}
+
 
   // ── UI atoms (cleaned)
   Widget _buildUserTypeToggle() {

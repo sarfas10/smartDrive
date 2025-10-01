@@ -21,7 +21,7 @@ import 'package:url_launcher/url_launcher.dart';
 // THEME
 import 'package:smart_drive/theme/app_theme.dart';
 
-/// ───────────────────── Background grain painter ─────────────────────
+/// ───────────────────────── Background grain painter ─────────────────────
 class _GrainPainter extends CustomPainter {
   final double opacity;
   _GrainPainter({this.opacity = 0.06});
@@ -74,8 +74,8 @@ class _StudentDashboardState extends State<StudentDashboard>
   // local hide flag for onboarding banner (not persisted)
   bool _hideOnboardingBanner = false;
 
-  // anchor for bell menu
-  final GlobalKey _bellAnchorKey = GlobalKey();
+  // local hide flag for license banner (not persisted)
+  bool _hideLicenseBanner = false;
 
   // whether the user has either a learner or license recorded (from user_profiles)
   bool _hasDrivingDocument = false;
@@ -324,14 +324,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                     uid: uid,
                     role: role.toLowerCase(),
                     userStatus: userStatus.toLowerCase(),
-                    anchorKey: _bellAnchorKey,
                   ),
-                IconButton(
-                  key: _bellAnchorKey,
-                  icon: const Icon(Icons.notifications_none_rounded,
-                      color: Colors.transparent),
-                  onPressed: () {},
-                ),
                 IconButton(
                   icon: const Icon(Icons.settings_outlined),
                   onPressed: _navigateToSettings,
@@ -458,7 +451,14 @@ class _StudentDashboardState extends State<StudentDashboard>
                         ),
                       ],
                     ),
-                    if (!isBlocked && !_hasDrivingDocument)
+
+                    // NEW: license unlock banner (dismissible locally)
+                    if (!isBlocked && !_hasDrivingDocument && !_hideLicenseBanner)
+                      const SizedBox(height: 12),
+                    if (!isBlocked && !_hasDrivingDocument && !_hideLicenseBanner)
+                      _licenseUnlockBanner(),
+
+                    if (!isBlocked && !_hasDrivingDocument && _hideLicenseBanner)
                       Padding(
                         padding: const EdgeInsets.only(top: 12),
                         child: Text(
@@ -466,6 +466,7 @@ class _StudentDashboardState extends State<StudentDashboard>
                           style: AppText.tileSubtitle,
                         ),
                       ),
+
                     if (isBlocked) const SizedBox(height: 12),
                     if (isBlocked)
                       Text(
@@ -636,108 +637,98 @@ class _StudentDashboardState extends State<StudentDashboard>
   }
 
   // Responsive Onboarding banner — replaces the existing _onboardingBanner()
-Widget _onboardingBanner() {
-  return ClipRRect(
-    borderRadius: BorderRadius.circular(AppRadii.m),
-    child: Container(
-      color: AppColors.surface,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-        child: LayoutBuilder(builder: (context, constraints) {
-          // tune breakpoint as needed
-          final isNarrow = constraints.maxWidth < 420;
+  Widget _onboardingBanner() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.m),
+      child: Container(
+        color: AppColors.surface,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: LayoutBuilder(builder: (context, constraints) {
+            // tune breakpoint as needed
+            final isNarrow = constraints.maxWidth < 420;
 
-          final iconBox = Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: AppColors.warning.withOpacity(0.10),
-              borderRadius: BorderRadius.circular(AppRadii.s),
-            ),
-            child: Icon(Icons.info_outline, color: AppColors.warning),
-          );
-
-          final title = Text('Complete onboarding', style: AppText.tileTitle);
-          final subtitle = Text(
-            'Finish setting-up your account',
-            style: AppText.tileSubtitle,
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          );
-
-          final completeBtn = TextButton(
-            onPressed: _navigateToCompleteOnboarding,
-            child: const Text('Complete onboarding',
-                style: TextStyle(fontWeight: FontWeight.w600)),
-          );
-
-          //final dismissBtn = IconButton(
-            //icon: const Icon(Icons.close, size: 20),
-            //onPressed: () => setState(() => _hideOnboardingBanner = true),
-            //tooltip: 'Dismiss',
-          // );
-
-          if (isNarrow) {
-            // stacked layout for small widths: icon + texts, then actions in a row
-            return Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    iconBox,
-                    const SizedBox(width: 12),
-                    // Title + subtitle in a flexible column
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          title,
-                          const SizedBox(height: 4),
-                          subtitle,
-                        ],
-                      ),
-                    ),
-                    // keep dismiss visible on the row
-                    //dismissBtn,
-                  ],
-                ),
-                const SizedBox(height: 8),
-                // action row — buttons share available space
-                Row(
-                  children: [
-                    Expanded(child: completeBtn),
-                  ],
-                ),
-              ],
+            final iconBox = Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withOpacity(0.10),
+                borderRadius: BorderRadius.circular(AppRadii.s),
+              ),
+              child: Icon(Icons.info_outline, color: AppColors.warning),
             );
-          } else {
-            // roomy layout: single row with icon, text expanded, action and dismiss
-            return Row(
-              children: [
-                iconBox,
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
+
+            final title = Text('Complete onboarding', style: AppText.tileTitle);
+            final subtitle = Text(
+              'Finish setting-up your account',
+              style: AppText.tileSubtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            );
+
+            final completeBtn = TextButton(
+              onPressed: _navigateToCompleteOnboarding,
+              child: const Text('Complete onboarding',
+                  style: TextStyle(fontWeight: FontWeight.w600)),
+            );
+
+            if (isNarrow) {
+              // stacked layout for small widths: icon + texts, then actions in a row
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      title,
-                      const SizedBox(height: 4),
-                      subtitle,
+                      iconBox,
+                      const SizedBox(width: 12),
+                      // Title + subtitle in a flexible column
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            title,
+                            const SizedBox(height: 4),
+                            subtitle,
+                          ],
+                        ),
+                      ),
                     ],
                   ),
-                ),
-                // action button & dismiss on the right
-                completeBtn,
-                //dismissBtn,
-              ],
-            );
-          }
-        }),
+                  const SizedBox(height: 8),
+                  // action row — buttons share available space
+                  Row(
+                    children: [
+                      Expanded(child: completeBtn),
+                    ],
+                  ),
+                ],
+              );
+            } else {
+              // roomy layout: single row with icon, text expanded, action and dismiss
+              return Row(
+                children: [
+                  iconBox,
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        title,
+                        const SizedBox(height: 4),
+                        subtitle,
+                      ],
+                    ),
+                  ),
+                  // action button & dismiss on the right
+                  completeBtn,
+                ],
+              );
+            }
+          }),
+        ),
       ),
-    ),
-  );
-}
-
+    );
+  }
 
   // Blocked banner (local dismiss only)
   Widget _blockedBanner() {
@@ -792,6 +783,51 @@ Widget _onboardingBanner() {
               IconButton(
                 icon: const Icon(Icons.close, size: 20),
                 onPressed: () => setState(() => _hideOnboardingBanner = true),
+                tooltip: 'Dismiss',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// Banner shown when booking/test features are locked due to missing learner/license.
+  /// Dismissible locally.
+  Widget _licenseUnlockBanner() {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppRadii.m),
+      child: Container(
+        color: AppColors.surface,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          child: Row(
+            children: [
+              // left icon
+              
+
+              // text
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Update licence details', style: AppText.tileTitle),
+                    const SizedBox(height: 6),
+                    
+                  ],
+                ),
+              ),
+
+              // CTA
+              TextButton(
+                onPressed: _navigateToSettings,
+                child: const Text('Update', style: TextStyle(fontWeight: FontWeight.w700)),
+              ),
+
+              // dismiss
+              IconButton(
+                icon: const Icon(Icons.close, size: 20),
+                onPressed: () => setState(() => _hideLicenseBanner = true),
                 tooltip: 'Dismiss',
               ),
             ],
@@ -1197,20 +1233,18 @@ class _ContactTile extends StatelessWidget {
 }
 
 /// ===============================
-/// Notification bell (client-side sort, no composite index required)
+/// Notification bell (navigates to a full NotificationsPage)
 /// ===============================
 class NotificationBell extends StatelessWidget {
   final String uid;
   final String role; // 'student' | 'instructor'
   final String userStatus; // 'active' | 'pending' | 'blocked'
-  final GlobalKey anchorKey;
 
   const NotificationBell({
     super.key,
     required this.uid,
     required this.role,
     required this.userStatus,
-    required this.anchorKey,
   });
 
   bool _isTargeted(Map<String, dynamic> m) {
@@ -1268,7 +1302,6 @@ class NotificationBell extends StatelessWidget {
         .snapshots();
 
     // Per-user notifications (written by admin flows to user_notification)
-    // NOTE: Removed orderBy to avoid composite index requirement.
     final userNotifsQuery = fs
         .collection('user_notification')
         .where('uid', isEqualTo: uid)
@@ -1382,12 +1415,20 @@ class NotificationBell extends StatelessWidget {
                   children: [
                     IconButton(
                       icon: const Icon(Icons.notifications_none_rounded),
-                      onPressed: () => _openMenu(
-                        context,
-                        anchorKey,
-                        visible,
-                        readAtMap.keys.toSet(),
-                      ),
+                      onPressed: () {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => NotificationsPage(
+                              uid: uid,
+                              role: role,
+                              userStatus: userStatus,
+                              initialTargeted: visible,
+                              initialReadIds: readAtMap.keys.toSet(),
+                            ),
+                          ),
+                        );
+                      },
                     ),
                     if (unreadCount > 0)
                       Positioned(
@@ -1416,114 +1457,205 @@ class NotificationBell extends StatelessWidget {
       },
     );
   }
+}
 
-  Future<void> _openMenu(
-    BuildContext context,
-    GlobalKey anchorKey,
-    List<QueryDocumentSnapshot> targeted,
-    Set<String> readIds,
-  ) async {
-    final RenderBox? box =
-        anchorKey.currentContext?.findRenderObject() as RenderBox?;
-    final RenderBox? overlay =
-        Overlay.of(context, rootOverlay: true).context.findRenderObject()
-            as RenderBox?;
-    if (box == null || overlay == null) {
-      await showModalBottomSheet(
-        context: context,
-        builder: (_) => _NotificationsList(
-          targeted: targeted,
-          readIds: readIds,
-          onTapItem: (id, url) async {
-            await _markRead(context, id);
-            if (url != null && url.isNotEmpty) {
-              final uri = Uri.tryParse(url);
-              if (uri != null) launchUrl(uri, mode: LaunchMode.externalApplication);
-            }
-            Navigator.pop(context);
-          },
-        ),
-      );
-      return;
-    }
+/// Full-screen notifications page (navigated to from the bell)
+class NotificationsPage extends StatefulWidget {
+  final String uid;
+  final String role;
+  final String userStatus;
+  final List<QueryDocumentSnapshot> initialTargeted;
+  final Set<String> initialReadIds;
 
-    final Offset topRight =
-        box.localToGlobal(Offset(box.size.width, 0), ancestor: overlay);
-    final Offset bottomRight = box.localToGlobal(
-        Offset(box.size.width, box.size.height),
-        ancestor: overlay);
+  const NotificationsPage({
+    super.key,
+    required this.uid,
+    required this.role,
+    required this.userStatus,
+    required this.initialTargeted,
+    required this.initialReadIds,
+  });
 
-    final RelativeRect position = RelativeRect.fromRect(
-      Rect.fromPoints(topRight, bottomRight),
-      Offset.zero & overlay.size,
-    );
+  @override
+  State<NotificationsPage> createState() => _NotificationsPageState();
+}
 
-    final double menuWidth = math.min(MediaQuery.of(context).size.width * 0.92, 340);
+class _NotificationsPageState extends State<NotificationsPage> {
+  final FirebaseFirestore _fs = FirebaseFirestore.instance;
 
-    await showMenu(
-      context: context,
-      position: position,
-      items: [
-        PopupMenuItem(
-          enabled: false,
-          padding: EdgeInsets.zero,
-          child: SizedBox(
-            width: menuWidth,
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 380),
-              child: Material(
-                color: Theme.of(context).colorScheme.surface,
-                child: _NotificationsList(
-                  targeted: targeted,
-                  readIds: readIds,
-                  onTapItem: (id, url) async {
-                    await _markRead(context, id);
-                    Navigator.pop(context);
-                    if (url != null && url.isNotEmpty) {
-                      final uri = Uri.tryParse(url);
-                      if (uri != null) {
-                        launchUrl(uri, mode: LaunchMode.externalApplication);
-                      }
-                    }
-                  },
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
+  // reuse streams like in bell but render a list here
+  Stream<QuerySnapshot> get _globalNotifs => _fs
+      .collection('notifications')
+      .orderBy('created_at', descending: true)
+      .limit(200)
+      .snapshots();
+
+  Stream<QuerySnapshot> get _userNotifs => _fs
+      .collection('user_notification')
+      .where('uid', isEqualTo: widget.uid)
+      .limit(200)
+      .snapshots();
+
+  Stream<QuerySnapshot> get _readsStream =>
+      _fs.collection('users').doc(widget.uid).collection('notif_reads').snapshots();
+
+  // local cache for merged/targeted docs
+  List<QueryDocumentSnapshot> _visible = [];
+  Set<String> _readIds = {};
+
+  // UI state
+  final TextEditingController _searchController = TextEditingController();
+  String _searchTerm = '';
+  bool _loading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _readIds = Set<String>.from(widget.initialReadIds);
+    _visible = List<QueryDocumentSnapshot>.from(widget.initialTargeted);
+    // then listen for live updates
+    _subscribeStreams();
+    _searchController.addListener(() {
+      setState(() {
+        _searchTerm = _searchController.text.trim().toLowerCase();
+      });
+    });
   }
 
-  /// Mark a notification as read.
-  ///
-  /// This writes a read entry into users/{uid}/notif_reads/{notifId} (existing pattern),
-  /// and also updates the notification doc in user_notification/{notifId} setting:
-  ///   read: true
-  ///   read_at: FieldValue.serverTimestamp()
-  ///   expires_at: Timestamp.fromDate(DateTime.now().toUtc().add(Duration(days:5)))
-  ///
-  /// The expires_at is a concrete timestamp that can be used with Firestore TTL.
-  Future<void> _markRead(BuildContext context, String notifId) async {
+  StreamSubscription<QuerySnapshot>? _subGlobal;
+  StreamSubscription<QuerySnapshot>? _subUser;
+  StreamSubscription<QuerySnapshot>? _subReads;
+
+  void _subscribeStreams() {
+    _subGlobal = _globalNotifs.listen((_) => _recompute());
+    _subUser = _userNotifs.listen((_) => _recompute());
+    _subReads = _readsStream.listen((snap) {
+      final Map<String, DateTime?> readAtMap = {};
+      for (final d in snap.docs) {
+        final map = (d.data() as Map<String, dynamic>?) ?? {};
+        final v = map['readAt'] ?? map['read_at'];
+        if (v is Timestamp) readAtMap[d.id] = v.toDate();
+        else if (v is DateTime) readAtMap[d.id] = v;
+        else readAtMap[d.id] = null;
+      }
+      setState(() {
+        _readIds = readAtMap.keys.toSet();
+      });
+    }, onError: (e) {
+      debugPrint('NotificationsPage readsStream error: $e');
+    });
+  }
+
+  Future<void> _recompute() async {
     try {
-      final fs = FirebaseFirestore.instance;
-      final batch = fs.batch();
+      final g = await _globalNotifs.first;
+      final u = await _userNotifs.first;
 
-      final uidLocal = FirebaseAuth.instance.currentUser?.uid;
-      if (uidLocal == null) return;
+      final combined = <QueryDocumentSnapshot>[];
+      combined.addAll(g.docs);
+      combined.addAll(u.docs);
 
-      // 1) user read receipt (keeps existing design)
-      final readRef =
-          fs.collection('users').doc(uidLocal).collection('notif_reads').doc(notifId);
-      batch.set(readRef, {'readAt': FieldValue.serverTimestamp()},
-          SetOptions(merge: true));
+      final Map<String, QueryDocumentSnapshot> byId = {};
+      for (final d in combined) byId[d.id] ??= d;
+      final merged = byId.values.toList();
 
-      // 2) Update user_notification doc (if exists)
-      final notifRef = fs.collection('user_notification').doc(notifId);
+      // sort newest first
+      merged.sort((a, b) {
+        DateTime ta = DateTime.fromMillisecondsSinceEpoch(0);
+        DateTime tb = DateTime.fromMillisecondsSinceEpoch(0);
+        try {
+          final ma = (a.data() as Map<String, dynamic>?) ?? {};
+          final mb = (b.data() as Map<String, dynamic>?) ?? {};
+          final ca = ma['created_at'];
+          final cb = mb['created_at'];
+          if (ca is Timestamp) ta = ca.toDate();
+          if (ca is DateTime) ta = ca;
+          if (cb is Timestamp) tb = cb.toDate();
+          if (cb is DateTime) tb = cb;
+        } catch (_) {}
+        return tb.compareTo(ta);
+      });
 
-      // compute expires_at 5 days from now (client-side wall-clock in UTC)
-      final expiresAtDate =
-          DateTime.now().toUtc().add(const Duration(days: 5));
+      // filtering / targeting (same logic as before)
+      bool _isTargeted(Map<String, dynamic> m) {
+        try {
+          final List segs = (m['segments'] as List?) ?? const ['all'];
+          final Set<String> S = segs.map((e) => e.toString().toLowerCase()).toSet();
+
+          final List targets = (m['target_uids'] as List?) ?? const [];
+          final bool direct = targets.map((e) => e.toString()).contains(widget.uid);
+
+          DateTime? asDt(dynamic v) {
+            if (v == null) return null;
+            if (v is Timestamp) return v.toDate();
+            if (v is DateTime) return v;
+            return null;
+          }
+
+          final now = DateTime.now();
+          final scheduledAt = asDt(m['scheduled_at']) ?? asDt(m['created_at']);
+          final expiresAt = asDt(m['expires_at']);
+          final withinTime = (scheduledAt == null || !scheduledAt.isAfter(now)) &&
+              (expiresAt == null || expiresAt.isAfter(now));
+
+          final bool segmentHit = S.contains('all') ||
+              (S.contains('students') && widget.role == 'student') ||
+              (S.contains('instructors') && widget.role == 'instructor') ||
+              (S.contains('active') && widget.userStatus == 'active') ||
+              (S.contains('pending') && widget.userStatus == 'pending') ||
+              (S.contains('blocked') && widget.userStatus == 'blocked');
+
+          return withinTime && (direct || segmentHit);
+        } catch (e, st) {
+          debugPrint('NotificationsPage: _isTargeted error: $e\n$st');
+          return false;
+        }
+      }
+
+      final targeted = <QueryDocumentSnapshot>[];
+      for (final d in merged) {
+        final path = d.reference.path;
+        final m = (d.data() as Map<String, dynamic>?) ?? <String, dynamic>{};
+        final fromUserNotification = path.contains('user_notification/');
+        if (fromUserNotification) {
+          targeted.add(d);
+        } else {
+          if (_isTargeted(m)) targeted.add(d);
+        }
+      }
+
+      // only keep items visible (we show all targeted here)
+      final visible = targeted.toList();
+
+      setState(() {
+        _visible = visible;
+      });
+    } catch (e, st) {
+      debugPrint('NotificationsPage _recompute error: $e\n$st');
+    }
+  }
+
+  @override
+  void dispose() {
+    _subGlobal?.cancel();
+    _subUser?.cancel();
+    _subReads?.cancel();
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _markRead(String notifId) async {
+    try {
+      final batch = _fs.batch();
+
+      final uidLocal = widget.uid;
+      if (uidLocal.isEmpty) return;
+
+      final readRef = _fs.collection('users').doc(uidLocal).collection('notif_reads').doc(notifId);
+      batch.set(readRef, {'readAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+
+      final notifRef = _fs.collection('user_notification').doc(notifId);
+      final expiresAtDate = DateTime.now().toUtc().add(const Duration(days: 5));
       final expiresAtTimestamp = Timestamp.fromDate(expiresAtDate);
 
       batch.set(notifRef, {
@@ -1534,25 +1666,45 @@ class NotificationBell extends StatelessWidget {
 
       await batch.commit();
     } catch (e) {
-      debugPrint('NBELL: _markRead error: $e');
+      debugPrint('NotificationsPage _markRead error: $e');
       if (context.mounted) {
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text('Failed to mark read: $e')));
       }
     }
   }
-}
 
-class _NotificationsList extends StatelessWidget {
-  final List<QueryDocumentSnapshot> targeted;
-  final Set<String> readIds;
-  final Future<void> Function(String id, String? url) onTapItem;
+  Future<void> _markAllVisibleRead() async {
+    try {
+      final batch = _fs.batch();
+      final uidLocal = widget.uid;
+      if (uidLocal.isEmpty) return;
 
-  const _NotificationsList({
-    required this.targeted,
-    required this.readIds,
-    required this.onTapItem,
-  });
+      for (final d in _filteredVisible) {
+        final id = d.id;
+        final readRef = _fs.collection('users').doc(uidLocal).collection('notif_reads').doc(id);
+        batch.set(readRef, {'readAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+
+        final notifRef = _fs.collection('user_notification').doc(id);
+        final expiresAtDate = DateTime.now().toUtc().add(const Duration(days: 5));
+        final expiresAtTimestamp = Timestamp.fromDate(expiresAtDate);
+
+        batch.set(notifRef, {
+          'read': true,
+          'read_at': FieldValue.serverTimestamp(),
+          'expires_at': expiresAtTimestamp,
+        }, SetOptions(merge: true));
+      }
+
+      await batch.commit();
+    } catch (e) {
+      debugPrint('NotificationsPage _markAllVisibleRead error: $e');
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('Failed to mark all read: $e')));
+      }
+    }
+  }
 
   String _formatWhen(dynamic ts) {
     DateTime? dt;
@@ -1568,89 +1720,203 @@ class _NotificationsList extends StatelessWidget {
     return '${dt.year}-${dt.month.toString().padLeft(2, '0')}-${dt.day.toString().padLeft(2, '0')}';
   }
 
+  List<QueryDocumentSnapshot> get _filteredVisible {
+    if (_searchTerm.isEmpty) return _visible;
+    return _visible.where((d) {
+      final m = (d.data() as Map<String, dynamic>?) ?? {};
+      final title = (m['title'] ?? '').toString().toLowerCase();
+      final msg = (m['message'] ?? '').toString().toLowerCase();
+      return title.contains(_searchTerm) || msg.contains(_searchTerm);
+    }).toList();
+  }
+
+  Future<void> _onRefresh() async {
+    setState(() => _loading = true);
+    try {
+      await _recompute();
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _openActionUrl(String? url) async {
+    if (url == null || url.isEmpty) return;
+    final uri = Uri.tryParse(url);
+    if (uri == null) return;
+    if (await canLaunchUrl(uri)) {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } else {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Cannot open link')));
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (targeted.isEmpty) {
-      return const SizedBox(
-        height: 120,
-        child: Center(child: Text('No notifications')),
-      );
-    }
+    final visibleList = _filteredVisible;
 
-    return ListView.separated(
-      shrinkWrap: true,
-      itemCount: targeted.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
-      itemBuilder: (ctx, i) {
-        final d = targeted[i];
-        final m = d.data() as Map<String, dynamic>? ?? <String, dynamic>{};
-        final title = (m['title'] ?? '-') as String;
-        final msg = (m['message'] ?? '') as String;
-        final url = (m['action_url'] ?? m['actionUrl'] ?? '').toString();
-        final ts = (m['scheduled_at'] ?? m['created_at']) as dynamic;
-        final whenTxt = _formatWhen(ts);
-        final isRead = readIds.contains(d.id);
-
-        return InkWell(
-          onTap: () => onTapItem(d.id, null),
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Notifications'),
+        backgroundColor: AppColors.surface,
+        foregroundColor: AppColors.onSurface,
+        elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.mark_email_read_outlined),
+            tooltip: 'Mark all visible read',
+            onPressed: visibleList.isEmpty ? null : () async {
+              await _markAllVisibleRead();
+            },
+          ),
+        ],
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(56),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(
-                  isRead ? Icons.notifications_none : Icons.notifications_active,
-                  size: 22,
-                  color: isRead ? AppColors.onSurfaceMuted : AppColors.danger,
-                ),
-                const SizedBox(width: 10),
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            fontWeight: FontWeight.w600,
-                            color: Theme.of(context).colorScheme.onSurface,
-                          )),
-                      const SizedBox(height: 2),
-                      Text(
-                        msg,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color:
-                              Theme.of(context).colorScheme.onSurface.withOpacity(.75),
-                          fontSize: 12,
-                        ),
+                  child: TextField(
+                    controller: _searchController,
+                    decoration: InputDecoration(
+                      hintText: 'Search notifications',
+                      isDense: true,
+                      filled: true,
+                      fillColor: AppColors.surface,
+                      prefixIcon: const Icon(Icons.search),
+                      contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(AppRadii.m),
+                        borderSide: BorderSide.none,
                       ),
-                      const SizedBox(height: 6),
-                      Row(
-                        children: [
-                          Text(whenTxt, style: AppText.hintSmall),
-                          const Spacer(),
-                          if (url.isNotEmpty)
-                            TextButton(
-                              onPressed: () => onTapItem(d.id, url),
-                              child: const Text('Open'),
-                            ),
-                          if (!isRead)
-                            TextButton(
-                              onPressed: () => onTapItem(d.id, null),
-                              child: const Text('Mark as read'),
-                            ),
-                        ],
-                      ),
-                    ],
+                    ),
                   ),
+                ),
+                const SizedBox(width: 8),
+                IconButton(
+                  icon: const Icon(Icons.refresh),
+                  tooltip: 'Refresh',
+                  onPressed: _onRefresh,
                 ),
               ],
             ),
           ),
-        );
-      },
+        ),
+      ),
+      backgroundColor: AppColors.background,
+      body: RefreshIndicator(
+        onRefresh: _onRefresh,
+        child: visibleList.isEmpty
+            ? ListView(
+                physics: const AlwaysScrollableScrollPhysics(),
+                children: const [
+                  SizedBox(height: 80),
+                  Center(child: Text('No notifications')),
+                ],
+              )
+            : ListView.separated(
+                padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+                itemCount: visibleList.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (ctx, i) {
+                  final d = visibleList[i];
+                  final m = (d.data() as Map<String, dynamic>?) ?? <String, dynamic>{};
+                  final title = (m['title'] ?? '-') as String;
+                  final msg = (m['message'] ?? '') as String;
+                  final ts = (m['scheduled_at'] ?? m['created_at']) as dynamic;
+                  final whenTxt = _formatWhen(ts);
+                  final isRead = _readIds.contains(d.id);
+                  final actionUrl = (m['action_url'] ?? m['actionUrl'] ?? '') as String?;
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                    child: Card(
+                      elevation: 0,
+                      color: AppColors.surface,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadii.s)),
+                      child: ExpansionTile(
+                        tilePadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                        leading: Stack(
+                          alignment: Alignment.topRight,
+                          children: [
+                            CircleAvatar(
+                              radius: 18,
+                              backgroundColor: isRead ? AppColors.onSurfaceMuted.withOpacity(.08) : AppColors.danger.withOpacity(.12),
+                              child: Icon(
+                                isRead ? Icons.notifications_none : Icons.notifications_active,
+                                color: isRead ? AppColors.onSurfaceMuted : AppColors.danger,
+                                size: 18,
+                              ),
+                            ),
+                            if (!isRead)
+                              Positioned(
+                                right: -2,
+                                top: -2,
+                                child: Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.danger,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: AppColors.surface, width: 1.5),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        title: Text(
+                          title,
+                          style: TextStyle(
+                            fontWeight: FontWeight.w700,
+                            color: isRead
+                                ? Theme.of(context).colorScheme.onSurface.withOpacity(.75)
+                                : Theme.of(context).colorScheme.onSurface,
+                            fontSize: 14,
+                          ),
+                        ),
+                        subtitle: Text(whenTxt, style: AppText.hintSmall),
+                        children: [
+                          Align(
+                            alignment: Alignment.centerLeft,
+                            child: SelectableText(
+                              msg.isEmpty ? '—' : msg,
+                              style: TextStyle(
+                                color: Theme.of(context).colorScheme.onSurface.withOpacity(isRead ? .6 : .8),
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              TextButton.icon(
+                                onPressed: isRead ? null : () async {
+                                  await _markRead(d.id);
+                                },
+                                icon: const Icon(Icons.mark_email_read_outlined),
+                                label: const Text('Mark as read'),
+                              ),
+                              const SizedBox(width: 8),
+                              if (actionUrl != null && actionUrl.isNotEmpty)
+                                TextButton.icon(
+                                  onPressed: () async {
+                                    await _openActionUrl(actionUrl);
+                                  },
+                                  icon: const Icon(Icons.open_in_new),
+                                  label: const Text('Open link'),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+      ),
     );
   }
 }

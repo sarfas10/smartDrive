@@ -660,7 +660,7 @@ class _FiltersBar extends StatelessWidget {
               
 
               // New: Add Office Staffs button (visible on all widths)
-              const SizedBox(width: 8),
+              
               Tooltip(
                 message: 'Add Office Staffs',
                 child: ElevatedButton.icon(
