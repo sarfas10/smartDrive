@@ -1,4 +1,4 @@
-package com.example.smart_drive
+package com.taj.smartdrive
 
 import io.flutter.embedding.android.FlutterActivity
 

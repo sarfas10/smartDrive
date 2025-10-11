@@ -2,6 +2,7 @@
 // SettingsBlock with Admin Popup (signed Cloudinary upload) integrated.
 // + Simplified "Generate Report" UI: preset date selectors (30D, 90D, 6 months, 1 year) + Generate button.
 // The Generate button now opens a dedicated ReportPage.
+// UPDATED: Added "Learner Application Fee" and "Learner Retest Fee" to Payment Settings and persisted to Firestore.
 
 import 'dart:async';
 import 'dart:convert';
@@ -47,6 +48,10 @@ class _SettingsBlockState extends State<SettingsBlock> {
   final TextEditingController _testCharge8Ctrl = TextEditingController();
   final TextEditingController _testChargeHCtrl = TextEditingController();
 
+  // NEW: Learner application & retest fee controllers
+  final TextEditingController _learnerAppFeeCtrl = TextEditingController();
+  final TextEditingController _learnerRetestFeeCtrl = TextEditingController();
+
   final FirebaseAuth _auth = FirebaseAuth.instance;
 
   Map<String, dynamic>? _lastAppliedSettings;
@@ -55,6 +60,10 @@ class _SettingsBlockState extends State<SettingsBlock> {
   // numeric values cached for quick access
   double _testCharge8 = 0.0;
   double _testChargeH = 0.0;
+
+  // NEW: learner application & retest fee cached
+  double _learnerAppFee = 0.0;
+  double _learnerRetestFee = 0.0;
 
   // ===== Admin Popup state =====
   PlatformFile? _pickedPopupFile;
@@ -78,6 +87,8 @@ class _SettingsBlockState extends State<SettingsBlock> {
     _policyCtrl.dispose();
     _testCharge8Ctrl.dispose();
     _testChargeHCtrl.dispose();
+    _learnerAppFeeCtrl.dispose();
+    _learnerRetestFeeCtrl.dispose(); // added
     super.dispose();
   }
 
@@ -117,6 +128,8 @@ class _SettingsBlockState extends State<SettingsBlock> {
             // load separate charges (defaults to 0.0)
             final raw8 = m['test_charge_8'];
             final rawH = m['test_charge_h'];
+            final rawLearner = m['learner_application_fee'];
+            final rawLearnerRetest = m['learner_retest_fee'];
             final drivingTestIncluded =
                 (m['driving_test_included'] ?? true) as bool;
 
@@ -141,11 +154,40 @@ class _SettingsBlockState extends State<SettingsBlock> {
               _testChargeH = 0.0;
             }
 
+            // parse learner application fee
+            if (rawLearner is num) {
+              _learnerAppFee = rawLearner.toDouble();
+            } else if (rawLearner != null) {
+              _learnerAppFee =
+                  double.tryParse(rawLearner.toString()) ?? 0.0;
+            } else {
+              _learnerAppFee = 0.0;
+            }
+
+            // NEW: parse learner retest fee
+            if (rawLearnerRetest is num) {
+              _learnerRetestFee = rawLearnerRetest.toDouble();
+            } else if (rawLearnerRetest != null) {
+              _learnerRetestFee =
+                  double.tryParse(rawLearnerRetest.toString()) ?? 0.0;
+            } else {
+              _learnerRetestFee = 0.0;
+            }
+
             if (_testCharge8Ctrl.text != _testCharge8.toStringAsFixed(2)) {
               _testCharge8Ctrl.text = _testCharge8.toStringAsFixed(2);
             }
             if (_testChargeHCtrl.text != _testChargeH.toStringAsFixed(2)) {
               _testChargeHCtrl.text = _testChargeH.toStringAsFixed(2);
+            }
+            if (_learnerAppFeeCtrl.text !=
+                _learnerAppFee.toStringAsFixed(2)) {
+              _learnerAppFeeCtrl.text = _learnerAppFee.toStringAsFixed(2);
+            }
+            if (_learnerRetestFeeCtrl.text !=
+                _learnerRetestFee.toStringAsFixed(2)) {
+              _learnerRetestFeeCtrl.text =
+                  _learnerRetestFee.toStringAsFixed(2);
             }
 
             _drivingTestIncluded = drivingTestIncluded;
@@ -503,6 +545,56 @@ class _SettingsBlockState extends State<SettingsBlock> {
           area('Cancellation Policy', _policyCtrl),
           SizedBox(height: pad * 0.5),
 
+          // NEW: Learner Application Fee
+          Text(
+            'Learner Application Fee (₹)',
+            style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _learnerAppFeeCtrl,
+            keyboardType: TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+            ],
+            decoration: InputDecoration(
+              labelText: 'Application fee',
+              prefixText: '₹',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.s),
+              ),
+              filled: true,
+              fillColor: AppColors.surface,
+            ),
+            style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
+          ),
+          SizedBox(height: pad * 0.5),
+
+          // NEW: Learner Retest Fee
+          Text(
+            'Learner Retest Fee (₹)',
+            style: AppText.tileTitle.copyWith(fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 8),
+          TextField(
+            controller: _learnerRetestFeeCtrl,
+            keyboardType: TextInputType.numberWithOptions(decimal: true),
+            inputFormatters: [
+              FilteringTextInputFormatter.allow(RegExp(r'^\d*\.?\d{0,2}')),
+            ],
+            decoration: InputDecoration(
+              labelText: 'Retest fee',
+              prefixText: '₹',
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(AppRadii.s),
+              ),
+              filled: true,
+              fillColor: AppColors.surface,
+            ),
+            style: AppText.tileSubtitle.copyWith(color: context.c.onSurface),
+          ),
+          SizedBox(height: pad * 0.5),
+
           // UPDATED: separate fields for 8-type and H-type test charges
           Text(
             'Driving Test Charge — 8 type (₹)',
@@ -571,6 +663,13 @@ class _SettingsBlockState extends State<SettingsBlock> {
                 final testH =
                     double.tryParse(_testChargeHCtrl.text.trim()) ??
                     _testChargeH;
+                final learnerFee =
+                    double.tryParse(_learnerAppFeeCtrl.text.trim()) ??
+                    _learnerAppFee;
+                // NEW: retest fee
+                final learnerRetestFee =
+                    double.tryParse(_learnerRetestFeeCtrl.text.trim()) ??
+                    _learnerRetestFee;
 
                 await doc.set({
                   'free_radius_km':
@@ -582,12 +681,17 @@ class _SettingsBlockState extends State<SettingsBlock> {
                   'test_charge_8': test8,
                   'test_charge_h': testH,
                   'driving_test_included': _drivingTestIncluded,
+                  // NEW: persist learner application & retest fee
+                  'learner_application_fee': learnerFee,
+                  'learner_retest_fee': learnerRetestFee,
                   'updated_at': FieldValue.serverTimestamp(),
                 }, SetOptions(merge: true));
 
                 setState(() {
                   _testCharge8 = test8;
                   _testChargeH = testH;
+                  _learnerAppFee = learnerFee;
+                  _learnerRetestFee = learnerRetestFee;
                 });
 
                 ScaffoldMessenger.of(context).showSnackBar(

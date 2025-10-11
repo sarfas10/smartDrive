@@ -17,6 +17,7 @@ import 'notifications_block.dart';
 import 'settings_block.dart';
 import 'slots_block.dart';
 import 'plans_block.dart';
+import 'learners_applications_block.dart'; // NEW: Learner's Applications
 
 // App theme
 import 'theme/app_theme.dart';
@@ -117,7 +118,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
     );
   }
 
-  Widget _buildSection() {
+    Widget _buildSection() {
     switch (selected) {
       case 'dashboard':
         return const DashboardBlock();
@@ -137,10 +138,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
         return const NotificationsBlock();
       case 'settings':
         return const SettingsBlock();
+      case 'learners_applications':
+        return const LearnersApplicationsAdminBlock(); // NEW
       default:
         return const Center(child: Text('Section not found'));
     }
   }
+
 
   Future<void> _openCreatePool() async {
     final controllers = {
@@ -227,7 +231,7 @@ class Sidebar extends StatelessWidget {
   final bool isInDrawer;
   const Sidebar({super.key, required this.selected, required this.onPick, this.isInDrawer = false});
 
-  static const _menuItems = [
+    static const _menuItems = [
     (Icons.dashboard_rounded, 'Dashboard', 'dashboard'),
     (Icons.group_rounded, 'Users', 'users'),
     (Icons.event_available_rounded, 'Slots', 'slots'),
@@ -236,8 +240,12 @@ class Sidebar extends StatelessWidget {
     (Icons.book_online_rounded, 'Test Bookings', 'test_bookings'),
     (Icons.payment_rounded, 'Plans', 'plans'),
     (Icons.notifications_rounded, 'Notifications', 'notifications'),
+    // NEW: Learner's Applications
+    (Icons.assignment_rounded, "Learner's Applications", 'learners_applications'),
     (Icons.settings_rounded, 'Settings', 'settings'),
+    
   ];
+
 
   @override
   Widget build(BuildContext context) {

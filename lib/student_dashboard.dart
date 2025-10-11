@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:smart_drive/downloadables.dart';
+import 'package:smart_drive/learners_application_page.dart';
 import 'package:smart_drive/upload_document_page.dart';
 import 'package:smart_drive/onboarding_forms.dart';
 import 'package:smart_drive/UserAttendancePanel.dart';
@@ -503,6 +504,22 @@ class _StudentDashboardState extends State<StudentDashboard>
                       onTap: _navigateToDownloadables,
                     ),
                     const SizedBox(height: 12),
+                    // NEW: Apply Learners (secondary feature as requested)
+                    _ActionTile(
+                      icon: Icons.how_to_reg,
+                      iconColor: AppColors.brand,
+                      title: 'Apply Learner',
+                      subtitle: 'Apply for learner license / start application',
+                      onTap: () {
+                        // Reuse onboarding flow for learner application
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                              builder: (_) => const LearnersApplicationPage()),
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 12),
                     // Moved: Questionaries (was Mock Tests)
                     _ActionTile(
                       icon: Icons.quiz,
@@ -804,7 +821,16 @@ class _StudentDashboardState extends State<StudentDashboard>
           child: Row(
             children: [
               // left icon
-              
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: AppColors.info.withOpacity(0.10),
+                  borderRadius: BorderRadius.circular(AppRadii.s),
+                ),
+                child: const Icon(Icons.info_outline, color: AppColors.info),
+              ),
+
+              const SizedBox(width: 12),
 
               // text
               Expanded(
@@ -813,7 +839,12 @@ class _StudentDashboardState extends State<StudentDashboard>
                   children: [
                     Text('Update licence details', style: AppText.tileTitle),
                     const SizedBox(height: 6),
-                    
+                    Text(
+                      'Add your learner or license details to unlock bookings & tests.',
+                      style: AppText.tileSubtitle,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ],
                 ),
               ),
